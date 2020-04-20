@@ -434,7 +434,7 @@ def com(A, d1, d2, d3=None):
           np.outer(np.arange(d3), np.outer(np.ones(d2), np.ones(d1)).ravel()).ravel()],
           dtype=A.dtype)
   
-  Anorm = sp.sparse.vstack([a.multiply(a>0.001*a.max())/a[a>0.001*a.max()].sum() if a.sum()>0 else a for a in A.T]).T;
+  Anorm = sp.sparse.vstack([a.multiply(a>0.001*a.max())/a[a>0.001*a.max()].sum() if (a>0).sum()>0 else a for a in A.T]).T;
   cm = (Coor * Anorm).T
   return np.array(cm)
 
