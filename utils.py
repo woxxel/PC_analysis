@@ -114,7 +114,7 @@ def periodic_distr_distance(p1,p2,mu1,mu2,nbin,mode='wasserstein'):
     return d_out
   else:
     ## get distance via bootstrapping
-    N_bs = 1000
+    N_bs = 200
     
     cdf1 = np.cumsum(p1)
     cdf2 = np.cumsum(p2)
@@ -434,24 +434,23 @@ def com(A, d1, d2, d3=None):
           np.outer(np.arange(d3), np.outer(np.ones(d2), np.ones(d1)).ravel()).ravel()],
           dtype=A.dtype)
   
-  Anorm = sp.sparse.vstack([a.multiply(a>0.001*a.max())/a[a>0.001*a.max()].sum() if (a>0).sum()>0 else a for a in A.T]).T;
+  Anorm = sp.sparse.vstack([a.multiply(a>0.001*a.max())/a[a>0.001*a.max()].sum() if (a>0).sum()>0 else sp.sparse.csc_matrix(a.shape) for a in A.T]).T;
   cm = (Coor * Anorm).T
   return np.array(cm)
 
 
-def calculate_img_correlation(A1,A2,dims=(512,512),crop=False,binary=False,shift=True,plot_bool=False):
-  #t_start = time.time()
-  ## try with binary and continuous
-  if binary == 'half':
-    A1 = (A1>np.median(A1.data)).multiply(A1)
-    A2 = (A2>np.median(A2.data)).multiply(A2)
-  elif binary:
-    A1 = A1>np.median(A1.data)
-    A2 = A2>np.median(A2.data)
-  #t_end = time.time()
-  #print('binary --- time taken: %5.3g'%(t_end-t_start))
+def calculate_img_correlation(A1,A2,dims=(512,512),crop=False,cm_crop=None,binary=False,shift=True,plot_bool=False):
   
   if shift:
+    
+    ## try with binary and continuous
+    if binary == 'half':
+      A1 = (A1>np.median(A1.data)).multiply(A1)
+      A2 = (A2>np.median(A2.data)).multiply(A2)
+    elif binary:
+      A1 = A1>np.median(A1.data)
+      A2 = A2>np.median(A2.data)
+      
     #t_start = time.time()
     if not np.all(A1.shape == dims):
       A1 = A1.reshape(dims)
@@ -520,12 +519,39 @@ def calculate_img_correlation(A1,A2,dims=(512,512),crop=False,binary=False,shift
     
     return C_max, img_shift # C[crop_half], 
   else:
-    if not (type(A1) is np.ndarray):
-      A1 = A1.toarray()
-    if not (type(A2) is np.ndarray):
-      A2 = A2.toarray()
+    #if not (type(A1) is np.ndarray):
+      #A1 = A1.toarray()
+    #if not (type(A2) is np.ndarray):
+      #A2 = A2.toarray()
     
-    return np.corrcoef(A1.flat,A2.flat)[0,1], None, None
+    if not (cm_crop is None):
+      
+      cr = 20
+      extent = np.array([cm_crop-cr,cm_crop+cr+1]).astype('int')
+      extent = np.maximum(extent,0)
+      extent = np.minimum(extent,dims)      
+      A1 = A1.reshape(dims)[extent[0,0]:extent[1,0],extent[0,1]:extent[1,1]]
+      A2 = A2.reshape(dims)[extent[0,0]:extent[1,0],extent[0,1]:extent[1,1]]
+    #else:
+      #extent = [[0,0],[dims[0],dims[1]]]
+    if plot_bool:
+      #idx_max = np.where(C.real==C_max)
+      plt.figure()
+      plt.subplot(221)
+      plt.imshow(A1.reshape(extent[1,0]-extent[0,0],extent[1,1]-extent[0,1]),origin='lower')
+      plt.colorbar()
+      plt.subplot(222)
+      plt.imshow(A2.reshape(extent[1,0]-extent[0,0],extent[1,1]-extent[0,1]),origin='lower')
+      plt.colorbar()
+      #plt.subplot(223)
+      #plt.imshow(C,origin='lower')
+      #plt.plot(crop_half[1],crop_half[0],'ro')
+      #plt.colorbar()
+      plt.suptitle('corr: %5.3g'%np.corrcoef(A1.flat,A2.flat)[0,1])
+      plt.show(block=False)
+    return A1.multiply(A2).sum()/np.sqrt(A1.power(2).sum()*A2.power(2).sum()), None
+    #return (A1*A2).sum()/np.sqrt((A1**2).sum()*(A2**2).sum()), None
+    #return np.corrcoef(A1.flat,A2.flat)[0,1], None
 
 
 def get_shift_and_flow(A1,A2,dims=(512,512),projection=-1,plot_bool=False):
@@ -583,9 +609,9 @@ def fun_wrapper(fun,x,p):
   if p.shape[-1] == 4:
     return fun(x,p[...,0],p[...,1],p[...,2],p[...,3])
   if p.shape[-1] == 5:
-    return fun(x,p[0],p[1],p[2],p[3],p[4])
+    return fun(x,p[...,0],p[...,1],p[...,2],p[...,3],p[...,4])
   if p.shape[-1] == 6:
-    return fun(x,p[0],p[1],p[2],p[3],p[4],p[5])
+    return fun(x,p[...,0],p[...,1],p[...,2],p[...,3],p[...,4],p[...,5])
   if p.shape[-1] == 7:
-    return fun(x,p[0],p[1],p[2],p[3],p[4],p[5],p[6])
+    return fun(x,p[...,0],p[...,1],p[...,2],p[...,3],p[...,4],p[...,5],p[...,6])
     

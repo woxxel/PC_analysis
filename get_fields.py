@@ -1271,7 +1271,7 @@ def load_activity(pathSession,redetect=True):
   ## load activity data from CaImAn results
   
   if redetect:
-    pathAct = pathcat([pathSession,'results_postSilent.mat'])
+    pathAct = pathcat([pathSession,'results_redetect.mat'])
   else:
     pathAct = pathcat([pathSession,'results_OnACID.mat'])
   

@@ -9,8 +9,8 @@ from scipy.sparse import coo_matrix
 from scipy.optimize import curve_fit
 from matplotlib import colors
 from mpl_toolkits.mplot3d import Axes3D
-
-import os, time, math, h5py, pickle, multiprocessing, random, progressbar, cv2
+from tqdm import *
+import os, time, math, h5py, pickle, multiprocessing, random, cv2
 
 from utils import get_nPaths, pathcat, periodic_distr_distance, bootstrap_data, get_average, pickleData, z_from_point_normal_plane, KS_test, E_stat_test
 from utils_data import set_para
@@ -273,9 +273,6 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],sv=False,sv_ext='png'):#,N_bs,s_offs
     
   if plot_fig[2]:
     
-    bar = progressbar.ProgressBar(maxval=nSes,widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
-    
-    bar.start()
     #plt.figure()
     f,axs = plt.subplots(2,2,figsize=(10,4))
     
@@ -299,8 +296,8 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],sv=False,sv_ext='png'):#,N_bs,s_offs
     r_recurr_cont = np.zeros((nSes,nSes))*np.NaN
     PC_recurr = np.zeros((nSes,nSes))*np.NaN
     PC_recurr_cont = np.zeros((nSes,nSes))*np.NaN
-    for s in range(nSes):#min(30,nSes)):
-      bar.update(s)
+    for s in tqdm(range(nSes)):#min(30,nSes)):
+      
       if cluster.boolSessions[s]:
         overlap_act = cluster.activity['status'][cluster.activity['status'][:,s,1],:,1].sum(0)
         overlap_PC = np.any(cluster.activity['status'][np.any(cluster.activity['status'][:,s,2:],-1),:,2:],-1).sum(0)
@@ -355,7 +352,6 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],sv=False,sv_ext='png'):#,N_bs,s_offs
           axs[0][1].scatter(pl_dat.n_edges,PC_recurr[s,:],5,color=[0.8,0.8,0.8],marker='o')
           axs[0][1].scatter(pl_dat.n_edges,PC_recurr_cont[s,:],5,color=[0.6,1,0.6],marker='o')
     
-    bar.finish()
     axs[0][0].plot(pl_dat.n_edges,np.nanmean(r_recurr,0),color='k')
     
     axs[0][0].legend(loc='lower right',fontsize=12)
@@ -613,8 +609,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],sv=False,sv_ext='png'):#,N_bs,s_offs
     ### ds > 0
     #PC_shifts = np.reshape(np.array(PC_shifts.todense()),(nC,nSes,nSes))
     
-    bar = progressbar.ProgressBar(maxval=nSes,widgets=[progressbar.Timer(),' / ',progressbar.ETA(),progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
-    bar.start()
+    
     p_ds0,p_cov = fit_shift_model(shift_distr_ds0)
     
     p = np.zeros((nSes,4))*np.NaN
@@ -636,8 +631,8 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],sv=False,sv_ext='png'):#,N_bs,s_offs
     f_stable_pos = plt.figure(figsize=(7,2.5))
     
     f_shift_distr = plt.figure(figsize=(7,2.5))
-    for ds in range(1,nSes):#min(nSes,30)):
-      bar.update(ds)
+    for ds in tqdm(range(1,nSes)):#min(nSes,30)):
+      
       #PC_idx_uncertain = np.diagonal(PC_match_certainty,ds,axis1=1,axis2=2) < 0.9
       
       #shifts = np.diagonal(PC_shifts,ds,axis1=1,axis2=2)
@@ -713,7 +708,6 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],sv=False,sv_ext='png'):#,N_bs,s_offs
         #plt.show(block=False)
         #plt.ylim([0,200])#shifts_hist[0].max()*1.5])
     plt.show(block=False)
-    bar.finish()
     if sv:
       plt.figure(f_shift_distr.number)
       pl_dat.save_fig('shift_distr')
@@ -1345,11 +1339,9 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],sv=False,sv_ext='png'):#,N_bs,s_offs
     dims = cluster.meta['dims']
     #A_length = [cluster.meta['dims'][0]/nA,cluster.meta['dims'][1]/nA]
     p_vals = np.zeros((cluster.meta['nSes'],4))
-    bar = progressbar.ProgressBar(maxval=cluster.meta['nSes'],widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
-    bar.start()
     
     plt.figure()
-    for s0 in range(cluster.meta['nSes']):
+    for s0 in tqdm(range(cluster.meta['nSes'])):
       #print(s)
       s = s0
       com_silent = com_mean[cluster.activity['status'][cluster.clusters_bool,s,0],:]
@@ -1427,7 +1419,6 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],sv=False,sv_ext='png'):#,N_bs,s_offs
         ax_hist.set_xlabel('distance from axis [$\mu$m]',fontsize=14)
       #plt.subplot(2,6,s0+1+6)
       
-      bar.update(s0)
       #
       #plt.colorbar()
       #
@@ -1442,7 +1433,6 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],sv=False,sv_ext='png'):#,N_bs,s_offs
       #plt.title('Session %d'%(s+1))
     #plt.plot(KS_dist)
     
-    bar.finish()
     ax_p = plt.subplot(224)
     ax_p.plot([0,cluster.meta['nSes']],[0.1,0.1],'k--')
     ax_p.plot(np.where(cluster.boolSessions)[0],p_vals[cluster.boolSessions,0],'r')

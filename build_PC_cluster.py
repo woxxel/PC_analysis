@@ -3,11 +3,14 @@ import numpy as np
 import scipy as sp
 import scipy.io as sio
 import scipy.stats as sstats
-import progressbar
+from tqdm import *
 from time import sleep
+from itertools import chain
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
-from utils import get_nPaths, pathcat, extend_dict, clean_dict, pickleData, fdr_control, periodic_distr_distance, fit_plane, z_from_point_normal_plane
+
+from utils import get_nPaths, pathcat, extend_dict, clean_dict, pickleData, fdr_control, periodic_distr_distance, fit_plane, z_from_point_normal_plane, get_shift_and_flow, com
 from utils_data import set_para
 
 warnings.filterwarnings("ignore")
@@ -15,16 +18,24 @@ warnings.filterwarnings("ignore")
 
 class cluster:
   
-  def __init__(self,basePath,mouse,nSes):
+  def __init__(self,basePath,mouse,nSes,matchName='matching/Sheintuch_registration_results_OnACID.pkl',session_order=None):
     
     t_start = time.time()
     
     self.mouse = mouse
     self.pathMouse = pathcat([basePath,mouse])
+    self.pathMatching = pathcat([self.pathMouse,matchName])
     
-    self.nSes, tmp = get_nPaths(self.pathMouse,'Session')
     if not (nSes is None):
       self.nSes = nSes
+    else:
+      self.nSes, tmp = get_nPaths(self.pathMouse,'Session')
+    
+    if session_order is None:
+      self.session_order = range(1,self.nSes+1)
+    else:
+      self.session_order = list(chain.from_iterable(session_order)) if (type(session_order[0]) is range) else list(chain(session_order))
+    
     self.para = set_para(basePath,mouse,1)
     
     self.svCluster = pathcat([self.pathMouse,'cluster.pkl'])
@@ -51,8 +62,9 @@ class cluster:
                 'neuronID':np.zeros((0,self.nSes,2))}
     
     self.sessions = {'shift':np.zeros((self.nSes,2))*np.NaN,
-                     'rotation_anchor':np.zeros((self.nSes,3))*np.NaN,     ## point on plane
-                     'rotation_normal':np.zeros((self.nSes,3))*np.NaN,     ## normal describing plane}
+                     'flow_field':np.zeros((self.meta['dims']+(2,))),
+                     #'rotation_anchor':np.zeros((self.nSes,3))*np.NaN,     ## point on plane
+                     #'rotation_normal':np.zeros((self.nSes,3))*np.NaN,     ## normal describing plane}
                      'com':np.zeros((0,self.nSes,3))*np.NaN,
                      'match_score':np.zeros((0,self.nSes,2))}
     
@@ -75,9 +87,8 @@ class cluster:
     
   def extend_dicts(self,nC=None):
     if nC is None:
-      pathMatching = pathcat([self.pathMouse,'matching/match_results.pkl']);
-      ld_dat = pickleData([],pathMatching,'load')
-      nC = ld_dat['assignments'].shape[0]
+      ld_dat = pickleData([],self.pathMatching,'load')
+      nC = ld_dat['assignment'].shape[0]
     
     extend_dict(self.IDs,nC)
     extend_dict(self.sessions,nC,exclude=['shift','rotation_anchor','rotation_normal'])
@@ -111,7 +122,7 @@ class cluster:
     #ld_dat = sio.loadmat(pathMatching,squeeze_me=True)
     
     ## get template of first session for calculating session alignment statistics
-    pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%1])
+    pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%self.session_order[0]])
     pathLoad = pathcat([pathSession,'results_OnACID.mat'])
     ld = sio.loadmat(pathLoad)
     Aref = ld['A']
@@ -124,36 +135,25 @@ class cluster:
     #x_grid, y_grid = np.meshgrid(np.arange(0., dims[1]).astype(np.float32), np.arange(0., dims[0]).astype(np.float32))
     
     ## get neuron
-    pathMatching = pathcat([self.pathMouse,'matching/match_results.pkl']);
-    ld_dat = pickleData([],pathMatching,'load')
-    assignments = ld_dat['assignments']
-    scores = ld_dat['scores']
+    ld_dat = pickleData([],self.pathMatching,'load')
+    assignments = ld_dat['assignment']
+    p_matched = ld_dat['p_matched']
+    p_all = ld_dat['p_same']
+    cm = ld_dat['cm']
     self.meta['nC'],nSes = assignments.shape
     
     assert (nSes==self.meta['nSes']), 'Session numbers dont agree - please check %d vs %d'%(nSes,self.meta['nSes'])
     
-    plt.figure()
-    plt.subplot(121)
-    plt.imshow(ld['Cn'],origin='lower')
-    plt.subplot(122)
-    plt.imshow(Aref.sum(1).reshape(dims),origin='lower')
-    plt.title('Session %d'%(s+1))
-    plt.show(block=False)
-    
-    
     #plt.figure()
     #plt.subplot(121)
-    #plt.imshow(self.dataIn['A'].sum(1).reshape(dims),origin='lower')
+    #plt.imshow(ld['Cn'],origin='lower')
     #plt.subplot(122)
-    #plt.imshow(A_tmp.sum(1).reshape(dims),origin='lower')
-    #plt.title('Session %d aligned'%(s_ld+1))
+    #plt.imshow(Aref.sum(1).reshape(dims),origin='lower')
+    #plt.title('Session %d'%self.session_order[0])
     #plt.show(block=False)
     
-    #plt.pause(1)
-    
-    bar = progressbar.ProgressBar(maxval=self.meta['nSes'],widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
-    bar.start()
-    for s in range(self.meta['nSes']):
+    for (s0,s) in tqdm(zip(self.session_order,range(nSes)),total=nSes,leave=False):
+    #for s in tqdm(range(self.meta['nSes']),leave=False):
       
       ### assign neuron IDs
       idx_c = np.where(~np.isnan(assignments[:,s]))[0]
@@ -162,55 +162,56 @@ class cluster:
       self.IDs['neuronID'][idx_c,s,:] = np.vstack([np.ones(N),n_arr]).T
       
       ### get neuron centroid positions
-      pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%(s+1)])
+      pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%s0])
       pathLoad = pathcat([pathSession,'results_OnACID.mat'])
+      #print('loading data from %s'%pathLoad)
       ld = sio.loadmat(pathLoad)
       A2 = ld['A']
-      cm = com(A2,dims[0],dims[1])
+      #cm = com(A2,dims[0],dims[1])
       
       if s > 0:
         
-        self.sessions['shift'][s,:], flow, (x_grid,y_grid) = get_shift_and_flow(Aref,A2,self.dims,projection=1,plot_bool=True)
+        self.sessions['shift'][s,:], flow, (x_grid,y_grid) = get_shift_and_flow(Aref,A2,dims,projection=1,plot_bool=False)
         
-        x_remap = (x_grid - self.sessions['shift'][s,0] + flow[:,:,0])
-        y_remap = (y_grid - self.sessions['shift'][s,1] + flow[:,:,1])
+        #com_tmp = com(A2,dims[0],dims[1])
+        #x_remap = (x_grid - self.sessions['shift'][s,0])
+        #y_remap = (y_grid - self.sessions['shift'][s,1])
+        #com_tmp = np.vstack([x_remap[np.round(com_tmp[:,1]).astype('int'),np.round(com_tmp[:,0]).astype('int')],y_remap[np.round(com_tmp[:,1]).astype('int'),np.round(com_tmp[:,0]).astype('int')]]).T
         
-        angles = self.find_rotation_from_flow(flow)
-        self.sessions['rotation_anchor'][s,:] = angles[0]
-        self.sessions['rotation_normal'][s,:] = angles[1]
+        #x_remap = (x_grid - self.sessions['shift'][s,0] + flow[:,:,0])
+        #y_remap = (y_grid - self.sessions['shift'][s,1] + flow[:,:,1])
+        
+        #angles = self.find_rotation_from_flow(flow,plot_bool=False)
+        #self.sessions['rotation_anchor'][s,:] = angles[0]
+        #self.sessions['rotation_normal'][s,:] = angles[1]
         
         ## correct for optical flow (rotations, etc)
-        self.sessions['com'][idx_c,s,:2] = np.hstack([x_remap[np.round(cm[:,0])],y_remap[np.round(cm[:,1])]]).T
-        print('check correction of CoM')
-        print(cm)
-        print(self.sessions['com'][idx_c,s,:2])
-        
+        self.sessions['com'][idx_c,s,:2] = cm[idx_c,s,:]#np.hstack([x_remap[np.round(cm[:,0])],y_remap[np.round(cm[:,1])]]).T
         ## get z-position
-        self.sessions['com'][idx_c,s,2] = np.squeeze(z_from_point_normal_plane(com_tmp[:,0],com_tmp[:,1],self.sessions['rotation_anchor'][s,:],self.sessions['rotation_normal'][s,:]))
+        #self.sessions['com'][idx_c,s,2] = np.squeeze(z_from_point_normal_plane(com_tmp[:,0],com_tmp[:,1],self.sessions['rotation_anchor'][s,:],self.sessions['rotation_normal'][s,:]))
         
         ## store matched score and best score (with matched removed)
         # remove entries of neurons, that were not present before (no matching possible)
-        idx_c = idx_c[idx_c<scores[s-1].shape[0]]
+        self.sessions['match_score'][idx_c,s,0] = p_matched[idx_c,s]
+        
+        idx_c = idx_c[idx_c<p_matched[s-1].shape[0]]
         n_arr = assignments[idx_c,s].astype('int')
         
-        scores_now = scores[s-1].toarray()
-        self.sessions['match_score'][idx_c,s,0] = scores_now[idx_c,n_arr]
+        scores_now = p_all[s].toarray()
+        
         self.sessions['match_score'][idx_c,s,1] = [max(scores_now[c,np.where(scores_now[c,:]!=self.sessions['match_score'][c,s,0])[0]]) for c in idx_c]
         
       else:
         self.sessions['shift'][s,:] = 0
-        self.sessions['rotation_anchor'][s,:] = 0
-        self.sessions['rotation_normal'][s,:] = 0
+        #self.sessions['rotation_anchor'][s,:] = 0
+        #self.sessions['rotation_normal'][s,:] = 0
         
-        self.sessions['com'][idx_c,s,:2] = cm
+        self.sessions['com'][idx_c,s,:2] = cm[idx_c,s,:]
       
-      bar.update(s)
-                                                                     
-    bar.finish()
     
     pickleData(self.sessions,self.meta['svSessions'],'save')
   
-  def find_rotation_from_flow(self,flow,Cn):
+  def find_rotation_from_flow(self,flow,plot_bool=False):
     dims = self.meta['dims']
     x = np.hstack([np.ones((dims[0],1)),np.arange(dims[0]).reshape(dims[0],1)]) 
     x_grid, y_grid, z_grid = np.meshgrid(np.arange(0., dims[0]).astype(np.float32),
@@ -233,9 +234,36 @@ class cluster:
     slope_normal = np.array([-r.slope,1])
     slope_normal /= np.linalg.norm(slope_normal)
     f_perp = np.dot(flow[:,:,:2],slope_normal)
+    f_perp_vec = f_perp[...,np.newaxis].dot(slope_normal[np.newaxis,:]) #multiplay by normal
+    
+    #print(f_perp_vec.shape)
+    idxes = 15
+    plt.figure()
+    plt.subplot(121)
+    plt.quiver(x_grid[::idxes,::idxes], y_grid[::idxes,::idxes], flow[::idxes,::idxes,0], flow[::idxes,::idxes,1], angles='xy', scale_units='xy', scale=0.25, headwidth=4,headlength=4, width=0.002, units='width')
+    plt.plot(tilt_ax,'b-')
+    plt.xlim([0,dims[0]])
+    plt.ylim([0,dims[0]])
+    
+    abs_flow = np.linalg.norm(flow,axis=2)
+    margin = 50
+    abs_flow = sp.ndimage.filters.gaussian_filter(abs_flow[margin:-margin,margin:-margin],20)
+    
+    print(abs_flow)
+    print(abs_flow.shape)
+    min_pos = np.add(np.unravel_index(np.argmin(abs_flow),abs_flow.shape),margin)
+    
+    plt.subplot(122)
+    plt.imshow(abs_flow,extent=[margin,512-margin,margin,512-margin])
+    plt.colorbar()
+    plt.plot(min_pos[1],min_pos[0],'rx')
+    plt.xlim([0,dims[0]])
+    plt.ylim([0,dims[0]])
+    plt.show(block=True)
     
     ## need two cases to capture both, flows away from and towards axis (rotation to a more even vs rotation to a more skewed plane) - not entirely precise, only holds for relatively small angles theta
     h_dat = np.sign(f_perp)*np.sin(np.arccos((dist_mat - np.abs(f_perp))/dist_mat))*dist_mat
+    #h_dat = np.zeros(x_grid[...,0].shape)
     
     data = np.stack([x_grid[...,0],y_grid[...,0],h_dat],2)
     data = data.reshape(dims[0]*dims[1],3)
@@ -247,41 +275,41 @@ class cluster:
     angles = np.arccos(n)/(2*np.pi)*360
     #print('angles:',angles)
     
-    pl_bool=False
-    if pl_bool:
+    
+    if plot_bool:
       h_plane = z_from_point_normal_plane(x_grid[...,0],y_grid[...,0],p,n)
       
-      pl.figure(figsize=(12,12))
-      ax = pl.subplot(221)
-      im = ax.imshow(h_dat,origin='lower',cmap='jet',clim=[-60,60])
-      pl.colorbar(im)
+      plt.figure(figsize=(12,12))
+      ax = plt.subplot(221)
+      im = ax.imshow(h_dat,origin='lower',cmap='jet',clim=[-30,30])
+      plt.colorbar(im)
       ax.plot(d,'b:')
       ax.plot(tilt_ax,'b-')
       ax.set_xlim([0,dims[0]])
       ax.set_ylim([0,dims[1]])
       
-      ax2 = pl.subplot(222)
-      im2 = ax2.imshow(h_plane,origin='lower',cmap='jet',clim=[-60,60])
+      ax2 = plt.subplot(222)
+      im2 = ax2.imshow(h_plane,origin='lower',cmap='jet',clim=[-30,30])
       ax2.plot(d,'b:')
       ax2.plot(tilt_ax,'b-')
       ax2.plot(p[0],p[1],'rx')
       ax2.set_xlim([0,dims[0]])
       ax2.set_ylim([0,dims[1]])
-      pl.colorbar(im2)
+      plt.colorbar(im2)
       
-      pl.subplot(223)
-      pl.imshow(h_dat-h_plane,origin='lower',cmap='jet',clim=[-10,10])
-      pl.colorbar()
+      plt.subplot(223)
+      plt.imshow(h_dat-h_plane,origin='lower',cmap='jet',clim=[-10,10])
+      plt.colorbar()
       
       idxes = 1
-      ax = pl.subplot(224,projection='3d')
+      ax = plt.subplot(224,projection='3d')
       ax.plot_surface(x_grid[::50,::50,0],y_grid[::50,::50,0],h_plane[::50,::50],color='k')
       ax.plot_surface(x_grid[::idxes,::idxes,0],y_grid[::idxes,::idxes,0],h_dat[::idxes,::idxes],color='r',alpha=0.5)
       ax.set_xlabel('x')
       ax.set_ylabel('y')
       ax.set_zlabel('z')
       
-      pl.show(block=False)
+      plt.show(block=True)
     
     return (p,n)
   
@@ -295,8 +323,6 @@ class cluster:
       self.sStart = sessions[0]
       self.sEnd = sessions[-1]
     
-    self.boolSessions = np.zeros(self.meta['nSes']).astype('bool')
-    self.boolSessions[sessions[0]:sessions[-1]] = True
     
     self.boolSessions = np.zeros(self.meta['nSes']).astype('bool')
     self.boolSessions[self.sStart:self.sEnd] = True
@@ -311,11 +337,8 @@ class cluster:
     
   def get_PC_fields(self):
     
-    bar = progressbar.ProgressBar(maxval=self.meta['nSes'],widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
-    bar.start()
     t_start = time.time()
-    for s in range(self.meta['nSes']):
-      bar.update(s)
+    for s in tqdm(range(self.meta['nSes']),leave=False):
       pathSession = pathcat([self.pathMouse,'Session%02d'%(s+1)]);
       pathOnACID = pathcat([pathSession,'results_OnACID.mat'])
       
@@ -396,7 +419,6 @@ class cluster:
     #clean_dict(self.PCs,idx_keep_c,0)
     
     #idx_keep_s = PCs['status'][:,:,1].sum(0) >= 0
-    bar.finish()
   
   
   def cluster_classification(self,ct_thr=2):
@@ -418,8 +440,7 @@ class cluster:
   def find_PCs(self,alpha=1,Bayes_thr=0,A_ratio_thr=0,p_mass_thr=0.5):
     
     ### --- post-process: only take into account fields that pass thresholds --- ###
-    bar = progressbar.ProgressBar(maxval=self.meta['nC'],widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
-    bar.start()
+    
     t_start = time.time()
     self.activity['status'][:,:,2:] = False     ## reset values
     
@@ -430,8 +451,8 @@ class cluster:
     
     A_ratio = self.PCs['fields']['parameter'][:,:,:,1,0]/self.PCs['fields']['parameter'][:,:,:,0,0]
     Bayes = self.PCs['Bayes']['factor'][:,:,0] - self.PCs['Bayes']['factor'][:,:,1]
-    for c in range(self.meta['nC']):
-      bar.update()
+    for c in tqdm(range(self.meta['nC'])):
+      
       for s in range(self.meta['nSes']):
         if self.activity['status'][c,s,1]:
           
@@ -449,7 +470,6 @@ class cluster:
             self.PCs['fields']['nModes'][c,s] = np.count_nonzero(self.PCs['fields']['status'][c,s,:])
     
     t_end = time.time()
-    bar.finish()
     print('PC-characterization done. Time taken: %7.5f'%(t_end-t_start))
   
   
@@ -460,8 +480,6 @@ class cluster:
     
     pathComp = pathcat([self.para['pathMouse'],'compareSessions.pkl'])
     if reprocess | (not os.path.exists(pathComp)):
-      bar = progressbar.ProgressBar(maxval=self.meta['nC'],widgets=[progressbar.Timer(),' / ',progressbar.ETA(),progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
-      bar.start()
       self.compare = {'shifts':{},
                       'shifts_distr':{},
                       'inter_coding':{},
@@ -469,8 +487,7 @@ class cluster:
       
       t_start=time.time()
       
-      for c in range(self.meta['nC']):
-        bar.update(c)
+      for c in tqdm(range(self.meta['nC']),leave=False):
         for s1 in range(self.meta['nSes']):
           if np.any(self.activity['status'][c,s1,2:]):
             for s2 in range(s1+1,self.meta['nSes']):
@@ -487,9 +504,10 @@ class cluster:
                 
                 self.compare['ref_pos'][c,s1,s2] = self.PCs['fields']['parameter'][c,s1,0,3,0]
                 self.compare['inter_coding'][c,s1,s2] = ic_tmp
+        
       
       pickleData(self.compare,self.meta['svCompare'],'save')
-      bar.finish()
+      
     else:
       self.compare = pickleData([],self.meta['svCompare'],'load')
     t_end = time.time()
