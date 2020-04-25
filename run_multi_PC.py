@@ -28,8 +28,10 @@ nP = 12
 #run_detection('/media/wollex/Analyze_AS3/Data','66',nP,rerun=True)
 #run_detection('/media/wollex/Analyze_AS3/Data','72',nP,rerun=True)
 
-run_detection('/media/wollex/Analyze_AS1/linstop','762',nP)
-run_detection('/media/wollex/Analyze_AS1/Shank','918shKO',nP)
+#run_detection('/media/wollex/Analyze_AS1/linstop','762',nP)
+#run_detection('/media/wollex/Analyze_AS1/Shank','918shKO',nP)
+run_detection('/media/wollex/Analyze_AS1/Shank','931wt',nP,17)
+run_detection('/media/wollex/Analyze_AS1/Shank','948shKO',nP)
 
 #run_detection('/media/wollex/Analyze_AS1/others','549',nP)
 #run_detection('/media/wollex/Analyze_AS1/others','756',nP)

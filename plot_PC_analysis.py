@@ -885,11 +885,11 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],sv=False,sv_ext='png'):#,N_bs,s_offs
     n_close = cluster.IDs['neuronID'][D_ROIs[c,:]<50,s,1].astype('int')
     
     pathSession = pathcat([cluster.meta['pathMouse'],'Session%02d'%(s+1)])
-    pathLoad = pathcat([pathSession,'results_OnACID.mat'])
+    pathLoad = pathcat([pathSession,'results_redetect.mat'])
     ld = loadmat(pathLoad)
-    Cn = ld['Cn']
-    A = ld['A'].toarray().reshape(cluster.meta['dims'][0],cluster.meta['dims'][1],-1)
-    
+    #Cn = ld['Cn']
+    A = ld['A']#.toarray().reshape(cluster.meta['dims'][0],cluster.meta['dims'][1],-1)
+    Cn = A.sum(1).reshape(cluster.meta['dims'])
     x = int(cluster.sessions['com'][c,s,0]-cluster.sessions['shift'][s,0])
     y = int(cluster.sessions['com'][c,s,1]-cluster.sessions['shift'][s,1])
     
@@ -902,9 +902,9 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],sv=False,sv_ext='png'):#,N_bs,s_offs
     Cn /= Cn_tmp.max()
     
     ax_ROIs1.imshow(Cn,origin='lower',clim=[0,1])
-    An = A[...,n]
+    An = A[...,n].reshape(cluster.meta['dims']).toarray()
     for nn in n_close:
-      ax_ROIs1.contour(A[...,nn].T,[0.01*A[...,nn].max()],colors='w',linestyles='--',linewidths=1)
+      ax_ROIs1.contour(A[...,nn].reshape(cluster.meta['dims']).toarray().T,[0.01*A[...,nn].max()],colors='w',linestyles='--',linewidths=1)
     ax_ROIs1.contour(An.T,[0.01*An.max()],colors='w',linewidths=3)
     #ax_ROIs1.plot(cluster.sessions['com'][c,s,0],cluster.sessions['com'][c,s,1],'kx')
     
@@ -918,14 +918,14 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],sv=False,sv_ext='png'):#,N_bs,s_offs
     pathSession = pathcat([cluster.meta['pathMouse'],'Session%02d'%(s+2)])
     pathLoad = pathcat([pathSession,'results_OnACID.mat'])
     ld = loadmat(pathLoad)
-    A = ld['A'].toarray().reshape(cluster.meta['dims'][0],cluster.meta['dims'][1],-1)
+    A = ld['A']#.toarray().reshape(cluster.meta['dims'][0],cluster.meta['dims'][1],-1)
     ## plot ROIs of session 2 compared to one of session 1
     ax_ROIs2 = plt.subplot(242)
     ax_ROIs2.imshow(Cn,origin='lower',clim=[0,1])
     n_match = int(cluster.IDs['neuronID'][c,s+1,1])
     for nn in n_close:
       if not (nn==n_match):
-        ax_ROIs2.contour(A[...,nn].T,[0.01*A[...,nn].max()],colors='r',linestyles='--',linewidths=1)
+        ax_ROIs2.contour(A[...,nn].reshape(cluster.meta['dims']).toarray().T,[0.01*A[...,nn].max()],colors='r',linestyles='--',linewidths=1)
     ax_ROIs2.contour(A[...,n_match].T,[0.01*A[...,n_match].max()],colors='g',linewidths=3)
     ax_ROIs2.contour(An.T,[0.01*An.max()],colors='w',linewidths=3)
     

@@ -114,7 +114,7 @@ def periodic_distr_distance(p1,p2,mu1,mu2,nbin,mode='wasserstein'):
     return d_out
   else:
     ## get distance via bootstrapping
-    N_bs = 200
+    N_bs = 100
     
     cdf1 = np.cumsum(p1)
     cdf2 = np.cumsum(p2)

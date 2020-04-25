@@ -65,7 +65,7 @@ class cluster:
                      'flow_field':np.zeros((self.meta['dims']+(2,))),
                      #'rotation_anchor':np.zeros((self.nSes,3))*np.NaN,     ## point on plane
                      #'rotation_normal':np.zeros((self.nSes,3))*np.NaN,     ## normal describing plane}
-                     'com':np.zeros((0,self.nSes,3))*np.NaN,
+                     'com':np.zeros((0,self.nSes,2))*np.NaN,
                      'match_score':np.zeros((0,self.nSes,2))}
     
     ### activity of neurons
@@ -100,7 +100,7 @@ class cluster:
     
     self.allocate_cluster()
     
-    if not os.path.exists(self.svCluster) | reprocess:
+    if (not os.path.exists(self.svCluster)) | reprocess:
       self.extend_dicts()
       self.get_matching()
       #self.extend_dicts(self.meta['nC'])
@@ -110,7 +110,8 @@ class cluster:
       self.find_PCs()
       self.compareSessions()
       self.save()
-    #else:
+    else:
+      print('already present')
       #self.load('cluster.pkl')
       #self.meta['nC'] = self.PCs['status'].shape[0]
       #self.session_classification(sessions)
@@ -123,7 +124,7 @@ class cluster:
     
     ## get template of first session for calculating session alignment statistics
     pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%self.session_order[0]])
-    pathLoad = pathcat([pathSession,'results_OnACID.mat'])
+    pathLoad = pathcat([pathSession,'results_redetect.mat'])
     ld = sio.loadmat(pathLoad)
     Aref = ld['A']
     #Cn = ld['Cn']
@@ -131,7 +132,7 @@ class cluster:
     #Cn /= Cn.max()
     #Cn_norm = np.uint8(Cn*(Cn > 0)*255)
     
-    self.meta['dims'] = dims = ld['Cn'].shape
+    self.meta['dims'] = dims = (512,512)
     #x_grid, y_grid = np.meshgrid(np.arange(0., dims[1]).astype(np.float32), np.arange(0., dims[0]).astype(np.float32))
     
     ## get neuron
@@ -141,7 +142,7 @@ class cluster:
     p_all = ld_dat['p_same']
     cm = ld_dat['cm']
     self.meta['nC'],nSes = assignments.shape
-    
+    nSes = self.meta['nSes']
     assert (nSes==self.meta['nSes']), 'Session numbers dont agree - please check %d vs %d'%(nSes,self.meta['nSes'])
     
     #plt.figure()
@@ -163,7 +164,7 @@ class cluster:
       
       ### get neuron centroid positions
       pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%s0])
-      pathLoad = pathcat([pathSession,'results_OnACID.mat'])
+      pathLoad = pathcat([pathSession,'results_redetect.mat'])
       #print('loading data from %s'%pathLoad)
       ld = sio.loadmat(pathLoad)
       A2 = ld['A']
@@ -186,7 +187,7 @@ class cluster:
         #self.sessions['rotation_normal'][s,:] = angles[1]
         
         ## correct for optical flow (rotations, etc)
-        self.sessions['com'][idx_c,s,:2] = cm[idx_c,s,:]#np.hstack([x_remap[np.round(cm[:,0])],y_remap[np.round(cm[:,1])]]).T
+        self.sessions['com'][idx_c,s,:] = cm[idx_c,s,:]#np.hstack([x_remap[np.round(cm[:,0])],y_remap[np.round(cm[:,1])]]).T
         ## get z-position
         #self.sessions['com'][idx_c,s,2] = np.squeeze(z_from_point_normal_plane(com_tmp[:,0],com_tmp[:,1],self.sessions['rotation_anchor'][s,:],self.sessions['rotation_normal'][s,:]))
         
@@ -206,7 +207,7 @@ class cluster:
         #self.sessions['rotation_anchor'][s,:] = 0
         #self.sessions['rotation_normal'][s,:] = 0
         
-        self.sessions['com'][idx_c,s,:2] = cm[idx_c,s,:]
+        self.sessions['com'][idx_c,s,:] = cm[idx_c,s,:]
       
     
     pickleData(self.sessions,self.meta['svSessions'],'save')
@@ -340,8 +341,8 @@ class cluster:
     t_start = time.time()
     for s in tqdm(range(self.meta['nSes']),leave=False):
       pathSession = pathcat([self.pathMouse,'Session%02d'%(s+1)]);
-      pathOnACID = pathcat([pathSession,'results_OnACID.mat'])
-      
+      pathOnACID = pathcat([pathSession,'results_redetect.mat'])
+      #print(s)
       pathStatus = pathcat([pathSession,'PC_fields_status.mat']);
       pathFields = pathcat([pathSession,'PC_fields_para.mat']);
       pathFiringstats = pathcat([pathSession,'PC_fields_firingstats.mat']);
