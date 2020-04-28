@@ -54,7 +54,12 @@ class detect_PC:
         idx_previous = other[1]
         SNR = other[2]
         r_values = other[3]
-    
+    else:
+      nCells = S.shape[0]
+      SNR = np.zeros(nCells)*np.NaN
+      r_values = np.zeros(nCells)*np.NaN
+      
+      
     nCells = S.shape[0]
     
     if specific_n:
@@ -206,151 +211,151 @@ class detect_PC:
       result['status']['SNR'] = SNR
       result['status']['r_value'] = r_value
       
-    #try:
-    active = {}
-    active['S'] = S[self.dataBH['longrunperiod']]    ### only consider activity during continuous runs
-    if np.count_nonzero(active['S'])==0:
-      print('no activity for this neuron')
-      result['firingstats']['rate'] = 0
-      return result
-    ## normalize activity by baseline (obtained via half-sampling mode)
-    baseline = _hsm(active['S'][active['S']>0])
-    active['S'] /= baseline
-    
-    ### calculate firing rate
-    [spikeNr,md,sd_r] = get_spikeNr(active['S'][active['S']>0])
-    
-    #plt.figure()
-    #plt.subplot(212)
-    
-    #plt.scatter(self.dataBH['time'],self.dataBH['binpos'],marker='.',s=3)
-    #S_plot = S/(md+2*sd_r);
-    #plt.scatter(self.dataBH['time'][active['S']>1],self.dataBH['binpos'][active['S']>1],color='r',s=10+S_plot[self.dataBH['longrunperiod']&(S>(md+2*sd_r))]*2)
-    #plt.subplot(211)
-    
-    #plt.plot(S)
-    #plt.show(block=False)
-    
-    #print("spike nr: %d"%spikeNr)
-    result['firingstats']['rate'] = spikeNr / (self.dataBH['T']/self.para['f'])
-    
-    if self.para['modes']['info']:
-      if self.para['modes']['info'] == 'MI':
-        ## obtain quantized firing rate for MI calculation
-        active['qtl'] = sp.ndimage.gaussian_filter(S,self.para['sigma'])
-        active['qtl'] = active['qtl'][self.dataBH['longrunperiod']]
-        qtls = np.quantile(active['qtl'][active['qtl']>0],np.linspace(0,1,self.para['qtl_steps']+1))
-        active['qtl'] = np.count_nonzero(active['qtl'][:,np.newaxis]>=qtls[np.newaxis,1:-1],1)
-    
-    ### get trial-specific activity
-    trials_S, trials_firingmap = self.get_trials_activity(active)
-    
-    ## obtain firingmap
-    firingstats_tmp = self.get_firingstats_from_trials(trials_firingmap)
-    for key in firingstats_tmp.keys():
-      result['firingstats'][key] = firingstats_tmp[key]
-    #print(result['firingstats']['parNoise'])
-    
-    if self.para['modes']['info']:
-      ## obtain mutual information first - check if (computational cost of) finding fields is worth it at all
-      MI_tmp = self.test_MI(active,trials_S)
-      for key in MI_tmp.keys():
-        result['status'][key] = MI_tmp[key]
-    else:
-      result['status']['MI_value'] = np.nan
-      result['status']['MI_p_value'] = np.nan
-      result['status']['MI_z_score'] = np.nan
+    try:
+      active = {}
+      active['S'] = S[self.dataBH['longrunperiod']]    ### only consider activity during continuous runs
+      if np.count_nonzero(active['S'])==0:
+        print('no activity for this neuron')
+        result['firingstats']['rate'] = 0
+        return result
+      ## normalize activity by baseline (obtained via half-sampling mode)
+      baseline = _hsm(active['S'][active['S']>0])
+      active['S'] /= baseline
       
+      ### calculate firing rate
+      [spikeNr,md,sd_r] = get_spikeNr(active['S'][active['S']>0])
       
-    ### do further tests only if there is "significant" mutual information
-    #if (not self.para['modes']['info']) | (result['status']['MI_p_value']<0.2):
+      #plt.figure()
+      #plt.subplot(212)
       
-    #### -------------------------- tuning curve model -------------------------------------
-    #PC_fields['firingmap'] = savgol_filter(PC_fields['firingmap'], 5, 3)
-    #self.para['bin_array'] = np.linspace(2*math.pi/self.para['nbin'],2*math.pi,self.para['nbin']);
-    
-    hbm = HierarchicalBayesModel(result['firingstats']['map'],self.para['bin_array'],result['firingstats']['parNoise'],0)
-    
-    ### test models with 0 vs 1 fields
-    for f in range(2):
+      #plt.scatter(self.dataBH['time'],self.dataBH['binpos'],marker='.',s=3)
+      #S_plot = S/(md+2*sd_r);
+      #plt.scatter(self.dataBH['time'][active['S']>1],self.dataBH['binpos'][active['S']>1],color='r',s=10+S_plot[self.dataBH['longrunperiod']&(S>(md+2*sd_r))]*2)
+      #plt.subplot(211)
       
-      hbm.change_model(f)
+      #plt.plot(S)
+      #plt.show(block=False)
       
-      #tic = time.time()
+      #print("spike nr: %d"%spikeNr)
+      result['firingstats']['rate'] = spikeNr / (self.dataBH['T']/self.para['f'])
       
-      ## hand over functions for sampler
-      my_prior_transform = hbm.transform_p
-      my_likelihood = hbm.set_logl_func()
+      if self.para['modes']['info']:
+        if self.para['modes']['info'] == 'MI':
+          ## obtain quantized firing rate for MI calculation
+          active['qtl'] = sp.ndimage.gaussian_filter(S,self.para['sigma'])
+          active['qtl'] = active['qtl'][self.dataBH['longrunperiod']]
+          qtls = np.quantile(active['qtl'][active['qtl']>0],np.linspace(0,1,self.para['qtl_steps']+1))
+          active['qtl'] = np.count_nonzero(active['qtl'][:,np.newaxis]>=qtls[np.newaxis,1:-1],1)
       
-      sampler = ultranest.ReactiveNestedSampler(self.para['names'][:hbm.nPars], my_likelihood, my_prior_transform,wrapped_params=hbm.pTC['wrap'],vectorized=True,num_bootstraps=30)#,log_dir='/home/wollex/Data/Documents/Uni/2016-XXXX_PhD/Japan/Work/Programs/PC_analysis/test_ultra')   ## set up sampler...
-      sampling_result = sampler.run(frac_remain=0.5,min_num_live_points=(f+1)*200,show_status=False,viz_callback=False)  ## ... and run it
+      ### get trial-specific activity
+      trials_S, trials_firingmap = self.get_trials_activity(active)
       
-      A_0 = sampling_result['posterior']['mean'][0]
+      ## obtain firingmap
+      firingstats_tmp = self.get_firingstats_from_trials(trials_firingmap)
+      for key in firingstats_tmp.keys():
+        result['firingstats'][key] = firingstats_tmp[key]
+      #print(result['firingstats']['parNoise'])
       
-      result['status']['Z'][f,:] = [sampling_result['logz'],sampling_result['logzerr']]    ## store evidences
-      
-      if f > 0:
-        #toc = time.time()
-        #print('time taken: %5.3gs'%(toc-tic))
+      if self.para['modes']['info']:
+        ## obtain mutual information first - check if (computational cost of) finding fields is worth it at all
+        MI_tmp = self.test_MI(active,trials_S)
+        for key in MI_tmp.keys():
+          result['status'][key] = MI_tmp[key]
+      else:
+        result['status']['MI_value'] = np.nan
+        result['status']['MI_p_value'] = np.nan
+        result['status']['MI_z_score'] = np.nan
         
-        result['status']['Bayes_factor'][0] = result['status']['Z'][1,0]-result['status']['Z'][0,0]
-        result['status']['Bayes_factor'][1] = np.sqrt(result['status']['Z'][0,1]**2 + result['status']['Z'][1,1]**2)
-        bayes_thr = result['status']['Bayes_factor'][0] - 1.96*result['status']['Bayes_factor'][1]
         
-        #if (result['status']['Z'][1,0]-result['status']['Z'][1,1]) > (result['status']['Z'][0,0]+result['status']['Z'][0,1]):
-        #if bayes_thr > 1:
-        fields_tmp = self.detect_modes_from_posterior(sampler)
-        for key in fields_tmp.keys():
-          result['fields'][key] = fields_tmp[key]
+      ### do further tests only if there is "significant" mutual information
+      #if (not self.para['modes']['info']) | (result['status']['MI_p_value']<0.2):
+        
+      #### -------------------------- tuning curve model -------------------------------------
+      #PC_fields['firingmap'] = savgol_filter(PC_fields['firingmap'], 5, 3)
+      #self.para['bin_array'] = np.linspace(2*math.pi/self.para['nbin'],2*math.pi,self.para['nbin']);
+      
+      hbm = HierarchicalBayesModel(result['firingstats']['map'],self.para['bin_array'],result['firingstats']['parNoise'],0)
+      
+      ### test models with 0 vs 1 fields
+      for f in range(2):
+        
+        hbm.change_model(f)
+        
+        #tic = time.time()
+        
+        ## hand over functions for sampler
+        my_prior_transform = hbm.transform_p
+        my_likelihood = hbm.set_logl_func()
+        
+        sampler = ultranest.ReactiveNestedSampler(self.para['names'][:hbm.nPars], my_likelihood, my_prior_transform,wrapped_params=hbm.pTC['wrap'],vectorized=True,num_bootstraps=30)#,log_dir='/home/wollex/Data/Documents/Uni/2016-XXXX_PhD/Japan/Work/Programs/PC_analysis/test_ultra')   ## set up sampler...
+        sampling_result = sampler.run(frac_remain=0.5,min_num_live_points=(f+1)*200,show_status=False,viz_callback=False)  ## ... and run it
+        
+        A_0 = sampling_result['posterior']['mean'][0]
+        
+        result['status']['Z'][f,:] = [sampling_result['logz'],sampling_result['logzerr']]    ## store evidences
+        
+        if f > 0:
+          #toc = time.time()
+          #print('time taken: %5.3gs'%(toc-tic))
           
-        #if self.para['plt_bool']:
-          #cornerplot(sampling_result)
-      
-    if self.para['plt_bool']:
-      print('for display: draw tuning curves from posterior distribution and evaluate TC-value for each bin. then, each bin has distribution of values and can be plotted! =)')
-      style_arr = ['--','-']
-      #col_arr = []
-      fig,ax = plt.subplots(figsize=(5,3),dpi=150)
-      ax.bar(self.para['bin_array'],result['firingstats']['map'],facecolor='b',width=100/self.para['nbin'],alpha=0.2)
-      ax.errorbar(self.para['bin_array'],result['firingstats']['map'],result['firingstats']['CI'],ecolor='r',linestyle='',fmt='',elinewidth=0.3)#,label='$95\\%$ confidence')
-      
-      ax.plot(self.para['bin_array'],hbm.TC(np.array([A_0])),'k',linestyle='--',linewidth=1,label='(constant)\t $log(Z)=%5.2g\\pm%5.2g$'%(result['status']['Z'][0,0],result['status']['Z'][0,1]))
-      
-      #try:
-      #print(result['fields']['nModes'])
-      for c in range(min(2,result['fields']['nModes'])):
-        if result['fields']['nModes']>1:
-          if c==0:
-            label_str = '(mode #%d)\t$log(Z)=%5.2g\\pm%5.2g$'%(c+1,result['status']['Z'][1,0],result['status']['Z'][1,1])
-          else:
-            label_str = '(mode #%d)'%(c+1)
-        else:
-          label_str = '(field)\t $log(Z)=%5.2g\\pm%5.2g$'%(result['status']['Z'][1,0],result['status']['Z'][1,1])
+          result['status']['Bayes_factor'][0] = result['status']['Z'][1,0]-result['status']['Z'][0,0]
+          result['status']['Bayes_factor'][1] = np.sqrt(result['status']['Z'][0,1]**2 + result['status']['Z'][1,1]**2)
+          bayes_thr = result['status']['Bayes_factor'][0] - 1.96*result['status']['Bayes_factor'][1]
+          
+          #if (result['status']['Z'][1,0]-result['status']['Z'][1,1]) > (result['status']['Z'][0,0]+result['status']['Z'][0,1]):
+          #if bayes_thr > 1:
+          fields_tmp = self.detect_modes_from_posterior(sampler)
+          for key in fields_tmp.keys():
+            result['fields'][key] = fields_tmp[key]
+            
+          #if self.para['plt_bool']:
+            #cornerplot(sampling_result)
         
-        ax.plot(self.para['bin_array'],hbm.TC(result['fields']['parameter'][c,:,0]),'r',linestyle='-',linewidth=0.5+result['fields']['posterior_mass'][c]*2,label=label_str)
-        #except:
-          #1
-      #ax.plot(self.para['bin_array'],hbm.TC(par_results[1]['mean']),'r',label='$log(Z)=%5.3g\\pm%5.3g$'%(par_results[1]['Z'][0],par_results[1]['Z'][1]))
-      ax.legend(title='evidence from nested sampling')
-      ax.set_xlabel('Position on track')
-      ax.set_ylabel('Ca$^{2+}$ event rate')
-      plt.tight_layout()
-      if self.para['plt_sv']:
-        pathSv = pathcat([self.para['pathFigs'],'PC_analysis_fit_results.png'])
-        plt.savefig(pathSv)
-        print('Figure saved @ %s'%pathSv)
-      plt.show(block=True)
-    
-    print('p-value (MI): %5.3g, z-score (MI): %5.3g, \t bayes factor: %7.5g+/-%7.5g \t SNR: %5.3g,\t r_value: %5.3g \t time passed: %7.2fs'%(result['status']['MI_p_value'],result['status']['MI_z_score'],result['status']['Bayes_factor'][0],result['status']['Bayes_factor'][1],SNR,r_value,time.time()-t_start))
-    #global n_ct
-    #print('tried')
-    #n_ct.increment()
-    #print('%d neurons processed, \t %7.5gs passed'%(n_ct.value,time.time()-t_start))
-    #except (KeyboardInterrupt, SystemExit):
-      #raise
-    #except:
-      #print('analysis failed: (-) p-value (MI): %5.3g, \t bayes factor: %7.5g+/-%7.5g \t SNR: %5.3g,\t r_value: %5.3g \t time passed: %7.2fs'%(result['status']['MI_p_value'],result['status']['Bayes_factor'][0],result['status']['Bayes_factor'][1],SNR,r_value,time.time()-t_start))
-      #result['fields']['nModes'] = -1
+      if self.para['plt_bool']:
+        print('for display: draw tuning curves from posterior distribution and evaluate TC-value for each bin. then, each bin has distribution of values and can be plotted! =)')
+        style_arr = ['--','-']
+        #col_arr = []
+        fig,ax = plt.subplots(figsize=(5,3),dpi=150)
+        ax.bar(self.para['bin_array'],result['firingstats']['map'],facecolor='b',width=100/self.para['nbin'],alpha=0.2)
+        ax.errorbar(self.para['bin_array'],result['firingstats']['map'],result['firingstats']['CI'],ecolor='r',linestyle='',fmt='',elinewidth=0.3)#,label='$95\\%$ confidence')
+        
+        ax.plot(self.para['bin_array'],hbm.TC(np.array([A_0])),'k',linestyle='--',linewidth=1,label='(constant)\t $log(Z)=%5.2g\\pm%5.2g$'%(result['status']['Z'][0,0],result['status']['Z'][0,1]))
+        
+        #try:
+        #print(result['fields']['nModes'])
+        for c in range(min(2,result['fields']['nModes'])):
+          if result['fields']['nModes']>1:
+            if c==0:
+              label_str = '(mode #%d)\t$log(Z)=%5.2g\\pm%5.2g$'%(c+1,result['status']['Z'][1,0],result['status']['Z'][1,1])
+            else:
+              label_str = '(mode #%d)'%(c+1)
+          else:
+            label_str = '(field)\t $log(Z)=%5.2g\\pm%5.2g$'%(result['status']['Z'][1,0],result['status']['Z'][1,1])
+          
+          ax.plot(self.para['bin_array'],hbm.TC(result['fields']['parameter'][c,:,0]),'r',linestyle='-',linewidth=0.5+result['fields']['posterior_mass'][c]*2,label=label_str)
+          #except:
+            #1
+        #ax.plot(self.para['bin_array'],hbm.TC(par_results[1]['mean']),'r',label='$log(Z)=%5.3g\\pm%5.3g$'%(par_results[1]['Z'][0],par_results[1]['Z'][1]))
+        ax.legend(title='evidence from nested sampling')
+        ax.set_xlabel('Position on track')
+        ax.set_ylabel('Ca$^{2+}$ event rate')
+        plt.tight_layout()
+        if self.para['plt_sv']:
+          pathSv = pathcat([self.para['pathFigs'],'PC_analysis_fit_results.png'])
+          plt.savefig(pathSv)
+          print('Figure saved @ %s'%pathSv)
+        plt.show(block=True)
+      
+      print('p-value (MI): %5.3g, z-score (MI): %5.3g, \t bayes factor: %7.5g+/-%7.5g \t SNR: %5.3g,\t r_value: %5.3g \t time passed: %7.2fs'%(result['status']['MI_p_value'],result['status']['MI_z_score'],result['status']['Bayes_factor'][0],result['status']['Bayes_factor'][1],SNR,r_value,time.time()-t_start))
+      #global n_ct
+      #print('tried')
+      #n_ct.increment()
+      #print('%d neurons processed, \t %7.5gs passed'%(n_ct.value,time.time()-t_start))
+      #except (KeyboardInterrupt, SystemExit):
+        #raise
+    except:
+      print('analysis failed: (-) p-value (MI): %5.3g, \t bayes factor: %7.5g+/-%7.5g \t SNR: %5.3g,\t r_value: %5.3g \t time passed: %7.2fs'%(result['status']['MI_p_value'],result['status']['Bayes_factor'][0],result['status']['Bayes_factor'][1],SNR,r_value,time.time()-t_start))
+      result['fields']['nModes'] = -1
       
     return result
 
