@@ -41,12 +41,12 @@ class detect_PC:
     self.get_behavior()       ## load and process behavior
     
     
-  def run_detection(self,S=None,rerun=False,return_results=False,specific_n=False,artificial=False,redetect=True):
+  def run_detection(self,S=None,rerun=False,return_results=False,specific_n=False,artificial=False,redetect=True,mode_info='MI'):
     
     global t_start
     t_start = time.time()
     
-    self.para['modes']['info'] = 'MI'
+    self.para['modes']['info'] = mode_info
     if S is None:
       S, other = load_activity(self.para['pathSession'],redetect=True)
       if redetect:
@@ -81,7 +81,7 @@ class detect_PC:
         PC_processed['fields'] = loadmat(self.para['svname_fields'],squeeze_me=True)
         PC_processed['firingstats'] = loadmat(self.para['svname_firingstats'],squeeze_me=True)
       
-      self.para['modes']['info'] = False
+      #self.para['modes']['info'] = False
       
       idx_process = np.where(np.isnan(PC_processed['status']['Bayes_factor'][:,0]))[0]
     else:
@@ -146,7 +146,7 @@ class detect_PC:
       print('nothing here to process')
   
   
-  def get_behavior(self):
+  def get_behavior(self,T=None):
     
     for file in os.listdir(self.para['pathSession']):
       if file.endswith("aligned.mat"):
@@ -159,16 +159,16 @@ class detect_PC:
     for key in key_array:
       load_behavior[key] = np.squeeze(f.get('alignedData/resampled/%s'%key).value)
     f.close()
-    
+    if T is None:
+      T = load_behavior['longrunperiod'].shape[0]
     self.dataBH = {}
-    self.dataBH['longrunperiod'] = load_behavior['longrunperiod'].astype(bool)
-    self.dataBH['binpos'] = load_behavior['binpos'][self.dataBH['longrunperiod']].astype('int') - 1 ## correct for different indexing
-    self.dataBH['binpos_raw'] = load_behavior['binpos'].astype('int') - 1 ## correct for different indexing
-    self.dataBH['binpos_coarse'] = (self.dataBH['binpos']/self.para['coarse_factor']).astype('int')
-    self.dataBH['time'] = load_behavior['time'][self.dataBH['longrunperiod']]
-    self.dataBH['time_raw'] = load_behavior['time']
+    self.dataBH['longrunperiod'] = load_behavior['longrunperiod'][:T].astype(bool)
+    self.dataBH['binpos'] = load_behavior['binpos'][:T][self.dataBH['longrunperiod']].astype('int') - 1 ## correct for different indexing
+    self.dataBH['binpos_raw'] = load_behavior['binpos'][:T].astype('int') - 1 ## correct for different indexing
+    self.dataBH['binpos_coarse'] = (self.dataBH['binpos'][:T]/self.para['coarse_factor']).astype('int')
+    self.dataBH['time'] = load_behavior['time'][:T][self.dataBH['longrunperiod']]
+    self.dataBH['time_raw'] = load_behavior['time'][:T]
     self.dataBH['T'] = np.count_nonzero(self.dataBH['longrunperiod'])
-    
     #plt.figure()
     #plt.plot(self.dataBH['time'],self.dataBH['binpos_coarse'],'r')
     #plt.plot(self.dataBH['time'],self.dataBH['binpos'],'b')
@@ -210,7 +210,7 @@ class detect_PC:
     if not (SNR is None):
       result['status']['SNR'] = SNR
       result['status']['r_value'] = r_value
-      
+    T = S.shape[0]
     try:
       active = {}
       active['S'] = S[self.dataBH['longrunperiod']]    ### only consider activity during continuous runs

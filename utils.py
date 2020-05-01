@@ -587,13 +587,17 @@ def get_shift_and_flow(A1,A2,dims=(512,512),projection=-1,plot_bool=False):
     plt.quiver(x_grid[::idxes,::idxes], y_grid[::idxes,::idxes], flow[::idxes,::idxes,0], flow[::idxes,::idxes,1], angles='xy', scale_units='xy', scale=1, headwidth=4,headlength=4, width=0.002, units='width')
     plt.show(block=False)
   
-  return (x_shift,y_shift), flow, (x_grid,y_grid)
+  return (x_shift,y_shift), flow, (x_grid,y_grid), c
 
-def normalize_array(A,a_type='uint',a_bits=8):
+def normalize_array(A,a_type='uint',a_bits=8,axis=None):
   A -= A.min()
   A = A/A.max()
-  return (A*(A>A.mean())*(2**a_bits-1)).astype('%s%d'%(a_type,a_bits))
+    
+  return (A*(A>A.mean(axis))*(2**a_bits-1)).astype('%s%d'%(a_type,a_bits))
   
+def normalize_sparse_array(A):
+  #A = sp.sparse.vstack([a-a.min() for a in A.T]).T
+  return sp.sparse.vstack([a/a.max() for a in A.T]).T
 
 #def display_projected_movie(basePath,mouse,s):
   

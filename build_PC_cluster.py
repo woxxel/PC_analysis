@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 
-from utils import get_nPaths, pathcat, extend_dict, clean_dict, pickleData, fdr_control, periodic_distr_distance, fit_plane, z_from_point_normal_plane, get_shift_and_flow, com
+from utils import get_nPaths, pathcat, extend_dict, clean_dict, pickleData, fdr_control, periodic_distr_distance, fit_plane, z_from_point_normal_plane, get_shift_and_flow, com, calculate_img_correlation
 from utils_data import set_para
 
 warnings.filterwarnings("ignore")
@@ -18,13 +18,14 @@ warnings.filterwarnings("ignore")
 
 class cluster:
   
-  def __init__(self,basePath,mouse,nSes,matchName='matching/Sheintuch_registration_results_OnACID.pkl',session_order=None):
+  def __init__(self,basePath,mouse,nSes,dataSet='OnACID',session_order=None):
     
     t_start = time.time()
     
     self.mouse = mouse
     self.pathMouse = pathcat([basePath,mouse])
-    self.pathMatching = pathcat([self.pathMouse,matchName])
+    self.pathMatching = pathcat([self.pathMouse,'matching/Sheintuch_registration_results_%s.pkl'%dataSet])
+    self.CNMF_name = 'results_%s.mat'%dataSet
     
     if not (nSes is None):
       self.nSes = nSes
@@ -38,7 +39,19 @@ class cluster:
     
     self.para = set_para(basePath,mouse,1)
     
-    self.svCluster = pathcat([self.pathMouse,'cluster.pkl'])
+    self.svCluster = pathcat([self.pathMouse,'cluster_%s.pkl'%dataSet])
+    print(self.svCluster)
+    
+    self.meta = {'mouse':self.mouse,
+                 'pathMouse':self.pathMouse,
+                 'nC':np.NaN,
+                 'nSes':self.nSes,
+                 'dims':(512,512),#np.zeros(2)*np.NaN,
+                 'svSessions':pathcat([self.pathMouse,'clusterSessions_%s.pkl'%dataSet]),
+                 'svIDs':pathcat([self.pathMouse,'clusterIDs_%s.pkl'%dataSet]),
+                 'svActivity':pathcat([self.pathMouse,'clusterActivity_%s.pkl'%dataSet]),
+                 'svPCs':pathcat([self.pathMouse,'clusterPCs_%s.pkl'%dataSet]),
+                 'svCompare':pathcat([self.pathMouse,'clusterCompare_%s.pkl'%dataSet])}
     
   
   def allocate_cluster(self):
@@ -46,23 +59,15 @@ class cluster:
     self.f_max = 2
     
     ### general meta-statistics / data
-    self.meta = {'mouse':self.mouse,
-                 'pathMouse':self.pathMouse,
-                 'nC':np.NaN,
-                 'nSes':self.nSes,
-                 'dims':(512,512),#np.zeros(2)*np.NaN,
-                 'svSessions':pathcat([self.pathMouse,'clusterSessions.pkl']),
-                 'svIDs':pathcat([self.pathMouse,'clusterIDs.pkl']),
-                 'svActivity':pathcat([self.pathMouse,'clusterActivity.pkl']),
-                 'svPCs':pathcat([self.pathMouse,'clusterPCs.pkl']),
-                 'svCompare':pathcat([self.pathMouse,'clusterCompare.pkl'])}
+    
     
     ### identity of neurons
     self.IDs = {'clusterID':np.zeros((0,2)).astype('uint16'), 
                 'neuronID':np.zeros((0,self.nSes,2))}
     
     self.sessions = {'shift':np.zeros((self.nSes,2))*np.NaN,
-                     'flow_field':np.zeros((self.meta['dims']+(2,))),
+                     'corr':np.zeros((self.nSes,2))*np.NaN,
+                     'flow_field':np.zeros(((self.nSes,)+self.meta['dims']+(2,))),
                      #'rotation_anchor':np.zeros((self.nSes,3))*np.NaN,     ## point on plane
                      #'rotation_normal':np.zeros((self.nSes,3))*np.NaN,     ## normal describing plane}
                      'com':np.zeros((0,self.nSes,2))*np.NaN,
@@ -91,7 +96,7 @@ class cluster:
       nC = ld_dat['assignment'].shape[0]
     
     extend_dict(self.IDs,nC)
-    extend_dict(self.sessions,nC,exclude=['shift','rotation_anchor','rotation_normal'])
+    extend_dict(self.sessions,nC,exclude=['shift','corr','flow_field','rotation_anchor','rotation_normal'])
     extend_dict(self.activity,nC)
     extend_dict(self.PCs,nC)
     
@@ -115,27 +120,51 @@ class cluster:
       #self.load('cluster.pkl')
       #self.meta['nC'] = self.PCs['status'].shape[0]
       #self.session_classification(sessions)
-    
   
-  def get_matching(self):
-    
-    #pathMatching = pathcat([self.pathMouse,'matching/results_matching_multi_std=0_thr=70_w=33_OnACID.mat']);
-    #ld_dat = sio.loadmat(pathMatching,squeeze_me=True)
+  
+  def get_reference_frame(self):
     
     ## get template of first session for calculating session alignment statistics
     pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%self.session_order[0]])
-    pathLoad = pathcat([pathSession,'results_redetect.mat'])
+    pathLoad = pathcat([pathSession,self.CNMF_name])
     ld = sio.loadmat(pathLoad)
     Aref = ld['A']
-    #Cn = ld['Cn']
-    #Cn -= Cn.min()
-    #Cn /= Cn.max()
-    #Cn_norm = np.uint8(Cn*(Cn > 0)*255)
+    self.progress = tqdm(enumerate(self.session_order),total=self.nSes,leave=False)
+    A2ref = Aref.copy()
+    x_shift_total = 0
+    y_shift_total = 0
+    
+    for (s,s0) in self.progress:
+      ### get neuron centroid positions
+      self.progress.set_description('Loading data from Session %d'%s0)
+      pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%s0])
+      pathLoad = pathcat([pathSession,self.CNMF_name])
+      #print('loading data from %s'%pathLoad)
+      ld = sio.loadmat(pathLoad)
+      A2 = ld['A']
+      
+      if s>0:
+        self.sessions['shift'][s,:], self.sessions['flow_field'][s,...], _, self.sessions['corr'][s,0] = get_shift_and_flow(Aref,A2,self.meta['dims'],projection=1,plot_bool=False)
+        
+        self.sessions['corr'][s,1],(y_shift,x_shift) = calculate_img_correlation(A2ref.sum(1),A2.sum(1),plot_bool=False)
+        
+        x_shift_total += x_shift
+        y_shift_total += y_shift
+        
+        #print(self.sessions['shift'][s,:])
+        #print([x_shift_total,y_shift_total])
+        #angles = self.find_rotation_from_flow(flow,plot_bool=False)
+      else:
+        self.sessions['shift'][s,:] = 0
+        #self.sessions['rotation_anchor'][s,:] = 0
+        #self.sessions['rotation_normal'][s,:] = 0
+      A2ref = A2.copy()
+  
+  def get_matching(self):
     
     self.meta['dims'] = dims = (512,512)
-    #x_grid, y_grid = np.meshgrid(np.arange(0., dims[1]).astype(np.float32), np.arange(0., dims[0]).astype(np.float32))
     
-    ## get neuron
+    ## get matching results
     ld_dat = pickleData([],self.pathMatching,'load')
     assignments = ld_dat['assignment']
     p_matched = ld_dat['p_matched']
@@ -144,14 +173,6 @@ class cluster:
     self.meta['nC'],nSes = assignments.shape
     nSes = self.meta['nSes']
     assert (nSes==self.meta['nSes']), 'Session numbers dont agree - please check %d vs %d'%(nSes,self.meta['nSes'])
-    
-    #plt.figure()
-    #plt.subplot(121)
-    #plt.imshow(ld['Cn'],origin='lower')
-    #plt.subplot(122)
-    #plt.imshow(Aref.sum(1).reshape(dims),origin='lower')
-    #plt.title('Session %d'%self.session_order[0])
-    #plt.show(block=False)
     
     for (s0,s) in tqdm(zip(self.session_order,range(nSes)),total=nSes,leave=False):
     #for s in tqdm(range(self.meta['nSes']),leave=False):
@@ -162,29 +183,7 @@ class cluster:
       N = len(n_arr)
       self.IDs['neuronID'][idx_c,s,:] = np.vstack([np.ones(N),n_arr]).T
       
-      ### get neuron centroid positions
-      pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%s0])
-      pathLoad = pathcat([pathSession,'results_redetect.mat'])
-      #print('loading data from %s'%pathLoad)
-      ld = sio.loadmat(pathLoad)
-      A2 = ld['A']
-      #cm = com(A2,dims[0],dims[1])
-      
       if s > 0:
-        
-        self.sessions['shift'][s,:], flow, (x_grid,y_grid) = get_shift_and_flow(Aref,A2,dims,projection=1,plot_bool=False)
-        
-        #com_tmp = com(A2,dims[0],dims[1])
-        #x_remap = (x_grid - self.sessions['shift'][s,0])
-        #y_remap = (y_grid - self.sessions['shift'][s,1])
-        #com_tmp = np.vstack([x_remap[np.round(com_tmp[:,1]).astype('int'),np.round(com_tmp[:,0]).astype('int')],y_remap[np.round(com_tmp[:,1]).astype('int'),np.round(com_tmp[:,0]).astype('int')]]).T
-        
-        #x_remap = (x_grid - self.sessions['shift'][s,0] + flow[:,:,0])
-        #y_remap = (y_grid - self.sessions['shift'][s,1] + flow[:,:,1])
-        
-        #angles = self.find_rotation_from_flow(flow,plot_bool=False)
-        #self.sessions['rotation_anchor'][s,:] = angles[0]
-        #self.sessions['rotation_normal'][s,:] = angles[1]
         
         ## correct for optical flow (rotations, etc)
         self.sessions['com'][idx_c,s,:] = cm[idx_c,s,:]#np.hstack([x_remap[np.round(cm[:,0])],y_remap[np.round(cm[:,1])]]).T
@@ -197,20 +196,16 @@ class cluster:
         
         idx_c = idx_c[idx_c<p_matched[s-1].shape[0]]
         n_arr = assignments[idx_c,s].astype('int')
-        
         scores_now = p_all[s].toarray()
         
         self.sessions['match_score'][idx_c,s,1] = [max(scores_now[c,np.where(scores_now[c,:]!=self.sessions['match_score'][c,s,0])[0]]) for c in idx_c]
         
       else:
-        self.sessions['shift'][s,:] = 0
-        #self.sessions['rotation_anchor'][s,:] = 0
-        #self.sessions['rotation_normal'][s,:] = 0
-        
         self.sessions['com'][idx_c,s,:] = cm[idx_c,s,:]
       
     
     pickleData(self.sessions,self.meta['svSessions'],'save')
+    
   
   def find_rotation_from_flow(self,flow,plot_bool=False):
     dims = self.meta['dims']
@@ -341,7 +336,7 @@ class cluster:
     t_start = time.time()
     for s in tqdm(range(self.meta['nSes']),leave=False):
       pathSession = pathcat([self.pathMouse,'Session%02d'%(s+1)]);
-      pathOnACID = pathcat([pathSession,'results_redetect.mat'])
+      pathOnACID = pathcat([pathSession,self.CNMF_name])
       #print(s)
       pathStatus = pathcat([pathSession,'PC_fields_status.mat']);
       pathFields = pathcat([pathSession,'PC_fields_para.mat']);
