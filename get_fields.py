@@ -41,15 +41,15 @@ class detect_PC:
     self.get_behavior()       ## load and process behavior
     
     
-  def run_detection(self,S=None,rerun=False,return_results=False,specific_n=False,artificial=False,redetect=True,mode_info='MI'):
+  def run_detection(self,S=None,rerun=False,return_results=False,specific_n=False,artificial=False,dataSet='redetect',mode_info='MI'):
     
     global t_start
     t_start = time.time()
-    
+    self.dataSet = dataSet
     self.para['modes']['info'] = mode_info
     if S is None:
-      S, other = load_activity(self.para['pathSession'],redetect=True)
-      if redetect:
+      S, other = load_activity(self.para['pathSession'],dataSet=dataSet)
+      if dataSet == 'redetect':
         idx_evaluate = other[0]
         idx_previous = other[1]
         SNR = other[2]
@@ -1272,20 +1272,17 @@ class HierarchicalBayesModel:
 
 
 
-def load_activity(pathSession,redetect=True):
+def load_activity(pathSession,dataSet='redetect'):
   ## load activity data from CaImAn results
   
-  if redetect:
-    pathAct = pathcat([pathSession,'results_redetect.mat'])
-  else:
-    pathAct = pathcat([pathSession,'results_OnACID.mat'])
+  pathAct = pathcat([pathSession,'results_%s.mat'%dataSet])
   
   ld = sio.loadmat(pathAct,squeeze_me=True)
   S = ld['S']
   if S.shape[0] > 8000:
     S = S.transpose()
   
-  if redetect:
+  if dataSet=='redetect':
     idx_evaluate = ld['idx_evaluate'].astype('bool')
     idx_previous = ld['idx_previous'].astype('bool')
     SNR = ld['SNR']

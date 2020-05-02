@@ -15,11 +15,11 @@ def run_detection(basePath,mouse,nP,s_start=1,rerun=False):
   for s in range(s_start,nSession+1):
     #try:
     dPC = detect_PC(basePath,mouse,s,nP,plt_bool=False,sv_bool=False)
-    dPC.run_detection(rerun=rerun)
+    dPC.run_detection(rerun=rerun,dataSet='redetect')
     #except:
       #print('###--- something went wrong in session %d of mouse %s! ---###'%(s,mouse))
 
-nP = 14
+nP = 10
 #run_detection_folders('/media/wollex/Analyze_AS3/Data',nP)
 
 #run_detection('/media/wollex/Analyze_AS3/Data','34',nP,rerun=True)
@@ -31,7 +31,7 @@ nP = 14
 #run_detection('/media/wollex/Analyze_AS1/linstop','762',nP)
 #run_detection('/media/wollex/Analyze_AS1/Shank','918shKO',nP)
 #run_detection('/media/wollex/Analyze_AS1/Shank','931wt',nP,22)
-run_detection('/media/wollex/Analyze_AS1/Shank','943shKO',nP)
+#run_detection('/media/wollex/Analyze_AS1/Shank','943shKO',nP)
 
 #run_detection('/media/wollex/Analyze_AS1/others','549',nP)
 #run_detection('/media/wollex/Analyze_AS1/others','756',nP)
@@ -46,7 +46,7 @@ run_detection('/media/wollex/Analyze_AS1/Shank','943shKO',nP)
 #run_detection('/media/wollex/Analyze_AS1/Shank','943shKO',nP,rerun=True)
 
 #run_detection('/media/wollex/Analyze_AS1/linstop','231',nP)
-#run_detection('/media/wollex/Analyze_AS1/linstop','232',nP)
+run_detection('/media/wollex/Analyze_AS1/linstop','232',nP,13)
 #run_detection('/media/wollex/Analyze_AS1/linstop','236',nP)
 #run_detection('/media/wollex/Analyze_AS1/linstop','246',nP)
 

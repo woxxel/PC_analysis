@@ -107,8 +107,8 @@ class cluster:
     
     if (not os.path.exists(self.svCluster)) | reprocess:
       self.extend_dicts()
+      self.get_reference_frame()
       self.get_matching()
-      #self.extend_dicts(self.meta['nC'])
       self.session_classification(sessions)
       self.cluster_classification()
       self.get_PC_fields()
@@ -182,6 +182,7 @@ class cluster:
       n_arr = assignments[idx_c,s].astype('int')
       N = len(n_arr)
       self.IDs['neuronID'][idx_c,s,:] = np.vstack([np.ones(N),n_arr]).T
+      self.activity['status'][idx_c,s,1] = True
       
       if s > 0:
         

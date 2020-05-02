@@ -497,7 +497,7 @@ def calculate_img_correlation(A1,A2,dims=(512,512),crop=False,cm_crop=None,binar
       return np.NaN, np.ones(2)*np.NaN
     
     #if not crop:
-    crop_half = ((dims[0]-1)/2,(dims[1]-1)/2)#tuple(int(d/2-1) for d in dims)
+    crop_half = ((dims[0]-np.mod(dims[0],2))/2,(dims[1]-np.mod(dims[1],2))/2)#tuple(int(d/2-1) for d in dims)
     idx_max = np.unravel_index(np.argmax(C),C.shape)
     img_shift = np.subtract(idx_max,crop_half)
     
