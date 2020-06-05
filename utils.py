@@ -82,7 +82,7 @@ def _hsm(data):
       return _hsm(data[j:j + N])
     
 
-def periodic_distr_distance(p1,p2,mu1,mu2,nbin,mode='wasserstein'):
+def periodic_distr_distance(p1,p2,nbin,mu1=None,mu2=None,mode='wasserstein'):
   
   
   if mode=='wasserstein':
@@ -274,12 +274,10 @@ def fdr_control(x,alpha):
     x_mask = ~np.isnan(x)
     N = x_mask.sum()
     FDR_thr = range(1,N+1)/N*alpha
-    
     x_masked = x[x_mask]
     idxes = np.where(x_mask)[0];
     idx_sorted = np.argsort(x_masked);
     x_sorted = x_masked[idx_sorted]
-    
     FDR_arr = x_sorted<FDR_thr;
     idx_cut = np.where(FDR_arr==False)[0][0]
     FDR_arr[idx_cut:] = False
@@ -501,13 +499,13 @@ def calculate_img_correlation(A1,A2,dims=(512,512),crop=False,cm_crop=None,binar
     idx_max = np.unravel_index(np.argmax(C),C.shape)
     img_shift = np.subtract(idx_max,crop_half)
     
-    if plot_bool:
+    if (plot_bool):# | ((C_max>0.95)&(C_max<0.9999)):
       #idx_max = np.where(C.real==C_max)
       plt.figure()
-      plt.subplot(221)
-      plt.imshow(A1,origin='lower')
-      plt.colorbar()
-      plt.subplot(222)
+      ax1 = plt.subplot(221)
+      im = ax1.imshow(A1,origin='lower')
+      plt.colorbar(im)
+      plt.subplot(222,sharex=ax1,sharey=ax1)
       plt.imshow(A2,origin='lower')
       plt.colorbar()
       plt.subplot(223)
@@ -515,7 +513,7 @@ def calculate_img_correlation(A1,A2,dims=(512,512),crop=False,cm_crop=None,binar
       plt.plot(crop_half[1],crop_half[0],'ro')
       plt.colorbar()
       plt.suptitle('corr: %5.3g'%C_max)
-      plt.show(block=False)
+      plt.show(block=True)
     
     return C_max, img_shift # C[crop_half], 
   else:
@@ -619,3 +617,10 @@ def fun_wrapper(fun,x,p):
   if p.shape[-1] == 7:
     return fun(x,p[...,0],p[...,1],p[...,2],p[...,3],p[...,4],p[...,5],p[...,6])
     
+
+def gmean(X,axis=1,nanflag=False):
+  
+  if nanflag:
+    return np.exp(np.nansum(np.log(X),axis)/(~np.isnan(X)).sum(axis))
+  else:
+    return np.exp(np.sum(np.log(X),axis)/X.shape[axis])

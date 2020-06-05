@@ -1,5 +1,6 @@
 import os, random, h5py, time, math, cmath, copy, importlib, warnings, pickle
 import multiprocessing as mp
+from multiprocessing import get_context
 
 from skimage import measure
 from collections import Counter
@@ -20,6 +21,7 @@ import numpy as np
 ### Documentation on https://johannesbuchner.github.io/UltraNest/performance.html
 import ultranest
 from ultranest.plot import cornerplot
+import ultranest.stepsampler
 
 from spike_shuffling import shuffling
 
@@ -41,11 +43,12 @@ class detect_PC:
     self.get_behavior()       ## load and process behavior
     
     
-  def run_detection(self,S=None,rerun=False,return_results=False,specific_n=False,artificial=False,dataSet='redetect',mode_info='MI'):
+  def run_detection(self,S=None,rerun=False,f_max=2,return_results=False,specific_n=None,artificial=False,dataSet='redetect',mode_info='MI'):
     
     global t_start
     t_start = time.time()
     self.dataSet = dataSet
+    self.f_max = f_max
     self.para['modes']['info'] = mode_info
     if S is None:
       S, other = load_activity(self.para['pathSession'],dataSet=dataSet)
@@ -59,10 +62,10 @@ class detect_PC:
       SNR = np.zeros(nCells)*np.NaN
       r_values = np.zeros(nCells)*np.NaN
       
-      
     nCells = S.shape[0]
     
-    if specific_n:
+    if not (specific_n is None):
+      self.para['n'] = specific_n
       result = self.PC_detect(S[specific_n,:])
       return result
     if rerun:
@@ -95,7 +98,7 @@ class detect_PC:
       result_tmp = []
       if self.para['nP'] > 0:
         
-        pool = mp.Pool(self.para['nP'])
+        pool = get_context("spawn").Pool(self.para['nP'])
         batchSz = 500
         nBatch = nCells_process//batchSz
         
@@ -162,9 +165,29 @@ class detect_PC:
     if T is None:
       T = load_behavior['longrunperiod'].shape[0]
     self.dataBH = {}
-    self.dataBH['longrunperiod'] = load_behavior['longrunperiod'][:T].astype(bool)
-    self.dataBH['binpos'] = load_behavior['binpos'][:T][self.dataBH['longrunperiod']].astype('int') - 1 ## correct for different indexing
     self.dataBH['binpos_raw'] = load_behavior['binpos'][:T].astype('int') - 1 ## correct for different indexing
+    
+    bp_min = self.dataBH['binpos_raw'].min()
+    bp_max = self.dataBH['binpos_raw'].max()
+    
+    print(bp_min,bp_max)
+    print(bp_max-bp_min)
+    self.dataBH['binpos_raw'] -= bp_min
+    self.dataBH['binpos_raw'] *= (self.para['nbin']/(bp_max-bp_min)).astype('int')
+    
+    velocity = np.diff(np.append(self.dataBH['binpos_raw'][0],self.dataBH['binpos_raw']))*self.para['f']*120/self.para['nbin']
+    velocity[velocity<0] = 0
+    velocity = sp.ndimage.gaussian_filter(velocity,5)
+    plt.figure()
+    plt.plot(velocity)
+    plt.show(block=False)
+    self.dataBH['longrunperiod'] = (velocity) > 2
+    
+    #self.dataBH['longrunperiod'] = load_behavior['longrunperiod'][:T].astype(bool)
+    self.dataBH['binpos'] = load_behavior['binpos'][:T][self.dataBH['longrunperiod']].astype('int') - 1 ## correct for different indexing
+    
+    self.dataBH['binpos'] = ((self.dataBH['binpos'] - bp_min)*self.para['nbin']/(bp_max-bp_min)).astype('int')
+    
     self.dataBH['binpos_coarse'] = (self.dataBH['binpos'][:T]/self.para['coarse_factor']).astype('int')
     self.dataBH['time'] = load_behavior['time'][:T][self.dataBH['longrunperiod']]
     self.dataBH['time_raw'] = load_behavior['time'][:T]
@@ -218,13 +241,21 @@ class detect_PC:
         print('no activity for this neuron')
         result['firingstats']['rate'] = 0
         return result
+      
+      #t_start = time.time()
       ## normalize activity by baseline (obtained via half-sampling mode)
-      baseline = _hsm(active['S'][active['S']>0])
-      active['S'] /= baseline
+      #baseline = _hsm(active['S'][active['S']>0])
+      #active['S'] /= baseline
+      
+      #t_end = time.time()
+      #print('get baseline - time taken: %5.3g'%(t_end-t_start))
       
       ### calculate firing rate
-      [spikeNr,md,sd_r] = get_spikeNr(active['S'][active['S']>0])
-      
+      t_start = time.time()
+      result['firingstats']['rate'],result['firingstats']['rate_thr'] = self.get_firingrate(active['S'])
+      #[spikeNr,md,sd_r] = get_spikeNr(active['S'][active['S']>0])
+      t_end = time.time()
+      print('get spikeNr - time taken: %5.3g'%(t_end-t_start))
       #plt.figure()
       #plt.subplot(212)
       
@@ -237,15 +268,14 @@ class detect_PC:
       #plt.show(block=False)
       
       #print("spike nr: %d"%spikeNr)
-      result['firingstats']['rate'] = spikeNr / (self.dataBH['T']/self.para['f'])
-      
-      if self.para['modes']['info']:
-        if self.para['modes']['info'] == 'MI':
-          ## obtain quantized firing rate for MI calculation
-          active['qtl'] = sp.ndimage.gaussian_filter(S,self.para['sigma'])
-          active['qtl'] = active['qtl'][self.dataBH['longrunperiod']]
-          qtls = np.quantile(active['qtl'][active['qtl']>0],np.linspace(0,1,self.para['qtl_steps']+1))
-          active['qtl'] = np.count_nonzero(active['qtl'][:,np.newaxis]>=qtls[np.newaxis,1:-1],1)
+      #rate_tmp = spikeNr / (self.dataBH['T']/self.para['f'])
+      #if self.para['modes']['info']:
+        #if self.para['modes']['info'] == 'MI':
+          ### obtain quantized firing rate for MI calculation
+          #active['qtl'] = sp.ndimage.gaussian_filter(S,self.para['sigma'])
+          #active['qtl'] = active['qtl'][self.dataBH['longrunperiod']]
+          #qtls = np.quantile(active['qtl'][active['qtl']>0],np.linspace(0,1,self.para['qtl_steps']+1))
+          #active['qtl'] = np.count_nonzero(active['qtl'][:,np.newaxis]>=qtls[np.newaxis,1:-1],1)
       
       ### get trial-specific activity
       trials_S, trials_firingmap = self.get_trials_activity(active)
@@ -255,6 +285,11 @@ class detect_PC:
       for key in firingstats_tmp.keys():
         result['firingstats'][key] = firingstats_tmp[key]
       #print(result['firingstats']['parNoise'])
+      
+      #t_start = time.time()
+      #return self.calc_Icorr(active['S'],trials_S)
+      #t_end = time.time()
+      #print('calc I - time taken: %5.3g'%(t_end-t_start))
       
       if self.para['modes']['info']:
         ## obtain mutual information first - check if (computational cost of) finding fields is worth it at all
@@ -277,85 +312,118 @@ class detect_PC:
       hbm = HierarchicalBayesModel(result['firingstats']['map'],self.para['bin_array'],result['firingstats']['parNoise'],0)
       
       ### test models with 0 vs 1 fields
-      for f in range(2):
+      pnames = [self.para['names'][0]]
+      break_it = False
+      for f in range(self.f_max+1):
         
+        if break_it:
+          continue
         hbm.change_model(f)
-        
+        print('model: %d'%f)
         #tic = time.time()
+        paramnames = pnames.copy()
+        paramnames.extend(self.para['names'][1:]*f)
         
         ## hand over functions for sampler
         my_prior_transform = hbm.transform_p
         my_likelihood = hbm.set_logl_func()
         
-        sampler = ultranest.ReactiveNestedSampler(self.para['names'][:hbm.nPars], my_likelihood, my_prior_transform,wrapped_params=hbm.pTC['wrap'],vectorized=True,num_bootstraps=30)#,log_dir='/home/wollex/Data/Documents/Uni/2016-XXXX_PhD/Japan/Work/Programs/PC_analysis/test_ultra')   ## set up sampler...
-        sampling_result = sampler.run(frac_remain=0.5,min_num_live_points=(f+1)*200,show_status=False,viz_callback=False)  ## ... and run it
+        sampler = ultranest.ReactiveNestedSampler(paramnames, my_likelihood, my_prior_transform,wrapped_params=hbm.pTC['wrap'],vectorized=True,num_bootstraps=20)#,log_dir='/home/wollex/Data/Documents/Uni/2016-XXXX_PhD/Japan/Work/Programs/PC_analysis/test_ultra')   ## set up sampler...
+        num_samples = 200
+        if f>1:
+          sampler.stepsampler = ultranest.stepsampler.RegionSliceSampler(nsteps=3)#, adaptive_nsteps='move-distance')
+          num_samples = 100
+        t_start = time.time()
+        sampling_result = sampler.run(min_num_live_points=num_samples,max_iters=10000,cluster_num_live_points=40,show_status=True,viz_callback=False)  ## ... and run it #max_ncalls=500000,(f+1)*100,
+        t_end = time.time()
+        print('nested sampler done, time: %5.3g'%(t_end-t_start))
         
         A_0 = sampling_result['posterior']['mean'][0]
         
         result['status']['Z'][f,:] = [sampling_result['logz'],sampling_result['logzerr']]    ## store evidences
         
         if f > 0:
-          #toc = time.time()
-          #print('time taken: %5.3gs'%(toc-tic))
+          result['status']['Bayes_factor'][f-1,0] = result['status']['Z'][f,0]-result['status']['Z'][f-1,0]
+          result['status']['Bayes_factor'][f-1,1] = np.sqrt(result['status']['Z'][f-1,1]**2 + result['status']['Z'][f,1]**2)
+          #bayes_thr = result['status']['Bayes_factor'][f-1,0] - 1.96*result['status']['Bayes_factor'][f-1,1]
           
-          result['status']['Bayes_factor'][0] = result['status']['Z'][1,0]-result['status']['Z'][0,0]
-          result['status']['Bayes_factor'][1] = np.sqrt(result['status']['Z'][0,1]**2 + result['status']['Z'][1,1]**2)
-          bayes_thr = result['status']['Bayes_factor'][0] - 1.96*result['status']['Bayes_factor'][1]
+          #if self.para['plt_bool']:
+            #cornerplot(sampling_result)
+            #plt.show(block=False)
           
-          #if (result['status']['Z'][1,0]-result['status']['Z'][1,1]) > (result['status']['Z'][0,0]+result['status']['Z'][0,1]):
-          #if bayes_thr > 1:
+          if f==2:
+            f_major = np.nanargmax(result['fields']['posterior_mass'])
+            theta_major = result['fields']['parameter'][f_major,3,0]
+          t_start = time.time()
           fields_tmp = self.detect_modes_from_posterior(sampler)
           for key in fields_tmp.keys():
             result['fields'][key] = fields_tmp[key]
+          t_end = time.time()
+          print('postprocessing done, time: %5.3g'%(t_end-t_start))
+          if f==2:
+            result['fields']['major'] = np.nanargmin(np.abs(np.mod(theta_major-result['fields']['parameter'][:,3,0]+self.para['nbin']/2,self.para['nbin'])-self.para['nbin']/2))
             
-          #if self.para['plt_bool']:
-            #cornerplot(sampling_result)
+            return result,sampler,sampling_result
+            
+          if result['status']['Bayes_factor'][f-1,0]<=0:
+            break_it = True
+            
+          
         
       if self.para['plt_bool']:
         print('for display: draw tuning curves from posterior distribution and evaluate TC-value for each bin. then, each bin has distribution of values and can be plotted! =)')
         style_arr = ['--','-']
         #col_arr = []
-        fig,ax = plt.subplots(figsize=(5,3),dpi=150)
+        #fig,ax = plt.subplots(figsize=(5,3),dpi=150)
+        ax = plt.axes([0.6,0.625,0.35,0.25])
         ax.bar(self.para['bin_array'],result['firingstats']['map'],facecolor='b',width=100/self.para['nbin'],alpha=0.2)
         ax.errorbar(self.para['bin_array'],result['firingstats']['map'],result['firingstats']['CI'],ecolor='r',linestyle='',fmt='',elinewidth=0.3)#,label='$95\\%$ confidence')
         
-        ax.plot(self.para['bin_array'],hbm.TC(np.array([A_0])),'k',linestyle='--',linewidth=1,label='(constant)\t $log(Z)=%5.2g\\pm%5.2g$'%(result['status']['Z'][0,0],result['status']['Z'][0,1]))
+        ax.plot(self.para['bin_array'],hbm.TC(np.array([A_0])),'k',linestyle='--',linewidth=1,label='$log(Z)=%4.1f\\pm%4.1f$ (non-coding)'%(result['status']['Z'][0,0],result['status']['Z'][0,1]))
         
         #try:
         #print(result['fields']['nModes'])
         for c in range(min(2,result['fields']['nModes'])):
           if result['fields']['nModes']>1:
             if c==0:
-              label_str = '(mode #%d)\t$log(Z)=%5.2g\\pm%5.2g$'%(c+1,result['status']['Z'][1,0],result['status']['Z'][1,1])
+              label_str = '(mode #%d)\t$log(Z)=%4.1f\\pm%4.1f$'%(c+1,result['status']['Z'][1,0],result['status']['Z'][1,1])
             else:
               label_str = '(mode #%d)'%(c+1)
           else:
-            label_str = '(field)\t $log(Z)=%5.2g\\pm%5.2g$'%(result['status']['Z'][1,0],result['status']['Z'][1,1])
+            label_str = '$log(Z)=%4.1f\\pm%4.1f$ (coding)'%(result['status']['Z'][1,0],result['status']['Z'][1,1])
           
           ax.plot(self.para['bin_array'],hbm.TC(result['fields']['parameter'][c,:,0]),'r',linestyle='-',linewidth=0.5+result['fields']['posterior_mass'][c]*2,label=label_str)
           #except:
             #1
         #ax.plot(self.para['bin_array'],hbm.TC(par_results[1]['mean']),'r',label='$log(Z)=%5.3g\\pm%5.3g$'%(par_results[1]['Z'][0],par_results[1]['Z'][1]))
-        ax.legend(title='evidence from nested sampling')
-        ax.set_xlabel('Position on track')
-        ax.set_ylabel('Ca$^{2+}$ event rate')
+        ax.legend(title='evidence',fontsize=8,loc='upper left',bbox_to_anchor=[0.05,1.4])
+        ax.set_xlabel('Location [bin]')
+        ax.set_ylabel('$\\bar{\\nu}$')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
         plt.tight_layout()
         if self.para['plt_sv']:
           pathSv = pathcat([self.para['pathFigs'],'PC_analysis_fit_results.png'])
           plt.savefig(pathSv)
           print('Figure saved @ %s'%pathSv)
         plt.show(block=True)
+        
+        
+      if SNR is None:
+        print('p-value (MI): %5.3g, z-score (MI): %5.3g, \t bayes factor (1): %7.5g+/-%7.5g, (2): %7.5g+/-%7.5g'%(result['status']['MI_p_value'],result['status']['MI_z_score'],result['status']['Bayes_factor'][0,0],result['status']['Bayes_factor'][0,1],result['status']['Bayes_factor'][1,0],result['status']['Bayes_factor'][1,1]))# \t time passed: %7.2fs,time.time()-t_start))
+      else:
+        print('p-value (MI): %5.3g, z-score (MI): %5.3g, \t bayes factor (1): %7.5g+/-%7.5g (2): %7.5g+/-%7.5g \t SNR: %5.3g,\t r_value: %5.3g'%(result['status']['MI_p_value'],result['status']['MI_z_score'],result['status']['Bayes_factor'][0,0],result['status']['Bayes_factor'][0,1],result['status']['Bayes_factor'][1,0],result['status']['Bayes_factor'][1,1],SNR,r_value))# \t time passed: %7.2fs,time.time()-t_start))
       
-      print('p-value (MI): %5.3g, z-score (MI): %5.3g, \t bayes factor: %7.5g+/-%7.5g \t SNR: %5.3g,\t r_value: %5.3g \t time passed: %7.2fs'%(result['status']['MI_p_value'],result['status']['MI_z_score'],result['status']['Bayes_factor'][0],result['status']['Bayes_factor'][1],SNR,r_value,time.time()-t_start))
+      #print('p-value (MI): %5.3g, z-score (MI): %5.3g, \t bayes factor: %7.5g+/-%7.5g \t SNR: %5.3g,\t r_value: %5.3g'%(result['status']['MI_p_value'],result['status']['MI_z_score'],result['status']['Bayes_factor'][0],result['status']['Bayes_factor'][1],SNR,r_value))# \t time passed: %7.2fs,time.time()-t_start))
       #global n_ct
       #print('tried')
       #n_ct.increment()
       #print('%d neurons processed, \t %7.5gs passed'%(n_ct.value,time.time()-t_start))
       #except (KeyboardInterrupt, SystemExit):
         #raise
-    except:
-      print('analysis failed: (-) p-value (MI): %5.3g, \t bayes factor: %7.5g+/-%7.5g \t SNR: %5.3g,\t r_value: %5.3g \t time passed: %7.2fs'%(result['status']['MI_p_value'],result['status']['Bayes_factor'][0],result['status']['Bayes_factor'][1],SNR,r_value,time.time()-t_start))
-      result['fields']['nModes'] = -1
+    except AssertionError:
+      print('analysis failed: (-) p-value (MI): %5.3g, \t bayes factor: %7.5g+/-%7.5g'%(result['status']['MI_p_value'],result['status']['Bayes_factor'][0],result['status']['Bayes_factor'][1]))
+      #result['fields']['nModes'] = -1
       
     return result
 
@@ -366,354 +434,463 @@ class detect_PC:
     logp_prior = np.log(-0.5*(np.diff(np.exp(data_tmp['logvol'][1:]))+np.diff(np.exp(data_tmp['logvol'][:-1])))) ## calculate prior probabilities (phasespace-slice volume from change in prior-volume (trapezoidal form)
     
     data = {}
-    data['logX'] = data_tmp['logvol'][1:-1]
-    data['logl'] = data_tmp['logl'][1:-1]
-    data['logz'] = data_tmp['logz'][1:-1]
+    data['logX'] = np.array(data_tmp['logvol'][1:-1])
+    data['logl'] = np.array(data_tmp['logl'][1:-1])
+    data['logz'] = np.array(data_tmp['logz'][1:-1])
     data['logp_posterior'] = logp_prior + data['logl'] - data['logz'][-1]   ## normalized posterior weight
     data['samples'] = data_tmp['samples'][1:-1,:]
-    data['pos_samples'] = data['samples'][:,3]
     
-    ### get number of clusters:
-    ### ...slice at different levels 
+    #print(data['pos_sampler'].shape)
     
-    logX_top = logX_top_tmp = -(data['logX'].min())
-    logX_bottom = logX_bottom_tmp = -(data['logX'].max())
-    
-    ### search for baseline (where whole prior space is sampled)
-    x_space = np.linspace(0,100,11)
-    i=0
-    while i < 10:
-      logX_base = (logX_top_tmp + logX_bottom_tmp)/2
-      mask_logX = -data['logX']>logX_base
-      cluster_hist = np.histogram(data['pos_samples'][mask_logX],bins=x_space)[0]>0
-      if np.mean(cluster_hist) > 0.9:
-        logX_bottom_tmp = logX_base
-      else:
-        logX_top_tmp = logX_base
-      i+=1
-    
-    ### check from baseline up
-    ### gather occupied phase space & occupied probability mass
-    x_space = np.linspace(0,100,101)
-    
-    nsteps = 31
-    clusters = {}
-    blob_center = np.zeros((nsteps,1))*np.NaN
-    blob_phase_space = np.zeros((nsteps,1))*np.NaN
-    blob_probability_mass = np.zeros((nsteps,1))*np.NaN
-    blob_center_CI = np.zeros((nsteps,2,1))*np.NaN
-    
-    periodic = False
-    nClusters = 0
-    logX_arr = np.linspace(logX_top,logX_base,nsteps)
-    for (logX,i) in zip(logX_arr,range(nsteps)):
-      mask_logX = -data['logX']>logX
+    if self.para['plt_bool']:
+      plt.figure(figsize=(2.5,1.5),dpi=300)
+      ## plot weight
+      ax1 = plt.subplot(111)
+      dZ = np.diff(np.exp(data['logz']))
+      ax1.fill_between(data['logX'][1:],dZ/dZ.max(),color=[0.5,0.5,0.5],zorder=0,label='$\Delta Z$')
       
+      w = np.exp(logp_prior)
+      ax1.plot(data['logX'],w/w.max(),'r',zorder=5,label='$w$')
+      
+      L = np.exp(data['logl'])
+      ax1.plot(data['logX'],L/L.max(),'k',zorder=10,label='$\mathcal{L}$')
+      
+      ax1.set_yticks([])
+      ax1.set_xlabel('ln X')
+      ax1.legend(fontsize=8,loc='lower left')
+      plt.tight_layout()
+      plt.show(block=False)
+      
+      if self.para['plt_sv']:
+        pathSv = pathcat([self.para['pathFigs'],'PC_analysis_NS_contributions.png'])
+        plt.savefig(pathSv)
+        print('Figure saved @ %s'%pathSv)
+    
+    print('add colorbar to other plot')
+    
+    nPars = data_tmp['samples'].shape[-1]
+    nf = int((nPars - 1)/3)
+    
+    fields = {}
+    for f in range(nf):
+      data['pos_samples'] = np.array(data['samples'][:,3+3*f])
+      
+      ### get number of clusters:
+      ### ...slice at different levels 
+      
+      logX_top = logX_top_tmp = -(data['logX'].min())
+      logX_bottom = logX_bottom_tmp = -(data['logX'].max())
+      
+      ### search for baseline (where whole prior space is sampled)
+      x_space = np.linspace(0,100,11)
+      i=0
+      while i < 10:
+        logX_base = (logX_top_tmp + logX_bottom_tmp)/2
+        mask_logX = -data['logX']>logX_base
+        cluster_hist = np.histogram(data['pos_samples'][mask_logX],bins=x_space)[0]>0
+        if np.mean(cluster_hist) > 0.9:
+          logX_bottom_tmp = logX_base
+        else:
+          logX_top_tmp = logX_base
+        i+=1
+      
+      ### check from baseline up
+      ### gather occupied phase space & occupied probability mass
+      x_space = np.linspace(0,100,101)
+      
+      nsteps = 31
+      clusters = {}
+      blob_center = np.zeros((nsteps,1))*np.NaN
+      blob_phase_space = np.zeros((nsteps,1))*np.NaN
+      blob_probability_mass = np.zeros((nsteps,1))*np.NaN
+      blob_center_CI = np.zeros((nsteps,2,1))*np.NaN
+      
+      periodic = False
+      nClusters = 0
+      logX_arr = np.linspace(logX_top,logX_base,nsteps)
+      for (logX,i) in zip(logX_arr,range(nsteps)):
+        mask_logX = -data['logX']>logX
+        
+        cluster_hist = np.histogram(data['pos_samples'][mask_logX],bins=x_space)[0]>0
+        
+        ## remove "noise" clusters
+        cluster_hist = sp.ndimage.morphology.binary_opening(sp.ndimage.morphology.binary_closing(np.concatenate((cluster_hist[-10:],cluster_hist,cluster_hist[:10]))))[10:-10]
+        if not any(cluster_hist):
+          continue
+        
+        blobs = measure.label(cluster_hist)
+        nblobs = blobs.max()
+        
+        if (blobs[0]>0) & (blobs[-1]>0):
+          periodic = True
+          nblobs-=1
+        
+        for c in range(1,nblobs+1):
+          
+          if len(blob_phase_space) < nblobs:
+            blob_center.append([])
+            blob_phase_space.append([])
+            blob_probability_mass.append([])
+            blob_center_CI.append([])
+            
+          if c == 1 & periodic:
+            val_last = x_space[np.where(blobs==c)[0][-1]]
+            val_first = x_space[np.where(blobs==blobs[-1])[0][0]]
+            mask_cluster = np.logical_or((val_first <= data['pos_samples']),(data['pos_samples'] < val_last))
+            blobs[blobs==blobs[-1]] = blobs[0]      ## assign components to each other, wrapped by periodicity of phase space
+            
+          else:
+            val_first = x_space[np.where(blobs==c)[0][0]]
+            val_last = x_space[np.where(blobs==c)[0][-1]]
+            mask_cluster = (val_first <= data['pos_samples']) & (data['pos_samples'] < val_last)
+          
+          mask = (mask_cluster & mask_logX)
+          
+          if np.count_nonzero(mask)>50:
+            p_posterior_cluster = np.exp(data['logp_posterior'][mask])
+            posterior_mass = (p_posterior_cluster).sum()
+            p_posterior_cluster /= posterior_mass
+            masked_samples = data['pos_samples'][mask]
+            
+            center_tmp = get_average(masked_samples,p_posterior_cluster,True,[0,100])  ## project to positive axis again
+            
+            ### test for overlap with other clusters
+            assigned = overlap = False
+            for cc in clusters.keys():
+              
+              mask_joint = mask & clusters[cc]['mask']
+                
+              if any(mask_joint):     ### does the cluster have an overlap with another one?
+                
+                if clusters[cc]['active']:    ### clusters can only be assigned to active clusters
+                
+                  if assigned:
+                    
+                    if (clusters[c_id]['posterior_mass'] > clusters[cc]['posterior_mass']):
+                      clusters[cc]['active'] = False
+                      if clusters[cc]['appeared'] > 3:
+                        clusters[c_id]['active'] = False
+                        overlap = True
+                    else:
+                      clusters[c_id]['active'] = False
+                      if clusters[c_id]['appeared'] > 3:
+                        clusters[cc]['active'] = False
+                        overlap = True
+                    
+                  elif ((np.exp(data['logp_posterior'][mask_joint]).sum() / clusters[cc]['posterior_mass']) > 0):# & abs((center_tmp -:
+                    ### if it's a significant overlap, not changing the clusterstats significantly, assign to existing one
+                    c_id = cc
+                    appeared = clusters[c_id]['appeared']+1
+                    assigned = True
+                  else:
+                    ### if overlap is non-significant, disable "small" cluster
+                    clusters[cc]['active'] = False
+                else:
+                  overlap = True
+                
+            if overlap:
+              continue
+            elif not assigned:
+              ### if no overlap was found, start new cluster
+              c_id = nClusters
+              nClusters+=1
+              appeared = 1
+            
+            n_samples = len(p_posterior_cluster)
+            
+            clusters[c_id] = {'periodic':periodic & (c==1),'mask':mask,'center':center_tmp,'phase_space':np.mean(blobs==c),'posterior_mass':posterior_mass,'baseline':logX,'n_samples':n_samples,'appeared':appeared,'active':True}
+            
+            if c_id >= blob_center.shape[1]:
+              cat_cluster = np.zeros((nsteps,1))*np.nan
+              blob_center = np.concatenate((blob_center,cat_cluster),1)
+              blob_phase_space = np.concatenate((blob_phase_space,cat_cluster),1)
+              blob_probability_mass = np.concatenate((blob_probability_mass,cat_cluster),1)
+              
+              cat_cluster = np.zeros((nsteps,2,1))*np.nan
+              blob_center_CI = np.concatenate((blob_center_CI,cat_cluster),2)
+            
+            blob_center[i,c_id] = center_tmp
+            blob_phase_space[i,c_id] = np.mean(blobs==c)
+            blob_probability_mass[i,c_id] = posterior_mass
+            
+            ### get confidence intervals from cdf
+            x_cdf_posterior, y_cdf_posterior = ecdf(masked_samples,p_posterior_cluster)
+            blob_center_CI[i,0,c_id] = x_cdf_posterior[np.where(y_cdf_posterior>=0.025)[0][0]]
+            blob_center_CI[i,1,c_id] = x_cdf_posterior[np.where(y_cdf_posterior>0.975)[0][0]]
+          
+      #print(clusters)
+      #print(blob_center)
+      #print(blob_center_CI)
+      #print(blob_phase_space)
+      #print(blob_probability_mass)
+      
+      ### remove overlapping and non-significant clusters
+      logX_baseline = np.inf
+      c_ct=0
+      c_arr = []
+      for c in range(nClusters):
+        clusters[c]['active'] = True
+        if c in clusters:
+          if (clusters[c]['posterior_mass'] < 0.05):
+            clusters[c]['active'] = False
+            continue
+          if (clusters[c]['appeared'] <= 3):
+            clusters[c]['active'] = False
+            continue
+          c_arr.append(c)
+        logX_baseline = min(clusters[c]['baseline'],logX_baseline)
+        c_ct+=1
+      
+      ### for each cluster, obtain self.para values and confidence intervals
+      fields[f] = {}
+      fields[f]['nModes'] = min(3,c_ct)
+      fields[f]['posterior_mass'] = np.zeros(3)*np.NaN
+      fields[f]['parameter'] = np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN
+      fields[f]['p_x'] = np.zeros((3,2,self.para['nbin']))*np.NaN
+      
+      mask_logX = -data['logX']>logX_baseline
       cluster_hist = np.histogram(data['pos_samples'][mask_logX],bins=x_space)[0]>0
       ## remove "noise" clusters
       cluster_hist = sp.ndimage.morphology.binary_opening(sp.ndimage.morphology.binary_closing(np.concatenate((cluster_hist[-10:],cluster_hist,cluster_hist[:10]))))[10:-10]
-      if not any(cluster_hist):
-        continue
       
       blobs = measure.label(cluster_hist)
-      nblobs = blobs.max()
-      
       if (blobs[0]>0) & (blobs[-1]>0):
         periodic = True
-        nblobs-=1
-      
-      for c in range(1,nblobs+1):
-        
-        if len(blob_phase_space) < nblobs:
-          blob_center.append([])
-          blob_phase_space.append([])
-          blob_probability_mass.append([])
-          blob_center_CI.append([])
-          
-        if c == 1 & periodic:
-          val_last = x_space[np.where(blobs==c)[0][-1]]
+      masks = {}
+      for i in range(1,blobs.max()):
+        masks[i] = {}
+        if i == 1 & periodic:
+          val_last = x_space[np.where(blobs==i)[0][-1]]
           val_first = x_space[np.where(blobs==blobs[-1])[0][0]]
           mask_cluster = np.logical_or((val_first <= data['pos_samples']),(data['pos_samples'] < val_last))
-          blobs[blobs==blobs[-1]] = blobs[0]      ## assign components to each other, wrapped by periodicity of phase space
-          
+          #blobs[blobs==blobs[-1]] = blobs[0]      ## assign components to each other, wrapped by periodicity of phase space
         else:
-          val_first = x_space[np.where(blobs==c)[0][0]]
-          val_last = x_space[np.where(blobs==c)[0][-1]]
+          val_first = x_space[np.where(blobs==i)[0][0]]
+          val_last = x_space[np.where(blobs==i)[0][-1]]
           mask_cluster = (val_first <= data['pos_samples']) & (data['pos_samples'] < val_last)
-        
-        mask = (mask_cluster & mask_logX)
-        
-        if np.count_nonzero(mask)>50:
-          p_posterior_cluster = np.exp(data['logp_posterior'][mask])
-          posterior_mass = (p_posterior_cluster).sum()
-          p_posterior_cluster /= posterior_mass
-          masked_samples = data['pos_samples'][mask]
+        masks[i]['baseline'] = (mask_cluster & mask_logX)
+      
+      c_ct = 0
+      sig_space = np.linspace(0,10,101)
+      for c in clusters.keys():
+        if clusters[c]['active']:
+          mask = np.ones(data['samples'].shape[0]).astype('bool')
           
-          center_tmp = get_average(masked_samples,p_posterior_cluster,True,[0,100])  ## project to positive axis again
+          for i in range(1,len(masks)):
+            if np.count_nonzero(masks[i]['baseline'] & clusters[c]['mask'])==0:
+              mask[masks[i]['baseline']] = False
           
-          ### test for overlap with other clusters
-          assigned = overlap = False
+          ## find, which cluster mask belongs to
           for cc in clusters.keys():
-            
-            mask_joint = mask & clusters[cc]['mask']
+            if not cc==c:
+              mask[clusters[cc]['mask']] = False
+              #posterior_mass -= clusters[cc]['posterior_mass']
+          
+          p_posterior_cluster = np.exp(data['logp_posterior'][mask])#/posterior_mass
+          p_posterior_cluster /= p_posterior_cluster.sum()
+          
+          ## calculate other parameters
+          for i in range(4):
+            if i==0:
+              samples = data['samples'][mask,i]
+            else:
+              samples = data['samples'][mask,i+3*f]
+            #samples = data['samples'][clusters[c]['mask'],i+3*f]
               
-            if any(mask_joint):     ### does the cluster have an overlap with another one?
-              
-              if clusters[cc]['active']:    ### clusters can only be assigned to active clusters
-              
-                if assigned:
-                  
-                  if (clusters[c_id]['posterior_mass'] > clusters[cc]['posterior_mass']):
-                    clusters[cc]['active'] = False
-                    if clusters[cc]['appeared'] > 3:
-                      clusters[c_id]['active'] = False
-                      overlap = True
-                  else:
-                    clusters[c_id]['active'] = False
-                    if clusters[c_id]['appeared'] > 3:
-                      clusters[cc]['active'] = False
-                      overlap = True
-                  
-                elif ((np.exp(data['logp_posterior'][mask_joint]).sum() / clusters[cc]['posterior_mass']) > 0):# & abs((center_tmp -:
-                  ### if it's a significant overlap, not changing the clusterstats significantly, assign to existing one
-                  c_id = cc
-                  appeared = clusters[c_id]['appeared']+1
-                  assigned = True
-                else:
-                  ### if overlap is non-significant, disable "small" cluster
-                  clusters[cc]['active'] = False
-              else:
-                overlap = True
-              
-          if overlap:
-            continue
-          elif not assigned:
-            ### if no overlap was found, start new cluster
-            c_id = nClusters
-            nClusters+=1
-            appeared = 1
-          
-          n_samples = len(p_posterior_cluster)
-          
-          clusters[c_id] = {'periodic':periodic & (c==1),'mask':mask,'center':center_tmp,'phase_space':np.mean(blobs==c),'posterior_mass':posterior_mass,'baseline':logX,'n_samples':n_samples,'appeared':appeared,'active':True}
-          
-          if c_id >= blob_center.shape[1]:
-            cat_cluster = np.zeros((nsteps,1))*np.nan
-            blob_center = np.concatenate((blob_center,cat_cluster),1)
-            blob_phase_space = np.concatenate((blob_phase_space,cat_cluster),1)
-            blob_probability_mass = np.concatenate((blob_probability_mass,cat_cluster),1)
+            if i==2:
+              for j in range(len(sig_space)-1):
+                thr_low = sig_space[j]
+                thr_up = sig_space[j+1]
+                mask_px = np.ones(samples.shape).astype('bool')
+                mask_px[samples<thr_low] = False
+                mask_px[samples>=thr_up] = False
+                fields[f]['p_x'][c_ct,0,j] = p_posterior_cluster[mask_px].sum()
+            if i==3:
+              for j in range(len(x_space)-1):
+                thr_low = x_space[j]
+                thr_up = x_space[j+1]
+                mask_px = np.ones(samples.shape).astype('bool')
+                mask_px[samples<thr_low] = False
+                mask_px[samples>=thr_up] = False
+                fields[f]['p_x'][c_ct,1,j] = p_posterior_cluster[mask_px].sum()
+              #fields[f]['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i+3*f],p_posterior_cluster,True,[0,100])
+              fields[f]['parameter'][c_ct,i,0] = get_average(samples,p_posterior_cluster,True,[0,100])
+              samples = (data['samples'][mask,i+3*f]+100/2-fields[f]['parameter'][c_ct,i,0])%100-100/2        ## shift whole axis such, that peak is in the center, to get proper errorbars
+            else:
+              #fields[f]['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i+3*f],p_posterior_cluster)
+              fields[f]['parameter'][c_ct,i,0] = get_average(samples,p_posterior_cluster)
             
-            cat_cluster = np.zeros((nsteps,2,1))*np.nan
-            blob_center_CI = np.concatenate((blob_center_CI,cat_cluster),2)
-          
-          blob_center[i,c_id] = center_tmp
-          blob_phase_space[i,c_id] = np.mean(blobs==c)
-          blob_probability_mass[i,c_id] = posterior_mass
-          
-          ### get confidence intervals from cdf
-          x_cdf_posterior, y_cdf_posterior = ecdf(masked_samples,p_posterior_cluster)
-          blob_center_CI[i,0,c_id] = x_cdf_posterior[np.where(y_cdf_posterior>=0.025)[0][0]]
-          blob_center_CI[i,1,c_id] = x_cdf_posterior[np.where(y_cdf_posterior>0.975)[0][0]]
-        
-    #print(clusters)
-    #print(blob_center)
-    #print(blob_center_CI)
-    #print(blob_phase_space)
-    #print(blob_probability_mass)
-    
-    ### remove overlapping and non-significant clusters
-    logX_baseline = np.inf
-    c_ct=0
-    c_arr = []
-    for c in range(nClusters):
-      clusters[c]['active'] = True
-      if c in clusters:
-        if (clusters[c]['posterior_mass'] < 0.05):
-          clusters[c]['active'] = False
-          continue
-        if (clusters[c]['appeared'] <= 3):
-          clusters[c]['active'] = False
-          continue
-        c_arr.append(c)
-      logX_baseline = min(clusters[c]['baseline'],logX_baseline)
-      c_ct+=1
-    
-    ### for each cluster, obtain self.para values and confidence intervals
-    fields = {}
-    fields['nModes'] = min(3,c_ct)
-    fields['posterior_mass'] = np.zeros(3)*np.NaN
-    fields['parameter'] = np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN
-    fields['p_x'] = np.zeros((3,2,self.para['nbin']))*np.NaN
-    
-    #print('masses:')
-    #print(clusters)
-    
-    mask_logX = -data['logX']>logX_baseline
-    cluster_hist = np.histogram(data['pos_samples'][mask_logX],bins=x_space)[0]>0
-    ## remove "noise" clusters
-    cluster_hist = sp.ndimage.morphology.binary_opening(sp.ndimage.morphology.binary_closing(np.concatenate((cluster_hist[-10:],cluster_hist,cluster_hist[:10]))))[10:-10]
-    
-    blobs = measure.label(cluster_hist)
-    if (blobs[0]>0) & (blobs[-1]>0):
-      periodic = True
-    masks = {}
-    for i in range(1,blobs.max()):
-      masks[i] = {}
-      if i == 1 & periodic:
-        val_last = x_space[np.where(blobs==i)[0][-1]]
-        val_first = x_space[np.where(blobs==blobs[-1])[0][0]]
-        mask_cluster = np.logical_or((val_first <= data['pos_samples']),(data['pos_samples'] < val_last))
-        #blobs[blobs==blobs[-1]] = blobs[0]      ## assign components to each other, wrapped by periodicity of phase space
-      else:
-        val_first = x_space[np.where(blobs==i)[0][0]]
-        val_last = x_space[np.where(blobs==i)[0][-1]]
-        mask_cluster = (val_first <= data['pos_samples']) & (data['pos_samples'] < val_last)
-      masks[i]['baseline'] = (mask_cluster & mask_logX)
-    
-    c_ct = 0
-    sig_space = np.linspace(0,10,101)
-    for c in clusters.keys():
-      if clusters[c]['active']:
-        mask = np.ones(data['samples'].shape[0]).astype('bool')
-        #posterior_mass = 1
-        #print(clusters[c])
-        #plt.figure()
-        #plt.subplot(131)
-        #plt.scatter(data['pos_samples'][mask],-data['logX'][mask],c=np.exp(data['logp_posterior'][mask]),marker='.',label='samples')
-        for i in range(1,len(masks)):
-          if np.count_nonzero(masks[i]['baseline'] & clusters[c]['mask'])==0:
-            mask[masks[i]['baseline']] = False
-        #plt.subplot(132)
-        #plt.scatter(data['pos_samples'][mask],-data['logX'][mask],c=np.exp(data['logp_posterior'][mask]),marker='.',label='samples')
-        
-        ## find, which cluster mask belongs to
-        for cc in clusters.keys():
-          if not cc==c:
-            mask[clusters[cc]['mask']] = False
-            #posterior_mass -= clusters[cc]['posterior_mass']
-        
-        #plt.subplot(133)
-        #plt.scatter(data['pos_samples'][mask],-data['logX'][mask],c=np.exp(data['logp_posterior'][mask]),marker='.',label='samples')
-        #plt.show(block=False)
-        
-        p_posterior_cluster = np.exp(data['logp_posterior'][mask])#/posterior_mass
-        p_posterior_cluster /= p_posterior_cluster.sum()
-        
-        ## calculate other parameters
-        for i in range(4):
-          samples = data['samples'][mask,i]
-          #samples = data['samples'][clusters[c]['mask'],i]
+            ### get confidence intervals from cdf
+            x_cdf_posterior, y_cdf_posterior = ecdf(samples,p_posterior_cluster)
+            for j in range(len(self.para['CI_arr'])):
+              fields[f]['parameter'][c_ct,i,1+j] = x_cdf_posterior[np.where(y_cdf_posterior>=self.para['CI_arr'][j])[0][0]]
+            #fields[f]['parameter'][c_ct,i,2] = x_cdf_posterior[np.where(y_cdf_posterior>0.975)[0][0]]
             
-          if i==2:
-            for j in range(len(sig_space)-1):
-              thr_low = sig_space[j]
-              thr_up = sig_space[j+1]
-              mask_px = np.ones(samples.shape).astype('bool')
-              mask_px[samples<thr_low] = False
-              mask_px[samples>=thr_up] = False
-              fields['p_x'][c_ct,0,j] = p_posterior_cluster[mask_px].sum()
-          if i==3:
-            for j in range(len(x_space)-1):
-              thr_low = x_space[j]
-              thr_up = x_space[j+1]
-              mask_px = np.ones(samples.shape).astype('bool')
-              mask_px[samples<thr_low] = False
-              mask_px[samples>=thr_up] = False
-              fields['p_x'][c_ct,1,j] = p_posterior_cluster[mask_px].sum()
-            #fields['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i],p_posterior_cluster,True,[0,100])
-            fields['parameter'][c_ct,i,0] = get_average(samples,p_posterior_cluster,True,[0,100])
-            samples = (data['samples'][mask,i]+100/2-fields['parameter'][c_ct,i,0])%100-100/2        ## shift whole axis such, that peak is in the center, to get proper errorbars
-          else:
-            #fields['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i],p_posterior_cluster)
-            fields['parameter'][c_ct,i,0] = get_average(samples,p_posterior_cluster)
+            if i==3:
+              fields[f]['parameter'][c_ct,i,0] = fields[f]['parameter'][c_ct,i,0] % 100
+              fields[f]['parameter'][c_ct,i,1:] = (fields[f]['parameter'][c_ct,i,0] + fields[f]['parameter'][c_ct,i,1:]) % 100
+              
+            fields[f]['posterior_mass'][c_ct] = clusters[c]['posterior_mass']
           
-          ### get confidence intervals from cdf
-          x_cdf_posterior, y_cdf_posterior = ecdf(samples,p_posterior_cluster)
-          for j in range(len(self.para['CI_arr'])):
-            fields['parameter'][c_ct,i,1+j] = x_cdf_posterior[np.where(y_cdf_posterior>=self.para['CI_arr'][j])[0][0]]
-          #fields['parameter'][c_ct,i,2] = x_cdf_posterior[np.where(y_cdf_posterior>0.975)[0][0]]
-          
-          if i==3:
-            fields['parameter'][c_ct,i,0] = fields['parameter'][c_ct,i,0] % 100
-            fields['parameter'][c_ct,i,1:] = (fields['parameter'][c_ct,i,0] + fields['parameter'][c_ct,i,1:]) % 100
-            
-            fields['parameter']
-          
-          fields['posterior_mass'][c_ct] = clusters[c]['posterior_mass']
+          if c_ct == 2:
+            break   ## maximum 2 clusters detected. should be kinda sorted, since they are detected starting from smallest lnX
+          c_ct += 1
         
-        if c_ct == 2:
-          break   ## maximum 2 clusters detected. should be kinda sorted, since they are detected starting from smallest lnX
-        c_ct += 1
         #cc+=1
           #print('val: %5.3g, \t (%5.3g,%5.3g)'%(val[c,i],CI[c,i,0],CI[c,i,1]))
-    #print('time took (post-process posterior): %5.3g'%(time.time()-t_start))
-    #print(fields['parameter'])
-    if self.para['plt_bool']:
-      #plt.figure()
-      #### plot nsamples
-      #### plot likelihood
-      #plt.subplot(313)
-      #plt.plot(-data['logX'],np.exp(data['logl']))
-      #plt.ylabel('likelihood')
-      #### plot importance weight
-      #plt.subplot(312)
-      #plt.plot(-data['logX'],np.exp(data['logp_posterior']))
-      #plt.ylabel('posterior weight')
-      #### plot evidence
-      #plt.subplot(311)
-      #plt.plot(-data['logX'],np.exp(data['logz']))
-      #plt.ylabel('evidence')
-      #plt.show(block=False)
-      
-      col_arr = ['tab:blue','tab:orange','tab:green']
-      
-      fig = plt.figure(figsize=(5,4),dpi=150)
-      ax_NS = plt.subplot(position=[0.13,0.15,0.32,0.75])
-      ax_prob = plt.subplot(position=[0.6,0.675,0.35,0.275])
-      ax_center = plt.subplot(position=[0.6,0.375,0.35,0.275])
-      ax_phase = plt.subplot(position=[0.6,0.15,0.35,0.2])
-      
-      ax_NS.scatter(data['pos_samples'],-data['logX'],c=np.exp(data['logp_posterior']),marker='.',label='samples')
-      ax_NS.plot([0,100],[logX_base,logX_base],'k--')
-      ax_NS.set_xlabel('field position $\\theta$')
-      ax_NS.set_ylabel('-ln(X)')
-      ax_NS.legend(loc='lower right')
-      for c in range(fields['nModes']):
-        #if fields['posterior_mass'][c] > 0.05:
-        ax_center.plot(logX_arr,blob_center[:,c],color=col_arr[c])
-        ax_center.fill_between(logX_arr,blob_center_CI[:,0,c],blob_center_CI[:,1,c],facecolor=col_arr[c],alpha=0.5)
+      #print('time took (post-process posterior): %5.3g'%(time.time()-t_start))
+      #print(fields[f]['parameter'])
+      if self.para['plt_bool']:
+        #plt.figure()
+        #### plot nsamples
+        #### plot likelihood
+        #plt.subplot(313)
+        #plt.plot(-data['logX'],np.exp(data['logl']))
+        #plt.ylabel('likelihood')
+        #### plot importance weight
+        #plt.subplot(312)
+        #plt.plot(-data['logX'],np.exp(data['logp_posterior']))
+        #plt.ylabel('posterior weight')
+        #### plot evidence
+        #plt.subplot(311)
+        #plt.plot(-data['logX'],np.exp(data['logz']))
+        #plt.ylabel('evidence')
+        #plt.show(block=False)
         
-        ax_phase.scatter(data['samples'][clusters[c_arr[c]]['mask'],3],data['samples'][clusters[c_arr[c]]['mask'],2],marker='.')
-        #ax_phase.plot(logX_arr,blob_phase_space[:,c],color=col_arr[c],label='mode #%d'%(c+1))
-        ax_prob.plot(logX_arr,blob_probability_mass[:,c],color=col_arr[c])
+        col_arr = ['tab:blue','tab:orange','tab:green']
         
-        if c < 3:
-          ax_NS.annotate('',(fields['parameter'][c,3,0],logX_top),xycoords='data',xytext=(fields['parameter'][c,3,0]+5,logX_top+2),arrowprops=dict(facecolor=ax_center.lines[-1].get_color(),shrink=0.05))
+        fig = plt.figure(figsize=(7,4),dpi=300)
+        ax_NS = plt.axes([0.1,0.11,0.2,0.85])
+        #ax_prob = plt.subplot(position=[0.6,0.675,0.35,0.275])
+        #ax_center = plt.subplot(position=[0.6,0.375,0.35,0.275])
+        ax_phase_1 = plt.axes([0.4,0.11,0.125,0.2])
+        ax_phase_2 = plt.axes([0.55,0.11,0.125,0.2])
+        ax_phase_3 = plt.axes([0.4,0.335,0.125,0.2])
+        ax_hist_1 = plt.axes([0.7,0.11,0.1,0.2])
+        ax_hist_2 = plt.axes([0.55,0.335,0.125,0.15])
+        ax_hist_3 = plt.axes([0.4,0.56,0.125,0.15])
+        
+        
+        ax_NS.scatter(data['pos_samples'],-data['logX'],c=np.exp(data['logp_posterior']),marker='.',label='samples')
+        ax_NS.plot([0,100],[logX_base,logX_base],'k--')
+        ax_NS.set_xlabel('field position $\\theta$')
+        ax_NS.set_ylabel('-ln(X)')
+        ax_NS.legend(loc='lower right')
+        for c in range(fields[f]['nModes']):
+          #if fields[f]['posterior_mass'][c] > 0.05:
+          #ax_center.plot(logX_arr,blob_center[:,c],color=col_arr[c])
+          #ax_center.fill_between(logX_arr,blob_center_CI[:,0,c],blob_center_CI[:,1,c],facecolor=col_arr[c],alpha=0.5)
+          
+          ax_phase_1.plot(data['samples'][clusters[c_arr[c]]['mask'],2+3*f],data['samples'][clusters[c_arr[c]]['mask'],3+3*f],'k.',markeredgewidth=0,markersize=1)
+          ax_phase_2.plot(data['samples'][clusters[c_arr[c]]['mask'],1+3*f],data['samples'][clusters[c_arr[c]]['mask'],3+3*f],'k.',markeredgewidth=0,markersize=1)
+          ax_phase_3.plot(data['samples'][clusters[c_arr[c]]['mask'],2+3*f],data['samples'][clusters[c_arr[c]]['mask'],1+3*f],'k.',markeredgewidth=0,markersize=1)
+          
+          ax_hist_1.hist(data['samples'][clusters[c_arr[c]]['mask'],3+3*f],np.linspace(0,self.para['nbin'],50),facecolor='k',orientation='horizontal')
+          ax_hist_2.hist(data['samples'][clusters[c_arr[c]]['mask'],1+3*f],np.linspace(0,10,20),facecolor='k')
+          ax_hist_3.hist(data['samples'][clusters[c_arr[c]]['mask'],2+3*f],np.linspace(0,5,20),facecolor='k')
+          
+          #ax_phase.plot(logX_arr,blob_phase_space[:,c],color=col_arr[c],label='mode #%d'%(c+1))
+          #ax_prob.plot(logX_arr,blob_probability_mass[:,c],color=col_arr[c])
+          
+          #if c < 3:
+            #ax_NS.annotate('',(fields[f]['parameter'][c,3,0],logX_top),xycoords='data',xytext=(fields[f]['parameter'][c,3,0]+5,logX_top+2),arrowprops=dict(facecolor=ax_center.lines[-1].get_color(),shrink=0.05))
+        
+        nsteps = 5
+        logX_arr = np.linspace(logX_top,logX_base,nsteps)
+        for (logX,i) in zip(logX_arr,range(nsteps)):
+          ax_NS.plot([0,100],[logX,logX],'--',color=[1,i/(2*nsteps),i/(2*nsteps)],linewidth=0.5)
+        
+        #ax_center.set_xticks([])
+        #ax_center.set_xlim([logX_base,logX_top])
+        #ax_prob.set_xlim([logX_base,logX_top])
+        #ax_center.set_ylim([0,100])
+        #ax_center.set_ylabel('$\\theta$')
+        #ax_prob.set_ylim([0,1])
+        #ax_prob.set_xlabel('-ln(X)')
+        #ax_prob.set_ylabel('posterior')
+        
+        ax_phase_1.set_xlabel('$\\sigma$')
+        ax_phase_1.set_ylabel('$\\theta$')
+        ax_phase_2.set_xlabel('$A$')
+        ax_phase_3.set_ylabel('$A$')
+        ax_phase_2.set_yticks([])
+        ax_phase_3.set_xticks([])
+        
+        ax_hist_1.set_xticks([])
+        ax_hist_2.set_xticks([])
+        ax_hist_3.set_xticks([])
+        ax_hist_1.set_yticks([])
+        ax_hist_2.set_yticks([])
+        ax_hist_3.set_yticks([])
+        
+        ax_hist_1.spines['top'].set_visible(False)
+        ax_hist_1.spines['right'].set_visible(False)
+        ax_hist_1.spines['bottom'].set_visible(False)
+        
+        ax_hist_2.spines['top'].set_visible(False)
+        ax_hist_2.spines['right'].set_visible(False)
+        ax_hist_2.spines['left'].set_visible(False)
+        
+        ax_hist_3.spines['top'].set_visible(False)
+        ax_hist_3.spines['right'].set_visible(False)
+        ax_hist_3.spines['left'].set_visible(False)
+        
+        #ax_phase_1.set_xticks([])
+        #ax_phase.set_xlim([logX_base,logX_top])
+        #ax_phase.set_ylim([0,1])
+        #ax_phase.set_ylabel('% phase space')
+        #ax_phase.legend(loc='upper right')
+        
+        if self.para['plt_sv']:
+            pathSv = pathcat([self.para['pathFigs'],'PC_analysis_NS_results.png'])
+            plt.savefig(pathSv)
+            print('Figure saved @ %s'%pathSv)
+        plt.show(block=False)
+    
+    
+    if nf > 1:
+      fields_return = {}
+      fields_return['nModes'] = 0
+      fields_return['posterior_mass'] = np.zeros(3)*np.NaN
+      fields_return['parameter'] = np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN
+      fields_return['p_x'] = np.zeros((3,2,self.para['nbin']))*np.NaN
       
+      for f in range(fields[0]['nModes']):
+        p_cluster = fields[0]['posterior_mass'][f]
+        dTheta = np.abs(np.mod(fields[0]['parameter'][f,3,0]-fields[1]['parameter'][:,3,0]+self.para['nbin']/2,self.para['nbin'])-self.para['nbin']/2)
+        if np.any(dTheta<5):  ## take field with larger probability mass to have better sampling
+          f2 = np.where(dTheta<5)[0][0]
+          if fields[0]['posterior_mass'][f] > fields[1]['posterior_mass'][f2]:
+            handover_f = 0
+            f2 = f
+          else:
+            handover_f = 1
+            p_cluster = fields[1]['posterior_mass'][f2]
+        else:
+          handover_f = 0
+          f2 = f
+          
+        if p_cluster>0.5:
+          fields_return['parameter'][fields_return['nModes'],...] = fields[handover_f]['parameter'][f2,...]
+          fields_return['p_x'][fields_return['nModes'],...] = fields[handover_f]['p_x'][f2,...]
+          fields_return['posterior_mass'][fields_return['nModes']] = fields[handover_f]['posterior_mass'][f2]
+          fields_return['nModes'] += 1
       
-      ax_center.set_xticks([])
-      ax_center.set_xlim([logX_base,logX_top])
-      ax_prob.set_xlim([logX_base,logX_top])
-      ax_center.set_ylim([0,100])
-      ax_center.set_ylabel('$\\theta$')
-      ax_prob.set_ylim([0,1])
-      ax_prob.set_xlabel('-ln(X)')
-      ax_prob.set_ylabel('posterior')
+      for f in range(fields[1]['nModes']):
+        
+        dTheta = np.abs(np.mod(fields[1]['parameter'][f,3,0]-fields[0]['parameter'][:,3,0]+self.para['nbin']/2,self.para['nbin'])-self.para['nbin']/2)
+        
+        if (not np.any(dTheta<5)) and (fields[1]['posterior_mass'][f]>0.5):  ## take field with larger probability mass to have better sampling
+          fields_return['parameter'][fields_return['nModes'],...] = fields[1]['parameter'][f,...]
+          fields_return['p_x'][fields_return['nModes'],...] = fields[1]['p_x'][f,...]
+          fields_return['posterior_mass'][fields_return['nModes']] = fields[1]['posterior_mass'][f]
+          fields_return['nModes'] += 1
+          
       
-      #ax_phase.set_xticks([])
-      #ax_phase.set_xlim([logX_base,logX_top])
-      #ax_phase.set_ylim([0,1])
-      #ax_phase.set_ylabel('% phase space')
-      #ax_phase.legend(loc='upper right')
-      
-      if self.para['plt_sv']:
-          pathSv = pathcat([self.para['pathFigs'],'PC_analysis_NS_results.png'])
-          plt.savefig(pathSv)
-          print('Figure saved @ %s'%pathSv)
-      plt.show(block=False)
-      
-      
-    return fields
+    else:
+      fields_return = fields[0]
+    #print(fields_return)
+    return fields_return
 
 
   def get_trials_activity(self,active):
@@ -771,7 +948,7 @@ class detect_PC:
     
     if self.para['plt_theory_bool']:
       self.plt_model_selection(firingmap_bs,firingstats['parNoise'],trials_firingmap)
-    
+      #return
     return firingstats
 
 
@@ -806,7 +983,81 @@ class detect_PC:
     p_joint = p_joint/p_joint.sum();    ## normalize
     return p_joint
 
-
+  
+  def calc_Icorr(self,S,trials_S):
+    
+    lag = [0,self.para['f']*1]
+    nlag = lag[1]-lag[0]
+    T = S.shape[0]
+    
+    print('check if range is properly covered in C_cross (and PSTH)')
+    print('speed, speed, speed!! - what can be vectorized? how to get rid of loops?')
+    print('spike train generation: generate a single, long one at once (or smth)')
+    print('how to properly generate surrogate data? single trials? conjoint trials? if i put in a rate only, sums will even out to homogenous process for N large')
+    
+    PSTH = np.zeros((self.para['nbin'],nlag))
+    C_cross = np.zeros((self.para['nbin'],nlag))
+    for x in range(self.para['nbin']):
+      for t in range(self.dataBH['trials']['ct']):
+        idx_x = np.where(self.dataBH['trials']['trial'][t]['binpos']==x)[0]
+        #print(idx_x)
+        if len(idx_x):
+          i = self.dataBH['trials']['frame'][t] + idx_x[0]    ## find entry to position x in trial t
+          #print('first occurence of x=%d in trial %d (start: %d) at frame %d'%(x,t,self.dataBH['trials']['frame'][t],i))
+          PSTH[x,:min(nlag,T-(i+lag[0]))] += S[i+lag[0]:min(T,i+lag[1])]
+      for i in range(1,nlag):
+        C_cross[x,i] = np.corrcoef(PSTH[x,:-i],PSTH[x,i:])[0,1]
+      C_cross[np.isnan(C_cross)] = 0
+      #C_cross[x,:] = np.fft.fft(C_cross[x,:])
+    PSTH /= nlag/self.para['f']*self.dataBH['trials']['ct']
+    fC_cross = np.fft.fft(C_cross)
+    
+    rate = PSTH.sum(1)/(nlag/self.para['f']*self.dataBH['trials']['ct'])
+    print(rate)
+    
+    Icorr = np.zeros(self.para['nbin'])
+    Icorr_art = np.zeros(self.para['nbin'])
+    
+    for x in range(self.para['nbin']):
+      #print(x)
+      Icorr[x] = -1/2*rate[x] * np.log2(1 - fC_cross[x,:]/(rate[x]+fC_cross[x,:])).sum()
+      Icorr_art[x] = self.calc_Icorr_data(rate[x]*nlag/self.para['f'],nlag)
+    
+    plt.figure()
+    plt.plot(Icorr)
+    plt.plot(Icorr_art,'r')
+    plt.show(block=False)
+    
+    return PSTH, C_cross, Icorr
+      #self.dataBH['trials']['frame'][t]
+  
+  def calc_Icorr_data(self,rate,T,N_bs=20):
+    
+    t = range(T)
+    Icorr = np.zeros(N_bs)
+    for n in range(N_bs):
+      PSTH = np.zeros(T)
+      for m in range(N_bs):
+        u = np.random.rand(int(math.ceil(1.1*T*rate)));  ## generate a sufficient amount of random variables to cover the whole time
+        t_AP = np.cumsum(-(1/rate)*np.log(u));       ## generate points of homogeneous pp (continuous time)
+        t_AP = t_AP[t_AP<T];
+        
+        nAP=len(t_AP);
+        idx_AP = np.zeros(nAP).astype('int')
+        for (AP,i) in zip(t_AP,range(nAP)):
+          idx_AP[i] = np.argmin(abs(AP-t))
+          PSTH[np.argmin(abs(AP-t))] += 1
+      
+      C_cross = np.zeros(T)
+      for i in range(1,T):
+        C_cross[i] = np.corrcoef(PSTH[:-i],PSTH[i:])[0,1]
+      C_cross[np.isnan(C_cross)] = 0
+      fC_cross = np.fft.fft(C_cross)
+      Icorr[n] = -1/2*rate * np.log2(1 - fC_cross/(rate+fC_cross)).sum()
+      
+    return Icorr.mean()
+  
+  
   def test_MI(self,active,trials_S):
     
     shuffle_peaks = False;
@@ -895,15 +1146,16 @@ class detect_PC:
     result['status'] = {'MI_value':np.NaN,
                         'MI_p_value':np.NaN,
                         'MI_z_score':np.NaN,
-                        'Z':np.zeros((2,2))*np.NaN,
-                        'Bayes_factor':np.zeros(2)*np.NaN,
+                        'Z':np.zeros((self.f_max+1,2))*np.NaN,
+                        'Bayes_factor':np.zeros((self.f_max+1,2))*np.NaN,
                         'SNR':np.NaN,
                         'r_value':np.NaN}
     
     result['fields'] = {'parameter':np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN,          ### (field1,field2) x (A0,A,std,theta) x (mean,CI_low,CI_top)
                         'posterior_mass':np.zeros(3)*np.NaN,
                         'p_x':np.zeros((3,2,self.para['nbin']))*np.NaN,
-                        'nModes':0}
+                        'nModes':0,
+                        'major':np.NaN}
     
     result['firingstats'] = {'rate':np.NaN,
                             'map':np.zeros(self.para['nbin'])*np.NaN,
@@ -918,15 +1170,16 @@ class detect_PC:
     results['status'] = {'MI_value':np.zeros(nCells)*np.NaN,
                         'MI_p_value':np.zeros(nCells)*np.NaN,
                         'MI_z_score':np.zeros(nCells)*np.NaN,
-                        'Z':np.zeros((nCells,2,2))*np.NaN,
-                        'Bayes_factor':np.zeros((nCells,2))*np.NaN,
+                        'Z':np.zeros((nCells,self.f_max+1,2))*np.NaN,
+                        'Bayes_factor':np.zeros((nCells,self.f_max+1,2))*np.NaN,
                         'SNR':np.zeros(nCells)*np.NaN,
                         'r_value':np.zeros(nCells)*np.NaN}
                   
     results['fields'] = {'parameter':np.zeros((nCells,3,4,1+len(self.para['CI_arr'])))*np.NaN,          ### (mean,std,CI_low,CI_top)
                         'p_x':np.zeros((nCells,3,2,self.para['nbin'])),
                         'posterior_mass':np.zeros((nCells,3))*np.NaN,
-                        'nModes':np.zeros(nCells).astype('int')}
+                        'nModes':np.zeros(nCells).astype('int'),
+                        'major':np.zeros(nCells)*np.NaN}
     
     results['firingstats'] = {'rate':np.zeros(nCells)*np.NaN,
                               'map':np.zeros((nCells,self.para['nbin']))*np.NaN,
@@ -980,9 +1233,32 @@ class detect_PC:
                 #}
     
 
-
+  def get_firingrate(self,S):
+    
+    S[S<0.0001*S.max()]=0
+    Ns = (S>0).sum()
+    if Ns==0:
+      return 0
+    else:
+      trace = S[S>0]
+      baseline = np.median(trace)
+      trace -= baseline
+      trace *= -1*(trace <= 0)
+      
+      Ns_baseline = (trace>0).sum()
+      noise = np.sqrt((trace**2).sum()/(Ns_baseline*(1-2/np.pi)))
+      
+      firing_threshold_adapt = sstats.norm.ppf((1-0.01)**(1/Ns))
+      N_spikes = np.floor(S / (baseline + firing_threshold_adapt*noise)).sum()
+      return N_spikes/(S.shape[0]/self.para['f']),firing_threshold_adapt
+  
+  
   def plt_model_selection(self,fmap_bs,parsNoise,trials_fmap):
     
+    rc('font',size=10)
+    rc('axes',labelsize=12)
+    rc('xtick',labelsize=8)
+    rc('ytick',labelsize=8)
     sig2 = False   ## estimate variance from 2-sigma or from 1-sigma interval (more accurate from 1-sigma interval, as it becomes less gaussian, the more data it encompasses
     if sig2: 
       prc = [2.5,97.5]
@@ -994,91 +1270,197 @@ class detect_PC:
     fr_CI = np.nanpercentile(fmap_bs,prc,1);   ## width of gaussian - from 1-SD confidence interval
     fr_std = np.nanstd(fmap_bs,1)
     
-    fig = plt.figure(figsize=(4,3),dpi=150)
-    ax = plt.axes([0.15,0.2,0.8,0.75])
+    #fig = plt.figure(figsize=(4,3),dpi=150)
+    #ax = plt.axes([0.15,0.2,0.8,0.75])
     
-    ax.bar(self.para['bin_array'],fr_mu,color='b',alpha=0.2,width=1,label='$\\bar{\\nu}$')
-    ax.errorbar(self.para['bin_array'],fr_mu,fr_CI,ecolor='r',elinewidth=0.5,linestyle='',fmt='',label='$95\\%$ confidence')
+    #ax.bar(self.para['bin_array'],fr_mu,color='b',alpha=0.2,width=1,label='$\\bar{\\nu}$')
+    #ax.errorbar(self.para['bin_array'],fr_mu,fr_CI,ecolor='r',elinewidth=0.5,linestyle='',fmt='',label='$95\\%$ confidence')
     
-    ax.set_xticks(np.linspace(0,100,6))
-    ax.set_xticklabels(np.linspace(0,100,6).astype('int'))
-    ax.set_ylim([-0.1,np.nanmax(fr_mu)*2])
-    ax.set_ylabel('Ca$^{2+}$-event rate $\\nu$',fontsize=14)
-    ax.set_xlabel('Position on track',fontsize=14)
-    ax.legend(loc='upper left')
-    plt.show(block=False)
+    #ax.set_xticks(np.linspace(0,100,6))
+    #ax.set_xticklabels(np.linspace(0,100,6).astype('int'))
+    #ax.set_ylim([-0.1,np.nanmax(fr_mu)*2])
+    #ax.set_ylabel('Ca$^{2+}$-event rate $\\nu$',fontsize=12)
+    #ax.set_xlabel('Position on track',fontsize=12)
+    #ax.legend(loc='upper left')
+    #plt.show(block=False)
     
-    fig = plt.figure(figsize=(10,5),dpi=150)
+    fig = plt.figure(figsize=(7,5),dpi=300)
     
-    ax1 = plt.axes([0.1,0.55,0.85,0.42])
+    ## get data
+    pathDat = os.path.join(self.para['pathSession'],'results_redetect.mat')
+    ld = loadmat(pathDat,variable_names=['S','C'])
+    
+    C = ld['C'][self.para['n'],:]
+    S = ld['S'][self.para['n'],:]
+    
+    t_start = 0#200
+    t_end = 600#470
+    n_trial = 12
+    
+    ax_Ca = plt.axes([0.1,0.8,0.5,0.175])
+    idx_longrun = self.dataBH['longrunperiod']
+    t_longrun = self.dataBH['time_raw'][idx_longrun]
+    t_stop = self.dataBH['time_raw'][~idx_longrun]
+    ax_Ca.bar(t_stop,np.ones(len(t_stop))*1.2*S.max(),color=[0.9,0.9,0.9],zorder=0)
+    
+    ax_Ca.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[1.2*S.max(),1.2*S.max()],color=[0,0,1,0.2],zorder=1)
+    
+    ax_Ca.plot(self.dataBH['time_raw'],C,'k',linewidth=0.2)
+    ax_Ca.plot(self.dataBH['time_raw'],S,'r',linewidth=1)
+    ax_Ca.set_ylim([0,1.2*S.max()])
+    ax_Ca.set_xlim([t_start,t_end])
+    ax_Ca.set_xticks([])
+    ax_Ca.set_ylabel('Ca$^{2+}$')
+    ax_Ca.set_yticks([])
+    
+    ax_loc = plt.axes([0.1,0.5,0.5,0.3])
+    
+    ax_loc.plot(self.dataBH['time_raw'],self.dataBH['binpos_raw'],'.',color=[0.6,0.6,0.6],zorder=5,markeredgewidth=0,markersize=1)
+    idx_active = (S>0) & self.dataBH['longrunperiod']
+    idx_inactive = (S>0) & ~self.dataBH['longrunperiod']
+    
+    t_active = self.dataBH['time_raw'][idx_active]
+    pos_active = self.dataBH['binpos_raw'][idx_active]
+    S_active = S[idx_active]
+    
+    t_inactive = self.dataBH['time_raw'][idx_inactive]
+    pos_inactive = self.dataBH['binpos_raw'][idx_inactive]
+    S_inactive = S[idx_inactive]
+    ax_loc.scatter(t_active,pos_active,s=S_active/S.max()*10+0.5,c='r',zorder=10)
+    ax_loc.scatter(t_inactive,pos_inactive,s=S_inactive/S.max()*10+0.5,c='k',zorder=10)
+    ax_loc.bar(t_stop,np.ones(len(t_stop))*100,color=[0.9,0.9,0.9],zorder=0)
+    ax_loc.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[100,100],color=[0,0,1,0.2],zorder=1)
+    
+    ax_loc.set_ylim([0,100])
+    ax_loc.set_xlim([t_start,t_end])
+    ax_loc.set_xlabel('t [s]')
+    ax_loc.set_ylabel('Location [bin]')
+    
+    nC,T = ld['C'].shape
+    ax_acorr = plt.axes([0.7,0.9,0.2,0.075])
+    n_arr = np.random.randint(0,nC,20)
+    lags = 300
+    t=np.linspace(0,lags/15,lags+1)
+    for n in n_arr:
+      acorr = np.zeros(lags+1)
+      acorr[0] = 1
+      for i in range(1,lags+1):
+        acorr[i] = np.corrcoef(ld['C'][n,:-i],ld['C'][n,i:])[0,1]
+      #acorr = np.correlate(ld['S'][n,:],ld['S'][n,:],mode='full')[T-1:T+lags]
+      #ax_acorr.plot(t,acorr/acorr[0])
+      ax_acorr.plot(t,acorr,linewidth=0.5)
+    
+    ax_acorr.set_xlabel('$\Delta t$ [s]')
+    ax_acorr.set_ylabel('corr.')
+    
+    ax1 = plt.axes([0.6,0.5,0.35,0.3])
+    i = random.randint(0,self.para['nbin']-1)
     #ax1 = plt.subplot(211)
-    ax1.bar(self.para['bin_array'],fr_mu,color='b',alpha=0.2,width=1,label='$\\bar{\\nu}$')
-    ax1.errorbar(self.para['bin_array'],fr_mu,fr_CI,ecolor='r',linestyle='',fmt='',label='$95\\%$ confidence')
+    ax1.barh(self.para['bin_array'],fr_mu,facecolor='b',alpha=0.2,height=1,label='$\\bar{\\nu}$')
+    ax1.barh(self.para['bin_array'][i],fr_mu[i],facecolor='b',height=1)
+    
+    ax1.errorbar(fr_mu,self.para['bin_array'],xerr=fr_CI,ecolor='r',linewidth=0.2,linestyle='',fmt='',label='1 SD confidence')
     Y = trials_fmap/self.dataBH['trials']['dwelltime']
     mask = ~np.isnan(Y)
     Y = [y[m] for y, m in zip(Y.T, mask.T)]
     
     #flierprops = dict(marker='.', markerfacecolor='k', markersize=0.5)
     #h_bp = ax1.boxplot(Y,flierprops=flierprops)#,positions=self.para['bin_array'])
-    ax1.set_xticks(np.linspace(0,100,6))
-    ax1.set_xticklabels(np.linspace(0,100,6).astype('int'))
-    ax1.set_ylim([-0.1,np.nanmax(fr_mu)*2])
-    ax1.set_ylabel('Ca$^{2+}$-event rate $\\nu$',fontsize=14)
-    ax1.set_xlabel('Position on track',fontsize=14)
-    ax1.legend(title='# trials = %d'%self.dataBH['trials']['ct'],fontsize=12)#[h_bp['boxes'][0]],['trial data'],
+    ax1.set_yticks([])#np.linspace(0,100,6))
+    #ax1.set_yticklabels(np.linspace(0,100,6).astype('int'))
+    ax1.set_ylim([0,100])
+    ax1.set_xlim([0,np.nanmax(fr_mu)*1.2])
+    ax1.set_xticks([])
+    #ax1.set_xlabel('Ca$^{2+}$-event rate $\\nu$')
+    ax1.spines['right'].set_visible(False)
+    ax1.spines['top'].set_visible(False)
+    #ax1.set_ylabel('Position on track')
+    ax1.legend(title='# trials = %d'%self.dataBH['trials']['ct'],loc='lower left',bbox_to_anchor=[0.55,0.025],fontsize=8)#[h_bp['boxes'][0]],['trial data'],
     
-    ax2 = plt.axes([0.6,0.27,0.35,0.13])
+    ax2 = plt.axes([0.6,0.275,0.35,0.175])
     #ax2 = plt.subplot(426)
-    ax2.plot(np.linspace(0,5,101),parsNoise*np.linspace(0,5,101),'k--',label='lq-fit')
-    ax2.plot(fr_mu,fr_std,'kx',label='$\\sigma(\\nu)$')
+    ax2.plot(np.linspace(0,5,101),parsNoise*np.linspace(0,5,101),'--',color=[0.5,0.5,0.5],label='lq-fit')
+    ax2.plot(fr_mu,fr_std,'r.',markersize=1)#,label='$\\sigma(\\nu)$')
     ax2.set_xlim([0,np.nanmax(fr_mu)*1.2])
     #ax2.set_xlabel('firing rate $\\nu$')
     ax2.set_xticks([])
-    ax2.set_ylim([0,np.nanmax(fr_mu)*1.2])
-    ax2.set_ylabel('$\\sigma_{\\nu}$',fontsize=14)
+    ax2.set_ylim([0,np.nanmax(fr_std)*1.2])
+    ax2.set_ylabel('$\\sigma_{\\nu}$')
     
-    ax3 = plt.axes([0.1,0.1,0.4,0.3])
+    ax3 = plt.axes([0.1,0.08,0.4,0.25])
     #ax3 = plt.subplot(223)
     
-    i = random.randint(0,self.para['nbin']-1)
+    
     ax1.bar(self.para['bin_array'][i],fr_mu[i],color='b')
     
-    x_arr = np.linspace(0,fmap_bs[i,:].max()*1.2,101)
+    x_arr = np.linspace(0,fmap_bs[i,:].max()*1.2,self.para['nbin']+1)
+    offset = (x_arr[1]-x_arr[0])/2
     act_hist = np.histogram(fmap_bs[i,:],x_arr,normed=True)
-    ax3.bar(act_hist[1][:-1],act_hist[0],width=x_arr[1]-x_arr[0],color='b',alpha=0.2,label='data spread')
+    ax3.bar(act_hist[1][:-1],act_hist[0],width=x_arr[1]-x_arr[0],color='b',alpha=0.2,label='data (bin %d)'%i)
     
     alpha, beta = gamma_paras(fr_mu[i],fr_std[i])
     mu, shape = lognorm_paras(fr_mu[i],fr_std[i])
     
+    def gamma_fun(x,alpha,beta):
+      return beta**alpha * x**(alpha-1) * np.exp(-beta*x) / sp.special.gamma(alpha)
+    
+    #fm = trials_fmap/self.dataBH['trials']['dwelltime']
+    #ax3.plot(fm[:,i],np.zeros(fm.shape[0]),'kx')
+    
     ax3.plot(x_arr,sstats.gamma.pdf(x_arr,alpha,0,1/beta),'r',label='fit: $\\Gamma(\\alpha,\\beta)$')
+    #ax3.plot(x_arr,gamma_fun(x_arr,alpha,beta),'r',label='fit: $\\Gamma(\\alpha,\\beta)$')
+    
+    #D,p = sstats.kstest(fmap_bs[i,:1000],'gamma',args=(alpha,0,1/beta))
+    
+    #sstats.gamma.rvs()
     #ax3.plot(x_arr,sstats.lognorm.pdf(x_arr,s=shape,loc=0,scale=np.exp(mu)),'b',label='fit: $lognorm(\\alpha,\\beta)$')
     #ax3.plot(x_arr,sstats.truncnorm.pdf(x_arr,(0-fr_mu[i])/fr_std[i],np.inf,loc=fr_mu[i],scale=fr_std[i]),'g',label='fit: $gauss(\\mu,\\sigma)$')
     
-    ax3.set_xlabel('$\\nu$',fontsize=14)
-    ax3.set_ylabel('$p_{bs}(\\nu)$',fontsize=14)
-    ax2.legend(fontsize=12)
-    ax2.set_title("estimating noise",fontsize=12)
+    ax3.set_xlabel('$\\nu$')
+    ax3.set_ylabel('$p_{bs}(\\nu)$')
+    ax3.spines['right'].set_visible(False)
+    ax3.spines['top'].set_visible(False)
     
-    ax3.legend(fontsize=12)
-    ax3.set_title('bootstrapped data at bin %d'%i)
+    ax2.legend(fontsize=8)
+    #ax2.set_title("estimating noise")
     
-    ax4 = plt.axes([0.6,0.1,0.35,0.13])
+    ax3.legend(fontsize=8)
+    #ax3.set_title('bootstrapped data at bin %d'%i)
+    
+    ax4 = plt.axes([0.6,0.08,0.35,0.175])
     #ax4 = plt.subplot(428)
     
     D_KL_gamma = np.zeros(self.para['nbin'])
     D_KL_gauss = np.zeros(self.para['nbin'])
     D_KL_lognorm = np.zeros(self.para['nbin'])
     
+    D_KS_stats = np.zeros(self.para['nbin'])
+    p_KS_stats = np.zeros(self.para['nbin'])
+    
+    
+    
+    
+    #print('this is ordered by bins, not by firing rate?!')
     for i in range(self.para['nbin']):
-      x_arr = np.linspace(0,fmap_bs[i,:].max()*1.2,101)
+      x_arr = np.linspace(0,fmap_bs[i,:].max()*1.2,self.para['nbin']+1)
+      offset = (x_arr[1]-x_arr[0])/2
       act_hist = np.histogram(fmap_bs[i,:],x_arr,normed=True)
       alpha, beta = gamma_paras(fr_mu[i],fr_std[i])
       mu, shape = lognorm_paras(fr_mu[i],fr_std[i])
       
-      hist_cdf = np.cumsum(act_hist[0])
-      hist_cdf /= hist_cdf[-1]
-      offset = (x_arr[1]-x_arr[0])/2
-      D_KL_gamma[i] = abs(sstats.gamma.cdf(act_hist[1][:-1]+offset,alpha,0,1/beta) - hist_cdf).max()
+      #print(fmap_bs[i,:])
+      
+      D_KS_stats[i],p_KS_stats[i] = sstats.kstest(fmap_bs[i,:],'gamma',args=(alpha,offset,1/beta))
+      #print('bin #%d'%i)
+      #print(fm[:,i])
+      #if np.any(np.isfinite(fm[:,i])):
+        #D_KS_stats[i],p_KS_stats[i] = sstats.kstest(fm[~np.isnan(fm[:,i]),i],'gamma',args=(alpha,offset,1/beta))
+        #print(D_KS_stats[i],p_KS_stats[i])
+        
+      #hist_cdf = np.cumsum(act_hist[0])
+      #hist_cdf /= hist_cdf[-1]
+      #offset = (x_arr[1]-x_arr[0])/2
+      #D_KL_gamma[i] = abs(sstats.gamma.cdf(act_hist[1][:-1]+offset,alpha,0,1/beta) - hist_cdf).max()
       #D_KL_gauss[i] = abs(sstats.truncnorm.cdf(act_hist[1][:-1]+offset,(0-fr_mu[i])/fr_std[i],np.inf,loc=fr_mu[i],scale=fr_std[i]) - hist_cdf).max()
       #D_KL_lognorm[i] = abs(sstats.lognorm.cdf(act_hist[1][:-1]+offset,s=shape,loc=0,scale=np.exp(mu)) - hist_cdf).max()
       
@@ -1105,13 +1487,17 @@ class detect_PC:
         
         #plt.show(block=False)
     
-    ax4.plot(fr_mu,D_KL_gamma,'rx')
+    #ax4.plot(fr_mu,p_KS_stats,'k.')
+    #ax4.set_yscale('log')
+    #ax4.set_ylim([10**(-30),1])
+    #ax4.plot(fr_mu,D_KL_gamma,'rx')
+    ax4.plot(fr_mu,D_KS_stats,'k.',markersize=1)
     #ax4.plot(fr_mu,D_KL_gauss,'gx')
     #ax4.plot(fr_mu,D_KL_lognorm,'bx')
     ax4.set_xlim([0,fr_mu.max()*1.2])
-    ax4.set_xlabel('$\\nu$',fontsize=14)
-    ax4.set_ylabel('$D_{KS}$',fontsize=14)
-    #ax4.set_title('comparing data vs model',fontsize=14)
+    ax4.set_xlabel('$\\bar{\\nu}$')
+    ax4.set_ylabel('$D_{KS}$')
+    #ax4.set_title('comparing data vs model')
     
     plt.tight_layout()
     if self.para['plt_sv']:
@@ -1157,28 +1543,27 @@ class detect_PC:
     if plt_text:
       plt.annotate("", xy=(theta+3*std, A_0), xytext=(theta+3*std, A_0+A),
             arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
-      plt.text(theta+3*std+2,A_0+A/2,'A',fontsize=14)
+      plt.text(theta+3*std+2,A_0+A/2,'A')
       
       plt.annotate("", xy=(theta, A_0*0.9), xytext=(theta+2*std, A_0*0.9),
             arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
-      plt.text(theta+2,A_0*0.6,'$2\\sigma$',fontsize=14)
+      plt.text(theta+2,A_0*0.6,'$2\\sigma$')
       
       plt.annotate("", xy=(90, 0), xytext=(90, A_0),
             arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
-      plt.text(92,A_0/2,'$A_0$',fontsize=14)
+      plt.text(92,A_0/2,'$A_0$')
       
       plt.annotate("", xy=(theta, 0), xytext=(theta,A_0+A),
             arrowprops=dict(arrowstyle="-"))
-      plt.text(theta,A_0+A*1.1,'$\\theta$',fontsize=14)
+      plt.text(theta,A_0+A*1.1,'$\\theta$')
     
-    plt.xlabel('Position on track $x$',fontsize=14)
-    plt.ylabel('Ca$^{2+}$ event rate (model)',fontsize=14)
+    plt.xlabel('Position on track $x$')
+    plt.ylabel('Ca$^{2+}$ event rate (model)')
     plt.yticks([])
-    #plt.legend(loc='upper left',fontsize=14)
-    plt.ylim([0,2.5])
+    #plt.legend(loc='upper left')
+    #plt.ylim([0,2.5])
     plt.tight_layout()
     plt.show(block=False)
-
 
 #### ---------------- end of class definition -----------------
 
@@ -1197,6 +1582,8 @@ class HierarchicalBayesModel:
     self.Nx = len(self.x_arr)
     self.change_model(f)
     
+    self.nbin = 100
+    
     ### steps for lookup-table (if used)
     #self.lookup_steps = 100000
     #self.set_beta_prior(5,4)
@@ -1207,17 +1594,31 @@ class HierarchicalBayesModel:
         p = p[np.newaxis,:]
       p = p[...,np.newaxis]
       
-      mean_model = np.ones((p.shape[0],self.Nx))*p[:,0]
+      mean_model = np.ones((p.shape[0],self.Nx))*p[:,0,:]
       if p.shape[1] > 1:
         for j in [-1,0,1]:   ## loop, to have periodic boundary conditions
-          mean_model += p[:,1]*np.exp(-(self.x_arr[np.newaxis,:]-p[:,3]+self.x_max*j)**2/(2*p[:,2]**2))
+          
+          #mean_model += p[:,1]*np.exp(-(self.x_arr[np.newaxis,:]-p[:,3]+self.x_max*j)**2/(2*p[:,2]**2))
+          mean_model += (p[:,slice(1,None,3),:]*np.exp(-(self.x_arr[np.newaxis,np.newaxis,:]-p[:,slice(3,None,3),:]+self.x_max*j)**2/(2*p[:,slice(2,None,3),:]**2))).sum(1)
+      
+      #plt.figure()
+      #for i in range(p.shape[0]):
+        #plt.subplot(p.shape[0],1,i+1)
+        #plt.plot(self.x_arr,np.squeeze(mean_model[i,:]))
+      #plt.show(block=False)
       
       SD_model = self.parsNoise*mean_model
       
       alpha = (mean_model/SD_model)**2
       beta = mean_model/SD_model**2
       
-      return (alpha*np.log(beta) - np.log(sp.special.gamma(alpha)) + (alpha-1)*np.log(self.data) - beta*self.data ).sum(1)
+      logl = (alpha*np.log(beta) - np.log(sp.special.gamma(alpha)) + (alpha-1)*np.log(self.data) - beta*self.data ).sum(1)
+      if self.f>1:
+        p_theta = p[:,slice(3,None,3)]
+        dTheta = np.squeeze(np.abs(np.mod(p_theta[:,1]-p_theta[:,0]+self.nbin/2,self.nbin)-self.nbin/2))
+        logl[dTheta<10] = -1e300
+      
+      return logl
       
     return get_logl
   
@@ -1228,17 +1629,39 @@ class HierarchicalBayesModel:
   
   def transform_p(self,p):
     
+    
     if p.shape[-1]>1:
       p_out = p*self.prior_stretch + self.prior_offset
+      #print(p_out[:,slice(3,None,3)])
+      #if self.f > 1:
+        #p_theta = p_out[:,slice(3,None,3)]
+        #for f in range(1,self.f):
+          #dTheta = np.diag(np.abs(np.mod(p_theta[:,f]-p_theta[:,:f]+nbin/2,nbin)-nbin/2))
+          #idx_update = dTheta<10
+          #while np.any(idx_update):
+            #p_theta[idx_update,f] = np.random.uniform(self.prior_offset[3*f],self.prior_offset[3*f]+self.prior_stretch[3*f],idx_update.sum())
+            
+            #dTheta = np.diag(np.abs(np.mod(p_theta[:,f]-p_theta[:,:f]+nbin/2,nbin)-nbin/2))
+            #idx_update = dTheta<10
+        
+        #p_out[:,slice(3,None,3)] = p_theta
+        ####for i in range(p.shape[0]):
+          ####if p_theta[i,1] < p_theta[i,0]:
+            ####p1 = p_out[i,1:4]
+            ####p2 = p_out[i,4:7]
+            ####p_out[i,1:4] = p2
+            ####p_out[i,4:7] = p1
+          
+          
       #p_out[...,2] = self.prior_stretch[2]*self.lookup_beta[(p[...,2]*self.lookup_steps).astype('int')]
     else:
       p_out = p*self.prior_stretch[0] + self.prior_offset[0]
-      
+    #print(p_out[:,slice(3,None,3)])
     return p_out
   
   def set_priors(self):
-    self.prior_stretch = np.array([5,10,5,100])
-    self.prior_offset = np.array([0,0,0.5,0])
+    self.prior_stretch = np.array(np.append(10,[10,9.5,100]*self.f))
+    self.prior_offset = np.array(np.append(0,[0,1,0]*self.f))
   
   def change_model(self,f):
     self.f = f
@@ -1259,7 +1682,8 @@ class HierarchicalBayesModel:
       TC = np.ones((p.shape[0],self.Nx))*p[:,0]
       if p.shape[1] > 1:
         for j in [-1,0,1]:   ## loop, to have periodic boundary conditions
-          TC += p[:,1]*np.exp(-(self.x_arr[np.newaxis,:]-p[:,3]+self.x_max*j)**2/(2*p[:,2]**2))
+          #TC += p[:,1]*np.exp(-(self.x_arr[np.newaxis,:]-p[:,3]+self.x_max*j)**2/(2*p[:,2]**2))
+          TC += (p[:,slice(1,None,3)]*np.exp(-(self.x_arr[np.newaxis,:]-p[:,slice(3,None,3)]+self.x_max*j)**2/(2*p[:,slice(2,None,3)]**2))).sum(-1)
       
       return np.squeeze(TC)
     

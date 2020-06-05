@@ -61,14 +61,14 @@ def set_para(basePath,mouse,s,nP=0,plt_bool=False,sv_bool=False):
           'CI_arr':[0.001,0.025,0.05,0.159,0.5,0.841,0.95,0.975,0.999],
           
           'plt_bool':plt_bool&(nP==0),
-          'plt_theory_bool':False&(nP==0),
+          'plt_theory_bool':True&(nP==0),
           'plt_sv':sv_bool&(nP==0),
           
           'mouse':mouse,
           'session':s,
           'pathSession':pathSession,
           'pathMouse':pathMouse,
-          'pathFigs':'/home/wollex/Data/Documents/Uni/2016-XXXX_PhD/Japan/Work/Results/pics/Methods',
+          'pathFigs':'/home/wollex/Data/Science/PhD/Thesis/pics/Methods',#'/home/wollex/Data/Documents/Uni/2016-XXXX_PhD/Japan/Work/Results/pics/Methods',
           
           ### provide names for figures
           'svname_status':pathcat([pathSession,'PC_fields_status.mat']),

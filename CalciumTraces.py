@@ -137,12 +137,12 @@ class CalciumTraces:
     plt.subplot(222)
     plt.scatter(self.data['SNR'][idxes],self.N_spikes_S[idxes]/(T/self.f),c='g')
     plt.scatter(self.data['SNR'][~idxes],self.N_spikes_S[~idxes]/(T/self.f),c='r')
-    plt.ylim([0,10])
+    #plt.ylim([0,10])
     
     plt.subplot(223)
     plt.scatter(self.data['r_values'][idxes],self.N_spikes_S[idxes]/(T/self.f),c='g')
     plt.scatter(self.data['r_values'][~idxes],self.N_spikes_S[~idxes]/(T/self.f),c='r')
-    plt.ylim([0,10])
+    #plt.ylim([0,10])
     
     plt.subplot(224)
     plt.hist(self.N_spikes_S[idxes]/(T/self.f),np.linspace(0,2,101),facecolor='g',alpha=0.5)
