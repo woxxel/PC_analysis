@@ -22,6 +22,7 @@ def run_detection(basePath,mouse,nP,s_start=1,s_end=None,rerun=False):
     #except:
       #print('###--- something went wrong in session %d of mouse %s! ---###'%(s,mouse))
 
+
 nP = 12
 #run_detection_folders('/media/wollex/Analyze_AS3/Data',nP)
 
@@ -30,9 +31,9 @@ nP = 12
 #run_detection('/media/wollex/Analyze_AS3/Data','35',nP,rerun=True)
 #run_detection('/media/wollex/Analyze_AS3/Data','65',nP,38)
 #run_detection('/media/wollex/Analyze_AS3/Data','66',nP,41,41)
-run_detection('/media/wollex/Analyze_AS3/Data','72',nP)
+#run_detection('/media/wollex/Analyze_AS3/Data','72',nP)
 
-#run_detection('/media/wollex/Analyze_AS1/linstop','762',nP)
+run_detection('/media/wollex/Analyze_AS1/linstop','762',nP,8,8)
 #run_detection('/media/wollex/Analyze_AS1/Shank','918shKO',nP)
 #run_detection('/media/wollex/Analyze_AS1/Shank','931wt',nP,22)
 #run_detection('/media/wollex/Analyze_AS1/Shank','943shKO',nP)

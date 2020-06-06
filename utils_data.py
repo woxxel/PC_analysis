@@ -13,8 +13,8 @@ def set_para(basePath,mouse,s,nP=0,plt_bool=False,sv_bool=False):
   pathSession = pathcat([pathMouse,'Session%02d'%s])
   
   nbin = 100
-  qtl_steps = 5
-  coarse_factor = 4
+  qtl_steps = 4
+  coarse_factor = 5
   
   fact = 1 ## factor from path length to bin number
   
@@ -58,10 +58,11 @@ def set_para(basePath,mouse,s,nP=0,plt_bool=False,sv_bool=False):
           'qtl_steps':qtl_steps,'sigma':1,
           'qtl_weight':np.ones(qtl_steps)/qtl_steps,
           'names':['A_0','A','SD','theta'],
-          'CI_arr':[0.001,0.025,0.05,0.159,0.5,0.841,0.95,0.975,0.999],
+          #'CI_arr':[0.001,0.025,0.05,0.159,0.5,0.841,0.95,0.975,0.999],
+          'CI_arr':[0.025,0.05,0.95,0.975],
           
           'plt_bool':plt_bool&(nP==0),
-          'plt_theory_bool':True&(nP==0),
+          'plt_theory_bool':False&(nP==0),
           'plt_sv':sv_bool&(nP==0),
           
           'mouse':mouse,
