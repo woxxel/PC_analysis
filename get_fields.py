@@ -361,6 +361,7 @@ class detect_PC:
             #return result,sampler
           #except:
             #pass
+          return result, sampler
         else:
           for key in fields_tmp.keys():
             result['fields'][key] = fields_tmp[key]
@@ -442,13 +443,7 @@ class detect_PC:
     data['logp_posterior'] = logp_prior + data['logl'] - data['logz'][-1]   ## normalized posterior weight
     data['samples'] = data_tmp['samples'][1:-1,:]
     
-    
-    #plt.figure()
-    
-    
-    #print(data['pos_sampler'].shape)
-    
-    if self.para['plt_bool']:
+    if False:#self.para['plt_bool']:
       plt.figure(figsize=(2.5,1.5),dpi=300)
       ## plot weight
       ax1 = plt.subplot(111)
@@ -477,299 +472,477 @@ class detect_PC:
     nPars = data_tmp['samples'].shape[-1]
     nf = int((nPars - 1)/3)
     
+    testing = True
+    bins = 2*self.para['nbin']
+    offset = 50
+    
     fields = {}
     for f in range(nf):
+      
+      fields[f] = {}
+      fields[f]['nModes'] = 0
+      fields[f]['posterior_mass'] = np.zeros(3)*np.NaN
+      fields[f]['parameter'] = np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN
+      fields[f]['p_x'] = np.zeros((3,self.para['nbin']))*np.NaN
+      
       data['pos_samples'] = np.array(data['samples'][:,3+3*f])
-      
-      print('logp')
-      
-      logp = np.exp(data['logp_posterior'])
-      post,post_bin = np.histogram(data['pos_samples'],bins=np.linspace(0,self.para['nbin'],2*self.para['nbin']+1),weights=logp*(np.random.rand(len(logp))<(logp/logp.max())))
-      
-      plt.figure()
-      plt.bar(post_bin[:-1],post/post.sum(),width=0.5,facecolor='b',alpha=0.5)
-      plt.show(block=False)
+      logp = np.exp(data['logp_posterior'])   ## even though its not logp, but p!!
       
       
-      
-      
-      
-      
-      
-      
-      
-      
-      
-      
-      
-      
-      
-      ### get number of clusters:
-      ### ...slice at different levels 
-      
-      logX_top = logX_top_tmp = -(data['logX'].min())
-      logX_bottom = logX_bottom_tmp = -(data['logX'].max())
       
       ### search for baseline (where whole prior space is sampled)
       x_space = np.linspace(0,100,11)
-      i=0
-      while i < 10:
-        logX_base = (logX_top_tmp + logX_bottom_tmp)/2
+      logX_top = -(data['logX'].min())
+      logX_bottom = -(data['logX'].max())
+      for i in range(10):
+        logX_base = (logX_top + logX_bottom)/2
         mask_logX = -data['logX']>logX_base
         cluster_hist = np.histogram(data['pos_samples'][mask_logX],bins=x_space)[0]>0
         if np.mean(cluster_hist) > 0.9:
-          logX_bottom_tmp = logX_base
+          logX_bottom = logX_base
         else:
-          logX_top_tmp = logX_base
+          logX_top = logX_base
         i+=1
       
-      ### check from baseline up
-      ### gather occupied phase space & occupied probability mass
-      x_space = np.linspace(0,100,101)
+      mask = -data['logX'] > logX_base
       
-      nsteps = 31
-      clusters = {}
-      blob_center = np.zeros((nsteps,1))*np.NaN
-      blob_phase_space = np.zeros((nsteps,1))*np.NaN
-      blob_probability_mass = np.zeros((nsteps,1))*np.NaN
-      blob_center_CI = np.zeros((nsteps,2,1))*np.NaN
+      post,post_bin = np.histogram(data['pos_samples'],bins=np.linspace(0,self.para['nbin'],bins+1),weights=logp*(np.random.rand(len(logp))<(logp/logp.max())))
+      post /= post.sum()
       
-      periodic = False
-      nClusters = 0
-      logX_arr = np.linspace(logX_top,logX_base,nsteps)
-      for (logX,i) in zip(logX_arr,range(nsteps)):
-        mask_logX = -data['logX']>logX
-        
-        cluster_hist = np.histogram(data['pos_samples'][mask_logX],bins=x_space)[0]>0
-        
-        ## remove "noise" clusters
-        cluster_hist = sp.ndimage.morphology.binary_opening(sp.ndimage.morphology.binary_closing(np.concatenate((cluster_hist[-10:],cluster_hist,cluster_hist[:10]))))[10:-10]
-        if not any(cluster_hist):
-          continue
-        
-        blobs = measure.label(cluster_hist)
-        nblobs = blobs.max()
-        
-        if (blobs[0]>0) & (blobs[-1]>0):
-          periodic = True
-          nblobs-=1
-        
-        for c in range(1,nblobs+1):
-          
-          if len(blob_phase_space) < nblobs:
-            blob_center.append([])
-            blob_phase_space.append([])
-            blob_probability_mass.append([])
-            blob_center_CI.append([])
-            
-          if c == 1 & periodic:
-            val_last = x_space[np.where(blobs==c)[0][-1]]
-            val_first = x_space[np.where(blobs==blobs[-1])[0][0]]
-            mask_cluster = np.logical_or((val_first <= data['pos_samples']),(data['pos_samples'] < val_last))
-            blobs[blobs==blobs[-1]] = blobs[0]      ## assign components to each other, wrapped by periodicity of phase space
-            
-          else:
-            val_first = x_space[np.where(blobs==c)[0][0]]
-            val_last = x_space[np.where(blobs==c)[0][-1]]
-            mask_cluster = (val_first <= data['pos_samples']) & (data['pos_samples'] < val_last)
-          
-          mask = (mask_cluster & mask_logX)
-          
-          if np.count_nonzero(mask)>50:
-            p_posterior_cluster = np.exp(data['logp_posterior'][mask])
-            posterior_mass = (p_posterior_cluster).sum()
-            p_posterior_cluster /= posterior_mass
-            masked_samples = data['pos_samples'][mask]
-            
-            center_tmp = get_average(masked_samples,p_posterior_cluster,True,[0,100])  ## project to positive axis again
-            
-            ### test for overlap with other clusters
-            assigned = overlap = False
-            for cc in clusters.keys():
-              
-              mask_joint = mask & clusters[cc]['mask']
-                
-              if any(mask_joint):     ### does the cluster have an overlap with another one?
-                
-                if clusters[cc]['active']:    ### clusters can only be assigned to active clusters
-                
-                  if assigned:
-                    
-                    if (clusters[c_id]['posterior_mass'] > clusters[cc]['posterior_mass']):
-                      clusters[cc]['active'] = False
-                      if clusters[cc]['appeared'] > 3:
-                        clusters[c_id]['active'] = False
-                        overlap = True
-                    else:
-                      clusters[c_id]['active'] = False
-                      if clusters[c_id]['appeared'] > 3:
-                        clusters[cc]['active'] = False
-                        overlap = True
-                    
-                  elif ((np.exp(data['logp_posterior'][mask_joint]).sum() / clusters[cc]['posterior_mass']) > 0):# & abs((center_tmp -:
-                    ### if it's a significant overlap, not changing the clusterstats significantly, assign to existing one
-                    c_id = cc
-                    appeared = clusters[c_id]['appeared']+1
-                    assigned = True
-                  else:
-                    ### if overlap is non-significant, disable "small" cluster
-                    clusters[cc]['active'] = False
-                else:
-                  overlap = True
-                
-            if overlap:
-              continue
-            elif not assigned:
-              ### if no overlap was found, start new cluster
-              c_id = nClusters
-              nClusters+=1
-              appeared = 1
-            
-            n_samples = len(p_posterior_cluster)
-            
-            clusters[c_id] = {'periodic':periodic & (c==1),'mask':mask,'center':center_tmp,'phase_space':np.mean(blobs==c),'posterior_mass':posterior_mass,'baseline':logX,'n_samples':n_samples,'appeared':appeared,'active':True}
-            
-            if c_id >= blob_center.shape[1]:
-              cat_cluster = np.zeros((nsteps,1))*np.nan
-              blob_center = np.concatenate((blob_center,cat_cluster),1)
-              blob_phase_space = np.concatenate((blob_phase_space,cat_cluster),1)
-              blob_probability_mass = np.concatenate((blob_probability_mass,cat_cluster),1)
-              
-              cat_cluster = np.zeros((nsteps,2,1))*np.nan
-              blob_center_CI = np.concatenate((blob_center_CI,cat_cluster),2)
-            
-            blob_center[i,c_id] = center_tmp
-            blob_phase_space[i,c_id] = np.mean(blobs==c)
-            blob_probability_mass[i,c_id] = posterior_mass
-            
-            ### get confidence intervals from cdf
-            x_cdf_posterior, y_cdf_posterior = ecdf(masked_samples,p_posterior_cluster)
-            blob_center_CI[i,0,c_id] = x_cdf_posterior[np.where(y_cdf_posterior>=0.025)[0][0]]
-            blob_center_CI[i,1,c_id] = x_cdf_posterior[np.where(y_cdf_posterior>0.975)[0][0]]
-          
-      #print(clusters)
-      #print(blob_center)
-      #print(blob_center_CI)
-      #print(blob_phase_space)
-      #print(blob_probability_mass)
+      # construct wrapped and smoothed histogram
+      post_cat = np.concatenate([post[-offset:],post,post[:offset]])
+      post_smooth = sp.ndimage.gaussian_filter(post,10,mode='wrap')
+      post_smooth = np.concatenate([post_smooth[-offset:],post_smooth,post_smooth[:offset]])
       
-      ### remove overlapping and non-significant clusters
-      logX_baseline = np.inf
-      c_ct=0
-      c_arr = []
-      for c in range(nClusters):
-        clusters[c]['active'] = True
-        if c in clusters:
-          if (clusters[c]['posterior_mass'] < 0.05):
-            clusters[c]['active'] = False
-            continue
-          if (clusters[c]['appeared'] <= 3):
-            clusters[c]['active'] = False
-            continue
-          c_arr.append(c)
-        logX_baseline = min(clusters[c]['baseline'],logX_baseline)
-        c_ct+=1
+      ## find peaks and troughs
+      mode_pos, prop = sp.signal.find_peaks(post_smooth,distance=20)
+      mode_pos = mode_pos[(mode_pos>offset) & (mode_pos<(bins+offset))]
+      trough_pos, prop = sp.signal.find_peaks(-post_smooth,distance=20)
       
-      ### for each cluster, obtain self.para values and confidence intervals
-      fields[f] = {}
-      fields[f]['nModes'] = min(3,c_ct)
-      fields[f]['posterior_mass'] = np.zeros(3)*np.NaN
-      fields[f]['parameter'] = np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN
-      fields[f]['p_x'] = np.zeros((3,2,self.para['nbin']))*np.NaN
-      
-      mask_logX = -data['logX']>logX_baseline
-      cluster_hist = np.histogram(data['pos_samples'][mask_logX],bins=x_space)[0]>0
-      ## remove "noise" clusters
-      cluster_hist = sp.ndimage.morphology.binary_opening(sp.ndimage.morphology.binary_closing(np.concatenate((cluster_hist[-10:],cluster_hist,cluster_hist[:10]))))[10:-10]
-      
-      blobs = measure.label(cluster_hist)
-      if (blobs[0]>0) & (blobs[-1]>0):
-        periodic = True
-      masks = {}
-      for i in range(1,blobs.max()):
-        masks[i] = {}
-        if i == 1 & periodic:
-          val_last = x_space[np.where(blobs==i)[0][-1]]
-          val_first = x_space[np.where(blobs==blobs[-1])[0][0]]
-          mask_cluster = np.logical_or((val_first <= data['pos_samples']),(data['pos_samples'] < val_last))
-          #blobs[blobs==blobs[-1]] = blobs[0]      ## assign components to each other, wrapped by periodicity of phase space
-        else:
-          val_first = x_space[np.where(blobs==i)[0][0]]
-          val_last = x_space[np.where(blobs==i)[0][-1]]
-          mask_cluster = (val_first <= data['pos_samples']) & (data['pos_samples'] < val_last)
-        masks[i]['baseline'] = (mask_cluster & mask_logX)
-      
+      modes = {}
       c_ct = 0
-      sig_space = np.linspace(0,10,101)
-      for c in clusters.keys():
-        if clusters[c]['active']:
-          mask = np.ones(data['samples'].shape[0]).astype('bool')
-          
-          for i in range(1,len(masks)):
-            if np.count_nonzero(masks[i]['baseline'] & clusters[c]['mask'])==0:
-              mask[masks[i]['baseline']] = False
-          
-          ## find, which cluster mask belongs to
-          for cc in clusters.keys():
-            if not cc==c:
-              mask[clusters[cc]['mask']] = False
-              #posterior_mass -= clusters[cc]['posterior_mass']
-          
-          p_posterior_cluster = np.exp(data['logp_posterior'][mask])#/posterior_mass
-          p_posterior_cluster /= p_posterior_cluster.sum()
-          
-          ## calculate other parameters
-          for i in range(4):
-            if i==0:
-              samples = data['samples'][mask,i]
-            else:
-              samples = data['samples'][mask,i+3*f]
-            #samples = data['samples'][clusters[c]['mask'],i+3*f]
-              
-            if i==2:
-              for j in range(len(sig_space)-1):
-                thr_low = sig_space[j]
-                thr_up = sig_space[j+1]
-                mask_px = np.ones(samples.shape).astype('bool')
-                mask_px[samples<thr_low] = False
-                mask_px[samples>=thr_up] = False
-                fields[f]['p_x'][c_ct,0,j] = p_posterior_cluster[mask_px].sum()
-            if i==3:
-              for j in range(len(x_space)-1):
-                thr_low = x_space[j]
-                thr_up = x_space[j+1]
-                mask_px = np.ones(samples.shape).astype('bool')
-                mask_px[samples<thr_low] = False
-                mask_px[samples>=thr_up] = False
-                fields[f]['p_x'][c_ct,1,j] = p_posterior_cluster[mask_px].sum()
-              #fields[f]['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i+3*f],p_posterior_cluster,True,[0,100])
-              fields[f]['parameter'][c_ct,i,0] = get_average(samples,p_posterior_cluster,True,[0,100])
-              samples = (data['samples'][mask,i+3*f]+100/2-fields[f]['parameter'][c_ct,i,0])%100-100/2        ## shift whole axis such, that peak is in the center, to get proper errorbars
-            else:
-              #fields[f]['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i+3*f],p_posterior_cluster)
-              fields[f]['parameter'][c_ct,i,0] = get_average(samples,p_posterior_cluster)
-            
-            ### get confidence intervals from cdf
-            x_cdf_posterior, y_cdf_posterior = ecdf(samples,p_posterior_cluster)
-            for j in range(len(self.para['CI_arr'])):
-              fields[f]['parameter'][c_ct,i,1+j] = x_cdf_posterior[np.where(y_cdf_posterior>=self.para['CI_arr'][j])[0][0]]
-            #fields[f]['parameter'][c_ct,i,2] = x_cdf_posterior[np.where(y_cdf_posterior>0.975)[0][0]]
-            
-            if i==3:
-              fields[f]['parameter'][c_ct,i,0] = fields[f]['parameter'][c_ct,i,0] % 100
-              fields[f]['parameter'][c_ct,i,1:] = (fields[f]['parameter'][c_ct,i,0] + fields[f]['parameter'][c_ct,i,1:]) % 100
-              
-            fields[f]['posterior_mass'][c_ct] = clusters[c]['posterior_mass']
-          
-          if c_ct == 2:
-            break   ## maximum 2 clusters detected. should be kinda sorted, since they are detected starting from smallest lnX
+      for (i,p) in enumerate(mode_pos):
+        
+        ## find neighbouring troughs
+        dp = trough_pos-p
+        t_right = dp[dp>0].min()
+        t_left = dp[dp<0].max()
+        
+        
+        p_mass = post_cat[p+t_left:p+t_right].sum()    # obtain probability mass between peaks
+        
+        if p_mass > 0.2:
+          modes[c_ct] = {}
+          modes[c_ct]['p_mass'] = p_mass
+          modes[c_ct]['left'] = post_bin[np.mod(p+t_left-offset,bins)]
+          modes[c_ct]['right'] = post_bin[np.mod(p+t_right-offset,bins)]
           c_ct += 1
+        
+        if testing:
+          print('peak @x=%.1f'%post_bin[p-offset])
+          print('\ttroughs: [%.1f, %.1f]'%(post_bin[np.mod(p+t_left-offset,bins)],post_bin[np.mod(p+t_right-offset,bins)]))
+          print('\tposterior mass: %5.3g'%p_mass)
+        
+      nsamples = len(logp)
+      print(modes)
+      
+      plt.figure()
+      plt.subplot(311)
+      plt.scatter(data['pos_samples'],-data['logX'],c=np.exp(data['logp_posterior']),marker='.',label='samples')
+      plt.plot([0,100],[logX_base,logX_base],'k--')
+      plt.xlabel('field position $\\theta$')
+      plt.ylabel('-ln(X)')
+      plt.legend(loc='lower right')
+      #plt.show(block=False)
+      
+      for (p,m) in enumerate(modes.values()):
+        
+        print(m)
+        if m['p_mass'] > 0.1:
+          
+          mask_mode = np.ones(nsamples,'bool')
+          
+          ## calculate further statistics
+          for (p2,m2) in enumerate(modes.values()):
+            if not (p==p2):
+              print(p,p2)
+              print(m2)
+              # obtain samples first 
+              if m2['left']<m2['right']:
+                mask_mode[(data['pos_samples']>m2['left']) & (data['pos_samples']<m2['right']) & (-data['logX']>logX_base)] = False
+              else:
+                mask_mode[(data['pos_samples']>m2['left']) | (data['pos_samples']<m2['right']) & (-data['logX']>logX_base)] = False
+          
+          mode_logp = logp[mask_mode]#/posterior_mass
+          mode_logp /= mode_logp.sum()
+          
+          plt.subplot(312)
+          plt.scatter(data['pos_samples'][mask_mode],-data['logX'][mask_mode],c=np.exp(data['logp_posterior'][mask_mode]),marker='.',label='samples')
+          plt.plot([0,100],[logX_base,logX_base],'k--')
+          plt.xlabel('field position $\\theta$')
+          plt.ylabel('-ln(X)')
+          plt.legend(loc='lower right')
+          #plt.show(block=False)
+          
+          
+          ## obtain parameters
+          if m['left']<m['right']:
+            fields[f]['posterior_mass'][p] = mode_logp[(data['pos_samples'][mask_mode]>m['left']) & (data['pos_samples'][mask_mode]<m['right'])].sum()
+          else:
+            fields[f]['posterior_mass'][p] = mode_logp[(data['pos_samples'][mask_mode]>m['left']) | (data['pos_samples'][mask_mode]<m['right'])].sum()
+          
+          fields[f]['parameter'][p,0,0] = get_average(data['samples'][mask_mode,0],mode_logp)
+          fields[f]['parameter'][p,1,0] = get_average(data['samples'][mask_mode,1+3*f],mode_logp)
+          fields[f]['parameter'][p,2,0] = get_average(data['samples'][mask_mode,2+3*f],mode_logp)
+          fields[f]['parameter'][p,3,0] = get_average(data['samples'][mask_mode,3+3*f],mode_logp,True,[0,self.para['nbin']])
+          
+          print(fields[f]['parameter'][p,3,0])
+          for i in range(4):
+            ### get confidence intervals from cdf
+            if i==0:
+              samples = data['samples'][mask_mode,0]
+            elif i==3:
+              samples = (data['samples'][mask_mode,3+3*f]+self.para['nbin']/2-fields[f]['parameter'][p,3,0])%self.para['nbin']-self.para['nbin']/2        ## shift whole axis such, that peak is in the center, to get proper errorbars
+            else:
+              samples = data['samples'][mask_mode,i+3*f]
+            
+            x_cdf_posterior, y_cdf_posterior = ecdf(samples,mode_logp)
+            for j in range(len(self.para['CI_arr'])):
+              fields[f]['parameter'][p,i,1+j] = x_cdf_posterior[np.where(y_cdf_posterior>=self.para['CI_arr'][j])[0][0]]
+          
+          fields[f]['p_x'][p,:],_ = np.histogram(data['pos_samples'][mask_mode],bins=np.linspace(0,self.para['nbin'],self.para['nbin']+1),weights=mode_logp*(np.random.rand(len(mode_logp))<(mode_logp/mode_logp.max())))
+          fields[f]['p_x'][p,fields[f]['p_x'][p,:]<(0.001*fields[f]['p_x'][p,:].max())] = 0
+          
+          fields[f]['parameter'][p,3,0] = fields[f]['parameter'][p,3,0] % 100
+          fields[f]['parameter'][p,3,1:] = (fields[f]['parameter'][p,3,0] + fields[f]['parameter'][p,3,1:]) % 100
+          
+          fields[f]['nModes'] += 1
+          plt.subplot(313)
+          plt.plot(fields[f]['p_x'][p,:])
+          plt.show(block=False)
+          
+      
+      if testing:
+        plt.figure()
+        plt.subplot(211)
+        #bin_arr = np.linspace(-25,125,bins+2*offset)
+        bin_arr = np.linspace(0,bins+2*offset,bins+2*offset)
+        plt.bar(bin_arr,post_smooth)
+        plt.plot(bin_arr[mode_pos],post_smooth[mode_pos],'ro')
+        plt.subplot(212)
+        plt.bar(post_bin[:-1],post,width=0.5,facecolor='b',alpha=0.5)
+        plt.plot(post_bin[np.mod(mode_pos-offset,bins)],post[np.mod(mode_pos-offset,bins)],'ro')
+        plt.plot(post_bin[np.mod(trough_pos-offset,bins)],post[np.mod(trough_pos-offset,bins)],'bo')
+        plt.show(block=False)
+      
+          ### calculate other parameters
+          #for i in range(4):
+            #if i==0:
+              #samples = data['samples'][mask,i]
+            #else:
+              #samples = data['samples'][mask,i+3*f]
+            ##samples = data['samples'][clusters[c]['mask'],i+3*f]
+              
+            #if i==2:
+              #for j in range(len(sig_space)-1):
+                #thr_low = sig_space[j]
+                #thr_up = sig_space[j+1]
+                #mask_px = np.ones(samples.shape).astype('bool')
+                #mask_px[samples<thr_low] = False
+                #mask_px[samples>=thr_up] = False
+                #fields[f]['p_x'][c_ct,0,j] = post_mode[mask_px].sum()
+            #if i==3:
+              #for j in range(len(x_space)-1):
+                #thr_low = x_space[j]
+                #thr_up = x_space[j+1]
+                #mask_px = np.ones(samples.shape).astype('bool')
+                #mask_px[samples<thr_low] = False
+                #mask_px[samples>=thr_up] = False
+                #fields[f]['p_x'][c_ct,1,j] = post_mode[mask_px].sum()
+              ##fields[f]['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i+3*f],post_mode,True,[0,100])
+              #fields[f]['parameter'][c_ct,i,0] = get_average(samples,post_mode,True,[0,100])
+              #samples = (data['samples'][mask,i+3*f]+100/2-fields[f]['parameter'][c_ct,i,0])%100-100/2        ## shift whole axis such, that peak is in the center, to get proper errorbars
+            #else:
+              ##fields[f]['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i+3*f],post_mode)
+              #fields[f]['parameter'][c_ct,i,0] = get_average(samples,post_mode)
+            
+            #### get confidence intervals from cdf
+            #x_cdf_posterior, y_cdf_posterior = ecdf(samples,post_mode)
+            #for j in range(len(self.para['CI_arr'])):
+              #fields[f]['parameter'][c_ct,i,1+j] = x_cdf_posterior[np.where(y_cdf_posterior>=self.para['CI_arr'][j])[0][0]]
+            ##fields[f]['parameter'][c_ct,i,2] = x_cdf_posterior[np.where(y_cdf_posterior>0.975)[0][0]]
+            
+            #if i==3:
+              #fields[f]['parameter'][c_ct,i,0] = fields[f]['parameter'][c_ct,i,0] % 100
+              #fields[f]['parameter'][c_ct,i,1:] = (fields[f]['parameter'][c_ct,i,0] + fields[f]['parameter'][c_ct,i,1:]) % 100
+              
+            #fields[f]['posterior_mass'][c_ct] = clusters[c]['posterior_mass']
+          
+          #if c_ct == 2:
+            #break   ## maximum 2 clusters detected. should be kinda sorted, since they are detected starting from smallest lnX
+          #c_ct += 1
+          
+      
+      print(fields[f])
+      
+      
+      
+      
+      
+      
+      
+      #### check from baseline up
+      #### gather occupied phase space & occupied probability mass
+      #x_space = np.linspace(0,100,101)
+      
+      #nsteps = 31
+      #clusters = {}
+      #blob_center = np.zeros((nsteps,1))*np.NaN
+      #blob_phase_space = np.zeros((nsteps,1))*np.NaN
+      #blob_probability_mass = np.zeros((nsteps,1))*np.NaN
+      #blob_center_CI = np.zeros((nsteps,2,1))*np.NaN
+      
+      #periodic = False
+      #nClusters = 0
+      #logX_arr = np.linspace(logX_top,logX_base,nsteps)
+      #for (logX,i) in zip(logX_arr,range(nsteps)):
+        #mask_logX = -data['logX']>logX
+        
+        #cluster_hist = np.histogram(data['pos_samples'][mask_logX],bins=x_space)[0]>0
+        
+        ### remove "noise" clusters
+        #cluster_hist = sp.ndimage.morphology.binary_opening(sp.ndimage.morphology.binary_closing(np.concatenate((cluster_hist[-10:],cluster_hist,cluster_hist[:10]))))[10:-10]
+        #if not any(cluster_hist):
+          #continue
+        
+        #blobs = measure.label(cluster_hist)
+        #nblobs = blobs.max()
+        
+        #if (blobs[0]>0) & (blobs[-1]>0):
+          #periodic = True
+          #nblobs-=1
+        
+        #for c in range(1,nblobs+1):
+          
+          #if len(blob_phase_space) < nblobs:
+            #blob_center.append([])
+            #blob_phase_space.append([])
+            #blob_probability_mass.append([])
+            #blob_center_CI.append([])
+            
+          #if c == 1 & periodic:
+            #val_last = x_space[np.where(blobs==c)[0][-1]]
+            #val_first = x_space[np.where(blobs==blobs[-1])[0][0]]
+            #mask_cluster = np.logical_or((val_first <= data['pos_samples']),(data['pos_samples'] < val_last))
+            #blobs[blobs==blobs[-1]] = blobs[0]      ## assign components to each other, wrapped by periodicity of phase space
+            
+          #else:
+            #val_first = x_space[np.where(blobs==c)[0][0]]
+            #val_last = x_space[np.where(blobs==c)[0][-1]]
+            #mask_cluster = (val_first <= data['pos_samples']) & (data['pos_samples'] < val_last)
+          
+          #mask = (mask_cluster & mask_logX)
+          
+          #if np.count_nonzero(mask)>50:
+            #p_posterior_cluster = np.exp(data['logp_posterior'][mask])
+            #posterior_mass = (p_posterior_cluster).sum()
+            #p_posterior_cluster /= posterior_mass
+            #masked_samples = data['pos_samples'][mask]
+            
+            #center_tmp = get_average(masked_samples,p_posterior_cluster,True,[0,100])  ## project to positive axis again
+            
+            #### test for overlap with other clusters
+            #assigned = overlap = False
+            #for cc in clusters.keys():
+              
+              #mask_joint = mask & clusters[cc]['mask']
+                
+              #if any(mask_joint):     ### does the cluster have an overlap with another one?
+                
+                #if clusters[cc]['active']:    ### clusters can only be assigned to active clusters
+                
+                  #if assigned:
+                    
+                    #if (clusters[c_id]['posterior_mass'] > clusters[cc]['posterior_mass']):
+                      #clusters[cc]['active'] = False
+                      #if clusters[cc]['appeared'] > 3:
+                        #clusters[c_id]['active'] = False
+                        #overlap = True
+                    #else:
+                      #clusters[c_id]['active'] = False
+                      #if clusters[c_id]['appeared'] > 3:
+                        #clusters[cc]['active'] = False
+                        #overlap = True
+                    
+                  #elif ((np.exp(data['logp_posterior'][mask_joint]).sum() / clusters[cc]['posterior_mass']) > 0):# & abs((center_tmp -:
+                    #### if it's a significant overlap, not changing the clusterstats significantly, assign to existing one
+                    #c_id = cc
+                    #appeared = clusters[c_id]['appeared']+1
+                    #assigned = True
+                  #else:
+                    #### if overlap is non-significant, disable "small" cluster
+                    #clusters[cc]['active'] = False
+                #else:
+                  #overlap = True
+                
+            #if overlap:
+              #continue
+            #elif not assigned:
+              #### if no overlap was found, start new cluster
+              #c_id = nClusters
+              #nClusters+=1
+              #appeared = 1
+            
+            #n_samples = len(p_posterior_cluster)
+            
+            #clusters[c_id] = {'periodic':periodic & (c==1),'mask':mask,'center':center_tmp,'phase_space':np.mean(blobs==c),'posterior_mass':posterior_mass,'baseline':logX,'n_samples':n_samples,'appeared':appeared,'active':True}
+            
+            #if c_id >= blob_center.shape[1]:
+              #cat_cluster = np.zeros((nsteps,1))*np.nan
+              #blob_center = np.concatenate((blob_center,cat_cluster),1)
+              #blob_phase_space = np.concatenate((blob_phase_space,cat_cluster),1)
+              #blob_probability_mass = np.concatenate((blob_probability_mass,cat_cluster),1)
+              
+              #cat_cluster = np.zeros((nsteps,2,1))*np.nan
+              #blob_center_CI = np.concatenate((blob_center_CI,cat_cluster),2)
+            
+            #blob_center[i,c_id] = center_tmp
+            #blob_phase_space[i,c_id] = np.mean(blobs==c)
+            #blob_probability_mass[i,c_id] = posterior_mass
+            
+            #### get confidence intervals from cdf
+            #x_cdf_posterior, y_cdf_posterior = ecdf(masked_samples,p_posterior_cluster)
+            #blob_center_CI[i,0,c_id] = x_cdf_posterior[np.where(y_cdf_posterior>=0.025)[0][0]]
+            #blob_center_CI[i,1,c_id] = x_cdf_posterior[np.where(y_cdf_posterior>0.975)[0][0]]
+          
+      ##print(clusters)
+      ##print(blob_center)
+      ##print(blob_center_CI)
+      ##print(blob_phase_space)
+      ##print(blob_probability_mass)
+      
+      #### remove overlapping and non-significant clusters
+      #logX_baseline = np.inf
+      #c_ct=0
+      #c_arr = []
+      #for c in range(nClusters):
+        #clusters[c]['active'] = True
+        #if c in clusters:
+          #if (clusters[c]['posterior_mass'] < 0.05):
+            #clusters[c]['active'] = False
+            #continue
+          #if (clusters[c]['appeared'] <= 3):
+            #clusters[c]['active'] = False
+            #continue
+          #c_arr.append(c)
+        #logX_baseline = min(clusters[c]['baseline'],logX_baseline)
+        #c_ct+=1
+      
+      #### for each cluster, obtain self.para values and confidence intervals
+      #fields[f] = {}
+      #fields[f]['nModes'] = min(3,c_ct)
+      #fields[f]['posterior_mass'] = np.zeros(3)*np.NaN
+      #fields[f]['parameter'] = np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN
+      #fields[f]['p_x'] = np.zeros((3,2,self.para['nbin']))*np.NaN
+      
+      #mask_logX = -data['logX']>logX_baseline
+      #cluster_hist = np.histogram(data['pos_samples'][mask_logX],bins=x_space)[0]>0
+      ### remove "noise" clusters
+      #cluster_hist = sp.ndimage.morphology.binary_opening(sp.ndimage.morphology.binary_closing(np.concatenate((cluster_hist[-10:],cluster_hist,cluster_hist[:10]))))[10:-10]
+      
+      #blobs = measure.label(cluster_hist)
+      #if (blobs[0]>0) & (blobs[-1]>0):
+        #periodic = True
+      #masks = {}
+      #for i in range(1,blobs.max()):
+        #masks[i] = {}
+        #if i == 1 & periodic:
+          #val_last = x_space[np.where(blobs==i)[0][-1]]
+          #val_first = x_space[np.where(blobs==blobs[-1])[0][0]]
+          #mask_cluster = np.logical_or((val_first <= data['pos_samples']),(data['pos_samples'] < val_last))
+          ##blobs[blobs==blobs[-1]] = blobs[0]      ## assign components to each other, wrapped by periodicity of phase space
+        #else:
+          #val_first = x_space[np.where(blobs==i)[0][0]]
+          #val_last = x_space[np.where(blobs==i)[0][-1]]
+          #mask_cluster = (val_first <= data['pos_samples']) & (data['pos_samples'] < val_last)
+        #masks[i]['baseline'] = (mask_cluster & mask_logX)
+      
+      #c_ct = 0
+      #sig_space = np.linspace(0,10,101)
+      #for c in clusters.keys():
+        #if clusters[c]['active']:
+          #mask = np.ones(data['samples'].shape[0]).astype('bool')
+          
+          #for i in range(1,len(masks)):
+            #if np.count_nonzero(masks[i]['baseline'] & clusters[c]['mask'])==0:
+              #mask[masks[i]['baseline']] = False
+          
+          ### find, which cluster mask belongs to
+          #for cc in clusters.keys():
+            #if not cc==c:
+              #mask[clusters[cc]['mask']] = False
+              ##posterior_mass -= clusters[cc]['posterior_mass']
+          
+          #p_posterior_cluster = np.exp(data['logp_posterior'][mask])#/posterior_mass
+          #p_posterior_cluster /= p_posterior_cluster.sum()
+          
+          ### calculate other parameters
+          #for i in range(4):
+            #if i==0:
+              #samples = data['samples'][mask,i]
+            #else:
+              #samples = data['samples'][mask,i+3*f]
+            ##samples = data['samples'][clusters[c]['mask'],i+3*f]
+              
+            #if i==2:
+              #for j in range(len(sig_space)-1):
+                #thr_low = sig_space[j]
+                #thr_up = sig_space[j+1]
+                #mask_px = np.ones(samples.shape).astype('bool')
+                #mask_px[samples<thr_low] = False
+                #mask_px[samples>=thr_up] = False
+                #fields[f]['p_x'][c_ct,0,j] = p_posterior_cluster[mask_px].sum()
+            #if i==3:
+              #for j in range(len(x_space)-1):
+                #thr_low = x_space[j]
+                #thr_up = x_space[j+1]
+                #mask_px = np.ones(samples.shape).astype('bool')
+                #mask_px[samples<thr_low] = False
+                #mask_px[samples>=thr_up] = False
+                #fields[f]['p_x'][c_ct,1,j] = p_posterior_cluster[mask_px].sum()
+              ##fields[f]['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i+3*f],p_posterior_cluster,True,[0,100])
+              #fields[f]['parameter'][c_ct,i,0] = get_average(samples,p_posterior_cluster,True,[0,100])
+              #samples = (data['samples'][mask,i+3*f]+100/2-fields[f]['parameter'][c_ct,i,0])%100-100/2        ## shift whole axis such, that peak is in the center, to get proper errorbars
+            #else:
+              ##fields[f]['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i+3*f],p_posterior_cluster)
+              #fields[f]['parameter'][c_ct,i,0] = get_average(samples,p_posterior_cluster)
+            
+            #### get confidence intervals from cdf
+            #x_cdf_posterior, y_cdf_posterior = ecdf(samples,p_posterior_cluster)
+            #for j in range(len(self.para['CI_arr'])):
+              #fields[f]['parameter'][c_ct,i,1+j] = x_cdf_posterior[np.where(y_cdf_posterior>=self.para['CI_arr'][j])[0][0]]
+            ##fields[f]['parameter'][c_ct,i,2] = x_cdf_posterior[np.where(y_cdf_posterior>0.975)[0][0]]
+            
+            #if i==3:
+              #fields[f]['parameter'][c_ct,i,0] = fields[f]['parameter'][c_ct,i,0] % 100
+              #fields[f]['parameter'][c_ct,i,1:] = (fields[f]['parameter'][c_ct,i,0] + fields[f]['parameter'][c_ct,i,1:]) % 100
+              
+            #fields[f]['posterior_mass'][c_ct] = clusters[c]['posterior_mass']
+          
+          #if c_ct == 2:
+            #break   ## maximum 2 clusters detected. should be kinda sorted, since they are detected starting from smallest lnX
+          #c_ct += 1
+        
+        
+        
+        
+        
         
         #cc+=1
           #print('val: %5.3g, \t (%5.3g,%5.3g)'%(val[c,i],CI[c,i,0],CI[c,i,1]))
       #print('time took (post-process posterior): %5.3g'%(time.time()-t_start))
       #print(fields[f]['parameter'])
-      if self.para['plt_bool'] or plt_bool:
+      if False:#self.para['plt_bool'] or plt_bool:
         #plt.figure()
         #### plot nsamples
         #### plot likelihood
@@ -889,7 +1062,7 @@ class detect_PC:
       fields_return['nModes'] = 0
       fields_return['posterior_mass'] = np.zeros(3)*np.NaN
       fields_return['parameter'] = np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN
-      fields_return['p_x'] = np.zeros((3,2,self.para['nbin']))*np.NaN
+      fields_return['p_x'] = np.zeros((3,self.para['nbin']))*np.NaN
       
       for f in range(fields[0]['nModes']):
         p_cluster = fields[0]['posterior_mass'][f]
@@ -928,6 +1101,10 @@ class detect_PC:
       
     else:
       fields_return = fields[0]
+      
+      
+      
+      
     #print(fields_return)
     return fields_return
 
@@ -1219,7 +1396,7 @@ class detect_PC:
                         'r_value':np.zeros(nCells)*np.NaN}
                   
     results['fields'] = {'parameter':np.zeros((nCells,3,4,1+len(self.para['CI_arr'])))*np.NaN,          ### (mean,std,CI_low,CI_top)
-                        'p_x':np.zeros((nCells,3,2,self.para['nbin'])),#sp.sparse.coo_matrix((nCells*3,self.para['nbin']))#
+                        'p_x':sp.sparse.COO((nCells,3,self.para['nbin'])),#np.zeros((nCells,3,2,self.para['nbin'])),##
                         'posterior_mass':np.zeros((nCells,3))*np.NaN,
                         'nModes':np.zeros(nCells).astype('int'),
                         'major':np.zeros(nCells)*np.NaN}
