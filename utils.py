@@ -10,9 +10,11 @@
 import os, pickle, cmath, time, cv2, h5py
 import scipy as sp
 import scipy.stats as sstats
-from scipy import signal
+from scipy import signal, cluster
 import numpy as np
 import matplotlib.pyplot as plt
+from fastcluster import linkage
+from scipy.spatial.distance import squareform
 
 
 def get_nPaths(path,pathStr):
@@ -82,24 +84,24 @@ def _hsm(data):
       return _hsm(data[j:j + N])
     
 
-def periodic_distr_distance(p1,p2,nbin,mu1=None,mu2=None,mode='wasserstein'):
+def periodic_distr_distance(p1,p2,nbin,L_track,mu1=None,mu2=None,mode='wasserstein'):
   
   
   if mode=='wasserstein':
     ### test, whether any distribution is cut off by "periodic bounds"
     d_raw = mu2-mu1
-    shift_sign = 1 if (d_raw>=0) & (abs(d_raw)<(nbin/2)) else -1
-    if abs(d_raw) > nbin/2:
+    shift_sign = 1 if (d_raw>=0) & (abs(d_raw)<(L_track/2)) else -1
+    if abs(d_raw) > L_track/2:
       shift = int((mu1+mu2)/2)
-      d_out = periodic_wasserstein_distance(np.roll(p1,shift),np.roll(p2,shift),(mu1+shift)%nbin,(mu2+shift)%nbin,nbin)
+      d_out = periodic_wasserstein_distance(np.roll(p1,shift),np.roll(p2,shift),(mu1+shift)%L_track,(mu2+shift)%L_track,L_track)
     else:
       
       idx_p1 = p1>p1.max()*10**(-2)
       idx_p2 = p2>p2.max()*10**(-2)
       x = np.arange(nbin)
-      if (idx_p1[0] & idx_p1[-1]) | (idx_p2[0] & idx_p2[-1]) | (abs(d_raw)>nbin/3):
+      if (idx_p1[0] & idx_p1[-1]) | (idx_p2[0] & idx_p2[-1]) | (abs(d_raw)>L_track/3):
         d = np.zeros(nbin)
-        for shift in range(nbin):
+        for shift in np.linspace(0,L_track,nbin):
           #d[shift] = sstats.wasserstein_distance(x,x,np.roll(p1,shift),np.roll(p2,shift))
           d[shift] = wasserstein_distance(x,x,np.roll(p1,shift),np.roll(p2,shift))
         d_out = d.min()
@@ -124,9 +126,9 @@ def periodic_distr_distance(p1,p2,nbin,mu1=None,mu2=None,mode='wasserstein'):
     shift_distr = np.zeros(N_bs)
     #for i in range(N_bs):
       ## generate two samples from distribution from cdfs
-    shift_distr = (x2-x1 + nbin/2)%nbin -nbin/2
-    d_out = get_average(shift_distr,1,periodic=True,bounds=[-50,50])
-    p_out = np.histogram(shift_distr,np.linspace(-50,50,101),density=True)[0]
+    shift_distr = (x2-x1 + L_track/2)%L_track -L_track/2
+    d_out = get_average(shift_distr,1,periodic=True,bounds=[-L_track/2,L_track/2])
+    p_out = np.histogram(shift_distr,np.linspace(-L_track/2,L_track/2,nbin+1),density=True)[0]
     p_out[p_out<10**(-10)] = 0
     #CI = np.percentile(shift_distr,[5,95])
     #print('CI: %5.3f,%5.3f'%(CI[0],CI[1]))
@@ -624,3 +626,77 @@ def gmean(X,axis=1,nanflag=False):
     return np.exp(np.nansum(np.log(X),axis)/(~np.isnan(X)).sum(axis))
   else:
     return np.exp(np.sum(np.log(X),axis)/X.shape[axis])
+
+def corr0(X,Y=None):
+  
+  Y = X if Y is None else Y
+  
+  c_xy = np.zeros((len(X),len(X)))
+  for i,x in enumerate(X):
+    for j,y in enumerate(Y):
+      c_xy[i,j] = (x*y).sum()/np.sqrt((x**2).sum()*(y**2).sum())
+  
+  return c_xy
+  
+def seriation(Z,N,cur_index):
+    '''
+        input:
+            - Z is a hierarchical tree (dendrogram)
+            - N is the number of points given to the clustering process
+            - cur_index is the position in the tree for the recursive traversal
+        output:
+            - order implied by the hierarchical tree Z
+            
+        seriation computes the order implied by a hierarchical tree (dendrogram)
+    '''
+    if cur_index < N:
+        return [cur_index]
+    else:
+        left = int(Z[cur_index-N,0])
+        right = int(Z[cur_index-N,1])
+        return (seriation(Z,N,left) + seriation(Z,N,right))
+    
+def compute_serial_matrix(dist_mat,method="ward"):
+    '''
+        input:
+            - dist_mat is a distance matrix
+            - method = ["ward","single","average","complete"]
+        output:
+            - seriated_dist is the input dist_mat,
+              but with re-ordered rows and columns
+              according to the seriation, i.e. the
+              order implied by the hierarchical tree
+            - res_order is the order implied by
+              the hierarhical tree
+            - res_linkage is the hierarhical tree (dendrogram)
+        
+        compute_serial_matrix transforms a distance matrix into 
+        a sorted distance matrix according to the order implied 
+        by the hierarchical tree (dendrogram)
+    '''
+    N = len(dist_mat)
+    flat_dist_mat = squareform(dist_mat,checks=False)
+    
+    #res_linkage = linkage(flat_dist_mat, method=method,preserve_input=False)
+    res_linkage = sp.cluster.hierarchy.linkage(flat_dist_mat,method=method,optimal_ordering=True)
+    res_order = seriation(res_linkage, N, N + N-2)
+    seriated_dist = np.zeros((N,N))
+    a,b = np.triu_indices(N,k=1)
+    seriated_dist[a,b] = dist_mat[ [res_order[i] for i in a], [res_order[j] for j in b]]
+    seriated_dist[b,a] = seriated_dist[a,b]
+    
+    return seriated_dist, res_order, res_linkage
+
+def gauss_smooth(X,smooth=None):
+  if (smooth is None) or not np.any(np.array(smooth)>0):
+    return X
+  else:
+    V = X.copy()
+    V[np.isnan(X)] = 0
+    VV = sp.ndimage.gaussian_filter(V,smooth,mode='wrap')
+    
+    W = 0*X.copy()+1
+    W[np.isnan(X)] = 0
+    WW = sp.ndimage.gaussian_filter(W,smooth,mode='wrap')
+  
+  return VV/WW

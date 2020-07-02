@@ -25,7 +25,7 @@ import ultranest.stepsampler
 
 from spike_shuffling import shuffling
 
-from utils import pathcat, _hsm, get_nPaths, extend_dict
+from utils import pathcat, _hsm, get_nPaths, extend_dict, compute_serial_matrix, corr0, gauss_smooth
 from utils_data import set_para
 
 warnings.filterwarnings("ignore")
@@ -34,22 +34,25 @@ warnings.filterwarnings("ignore")
 
 class detect_PC:
   
-  def __init__(self,basePath,mouse,s,nP,plt_bool=False,sv_bool=False):
+  def __init__(self,basePath,mouse,s,nP,nbin=100,plt_bool=False,sv_bool=False):
     
     print('----------- mouse %s --- session %d -------------'%(mouse,s))
     
     ### set global parameters and data for all processes to access
-    self.para = set_para(basePath,mouse,s,nP,plt_bool,sv_bool)
+    self.para = set_para(basePath,mouse,s,nP=nP,nbin=nbin,plt_bool=plt_bool,sv_bool=sv_bool)
     self.get_behavior()       ## load and process behavior
     
     
-  def run_detection(self,S=None,rerun=False,f_max=2,return_results=False,specific_n=None,artificial=False,dataSet='redetect',mode_info='MI'):
+  def run_detection(self,S=None,rerun=False,f_max=2,return_results=False,specific_n=None,artificial=False,dataSet='redetect',mode_info='MI',mode_activity='spikes'):
     
     global t_start
     t_start = time.time()
     self.dataSet = dataSet
     self.f_max = f_max
     self.para['modes']['info'] = mode_info
+    self.para['modes']['activity'] = mode_activity
+    self.tmp = {}   ## dict to store some temporary variables in
+    
     if S is None:
       S, other = load_activity(self.para['pathSession'],dataSet=dataSet)
       if dataSet == 'redetect':
@@ -86,7 +89,9 @@ class detect_PC:
       
       #self.para['modes']['info'] = False
       
-      idx_process = np.where(np.isnan(PC_processed['status']['Bayes_factor'][:,0]))[0]
+      #idx_process = np.where(np.isnan(PC_processed['status']['Bayes_factor'][:,0]))[0]
+      idx_process = np.where(PC_processed['status']['MI_value']<=0.1)[0]
+      print(idx_process)
     else:
       idx_process = np.arange(nCells)
     nCells_process = len(idx_process)
@@ -99,7 +104,7 @@ class detect_PC:
       if self.para['nP'] > 0:
         
         pool = get_context("spawn").Pool(self.para['nP'])
-        batchSz = 50
+        batchSz = 500
         nBatch = nCells_process//batchSz
         
         for i in range(nBatch+1):
@@ -108,7 +113,7 @@ class detect_PC:
           #res = pool.starmap(self.PC_detect,zip(S[idx_batch,:],SNR[idx_batch],r_values[idx_batch]))
           #result_tmp.extend(res)
           result_tmp.extend(pool.starmap(self.PC_detect,zip(S[idx_batch,:],SNR[idx_batch],r_values[idx_batch])))
-          print('\t\t\t ------ mouse %s --- session %d ------ %d / %d neurons processed\t ------ \t time passed: %7.2fs'%(self.para['mouse'],self.para['session'],min(nCells_process,(i+1)*batchSz),nCells_process,time.time()-t_start))
+          print('\n\t\t\t ------ mouse %s --- session %d ------ %d / %d neurons processed\t ------ \t time passed: %7.2fs\n'%(self.para['mouse'],self.para['session'],min(nCells_process,(i+1)*batchSz),nCells_process,time.time()-t_start))
       else:
         for n0 in range(nCells_process):
           n = idx_process[n0]
@@ -116,18 +121,20 @@ class detect_PC:
           print('\t\t\t ------ mouse %s --- session %d ------ %d / %d neurons processed\t -----\t time passed: %7.2fs'%(self.para['mouse'],self.para['session'],n0+1,nCells_process,time.time()-t_start))
       
       results = self.build_PC_results(nCells)   ## pre-allocate array
-      
+      #nCells = batchSz*(nBatch+1)
       for n in range(nCells):
         for key_type in result_tmp[0].keys():
           for key in result_tmp[0][key_type].keys():
             if key[0] == '_':
               continue
             if rerun:
-              if ((~np.isnan(PC_processed['status']['Bayes_factor'][n,0])) | (key in ['MI_value','MI_p_value','MI_z_score'])):# | (n>=idx_process[10])):
-                results[key_type][key][n,...] = PC_processed[key_type][key][n,...]
-              else:
+              if n in idx_process:
                 n0 = np.where(idx_process==n)[0][0]
                 results[key_type][key][n,...] = result_tmp[n0][key_type][key]
+              else:
+                #((~np.isnan(PC_processed['status']['Bayes_factor'][n,0])) | (key in ['MI_value','MI_p_value','MI_z_score','Isec_value','Isec_p_value','Isec_z_score'])):# | (n>=idx_process[10])):
+                results[key_type][key][n,...] = PC_processed[key_type][key][n,...]
+              #else:
             else:
               n0 = np.where(idx_process==n)[0][0]
               results[key_type][key][n,...] = result_tmp[n0][key_type][key]
@@ -136,7 +143,7 @@ class detect_PC:
         #for key_type in r.keys():
           #for key in r[key_type].keys():
             #results[key_type][key][n,...] = r[key_type][key]
-        
+      
       print('time passed (overall): %7.2f'%(time.time()-t_start))
       
       if return_results:
@@ -169,34 +176,46 @@ class detect_PC:
     self.dataBH = {}
     position = load_behavior['position'][:T].astype('int')
     position -= position.min()
-    self.dataBH['binpos'] = (position*(self.para['nbin']-1)/position.max()).astype('int')
     
-    velocity = np.diff(np.append(position[0],position))*self.para['f']*120/position.max()
+    self.dataBH['position'] = position/position.max()*self.para['L_track']
+    self.dataBH['binpos'] = (position*self.para['nbin']/(position.max()+1)).astype('int')
+    
+    nbin_coarse = (self.para['nbin']/self.para['coarse_factor'])
+    self.dataBH['binpos_coarse'] = (position*nbin_coarse/(position.max()+1)).astype('int')
+    
+    velocity = np.diff(np.append(position[0],position))*self.para['f']*self.para['L_track']/position.max()
     velocity[velocity<0] = 0
-    velocity = sp.ndimage.gaussian_filter(velocity,7)
-    self.dataBH['active'] = (velocity) > 5
+    velocity = sp.ndimage.gaussian_filter(velocity,2)
     
-    #self.dataBH['binpos'] = load_behavior['binpos'][:T].astype('int') - 1 ## correct for different indexing
+    self.dataBH['active'] = sp.ndimage.binary_opening(velocity>2,structure=np.ones(int(self.para['f']/2)))
+    self.dataBH['active'] = sp.ndimage.binary_closing(velocity>2,structure=np.ones(int(self.para['f']/2)))
+    self.dataBH['time'] = load_behavior['time'][:T]
+    
+    idx_teleport = np.where(np.diff(self.dataBH['binpos'])<-10)[0]
+    
+    self.dataBH['active'][:max(0,idx_teleport[0]-1)] = False
+    self.dataBH['active'][idx_teleport[-1]:] = False
     
     self.dataBH['binpos_active'] = self.dataBH['binpos'][self.dataBH['active']]
-    
-    nbin_coarse = (self.para['nbin']/self.para['coarse_factor']-1)
-    self.dataBH['binpos_coarse'] = (position*nbin_coarse/position.max()).astype('int')
     self.dataBH['binpos_coarse_active'] = self.dataBH['binpos_coarse'][self.dataBH['active']]
     
-    self.dataBH['time'] = load_behavior['time'][:T]
     self.dataBH['time_active'] = self.dataBH['time'][self.dataBH['active']]
     self.dataBH['T'] = np.count_nonzero(self.dataBH['active'])
+    
+    
+    #self.dataBH['binpos'] = load_behavior['binpos'][:T].astype('int') - 1 ## correct for different indexing
     #plt.figure()
-    #plt.plot(self.dataBH['time_active'],self.dataBH['binpos_coarse'],'r')
+    #plt.plot(self.dataBH['time_active'],self.dataBH['binpos_active'],'r')
     #plt.plot(self.dataBH['time_active'],self.dataBH['binpos_active'],'b')
-    #plt.show()
+    #plt.show(block=False)
     
     ###### define trials
     self.dataBH['trials'] = {}
     self.dataBH['trials']['frame'] = np.hstack([0, np.where(np.diff(self.dataBH['binpos_active'])<-10)[0]+1,len(self.dataBH['time_active'])])
-    self.dataBH['trials']['t'] = np.hstack([self.dataBH['time_active'][self.dataBH['trials']['frame'][:-1]],self.dataBH['time_active'][-1]])
-    dt = np.diff(self.dataBH['trials']['t'])
+    #self.dataBH['trials']['frame'] = np.hstack([0,np.where(np.diff(self.dataBH['binpos_active'])<-10)[0]+1])
+    
+    self.dataBH['trials']['t'] = np.hstack([self.dataBH['time_active'][self.dataBH['trials']['frame'][:-1]],self.dataBH['time_active'][self.dataBH['trials']['frame'][-1]-1]])
+    #dt = np.diff(self.dataBH['trials']['t'])
     ct = len(self.dataBH['trials']['frame'])-1
     #if dt[0] < 2:
       #self.dataBH['trials']['t'] = np.delete(self.dataBH['trials']['t'],0)
@@ -230,207 +249,278 @@ class detect_PC:
     if not (SNR is None):
       result['status']['SNR'] = SNR
       result['status']['r_value'] = r_value
+    
     T = S.shape[0]
-    #try:
+    try:
+      
+      active, result['firingstats']['rate'] = self.get_active_Ca(S)
+      
+      if result['firingstats']['rate']==0:
+        print('no activity for this neuron')
+        return result
+      
+      ### get trial-specific activity and overall firingmap stats
+      trials_S, result['firingstats']['trial_map'] = self.get_trials_activity(active)
+      
+      ## obtain mutual information first - check if (computational cost of) finding fields is worth it at all
+      t_start = time.time()
+      if self.para['modes']['info']:
+        MI_tmp = self.test_MI(active,trials_S)
+        for key in MI_tmp.keys():
+          result['status'][key] = MI_tmp[key]
+      #print('time taken (information): %.4f'%(time.time()-t_start))
+      
+      result = self.get_correlated_trials(result,smooth=3)
+      
+      firingstats_tmp = self.get_firingstats_from_trials(result['firingstats']['trial_map'])
+      for key in firingstats_tmp.keys():
+        result['firingstats'][key] = firingstats_tmp[key]
+      
+      if np.any(result['firingstats']['trial_field']) and (result['status']['SNR']>2):  # and (result['status']['MI_value']>0.1)     ## only do further processing, if enough trials are significantly correlated
+        for t in range(3):
+          trials = np.where(result['firingstats']['trial_field'][t,:])[0]
+          if len(trials)<1:
+            continue
+          
+          firingstats_tmp = self.get_firingstats_from_trials(result['firingstats']['trial_map'],trials,complete=False)
+          
+          #print(gauss_smooth(firingstats_tmp['map'],2))
+          
+          if (gauss_smooth(firingstats_tmp['map'],4)>(self.para['rate_thr']/2)).sum()>self.para['width_thr']:
+            
+            ### do further tests only if there is "significant" mutual information
+            
+            for f in range(self.f_max+1):
+              field = self.run_nestedSampling(result['firingstats'],firingstats_tmp['map'],f)
+            
+            ## pick most prominent peak and store into result, if bayes factor > 1/2
+            if field['Bayes_factor'][0] > 0:
+              
+              dTheta = np.abs(np.mod(field['parameter'][3,0]-result['fields']['parameter'][:t,3,0]+self.para['L_track']/2,self.para['L_track'])-self.para['L_track']/2)
+              if not np.any(dTheta < 10):   ## should be in cm
+                ## store results into array index "t"
+                for key in field.keys():#['parameter','p_x','posterior_mass']:
+                  result['fields'][key][t,...] = field[key]
+                
+                result['fields']['nModes'] += 1
+                
+                fmap = gauss_smooth(result['firingstats']['trial_map'],(0,2*self.para['nbin']/self.para['L_track']))
+                sd_fmap = 3
+                fmap_noise = result['firingstats']['map'] - np.nanmedian(result['firingstats']['map'])#result['fields']['parameter'][t,0,0]
+                fmap_noise = -1*fmap_noise*(fmap_noise<0)
+                N_noise = (fmap_noise>0).sum()
+                noise = np.sqrt((fmap_noise**2).sum())/(N_noise*(1-2/np.pi))
+                fmap_thr = np.maximum(5,result['fields']['parameter'][t,0,0]+sd_fmap*noise)
+                
+                field_bin = int(result['fields']['parameter'][t,3,0]*(self.para['nbin']/self.para['L_track']))
+                field_bin_l = int((result['fields']['parameter'][t,3,0]-result['fields']['parameter'][t,2,0])*(self.para['nbin']/self.para['L_track'])) % self.para['nbin']
+                field_bin_r = int((result['fields']['parameter'][t,3,0]+result['fields']['parameter'][t,2,0])*(self.para['nbin']/self.para['L_track'])+1) % self.para['nbin']
+                
+                if field_bin_l < field_bin_r:
+                  field_rate = np.nanmax(fmap[:,field_bin_l:field_bin_r],1)
+                else:
+                  field_rate = np.maximum(np.nanmax(fmap[:,field_bin_l:],1),np.nanmax(fmap[:,:field_bin_r],1))#(np.nansum(fmap[:,field_bin_l:],1) + np.nansum(fmap[:,:field_bin_r],1))/(2*result['fields']['parameter'][t,2,0]*self.para['nbin']/self.para['L_track'])
+                
+                result['firingstats']['trial_field'][t,:] = field_rate>fmap_thr
+                
+                result['fields']['reliability'][t] = (field_rate>fmap_thr).sum()/self.dataBH['trials']['ct']
+                #print('reliability: %.2f'%((fmap[:,field_bin]>self.para['rate_thr']).sum()/self.dataBH['trials']['ct']))
+                #print(result['firingstats']['trial_field'][t,:])
+                
+                if self.para['plt_bool']:
+                  self.plt_results(result,t)
+                
+            #if np.any(~np.isnan(fields_tmp['posterior_mass'])):
+              
+              #if np.any(~np.isnan(result['fields']['posterior_mass'])):
+                #f_major = np.nanargmax(result['fields']['posterior_mass'])
+                #theta_major = result['fields']['parameter'][f_major,3,0]
+                #dTheta = np.abs(np.mod(theta_major-fields_tmp['parameter'][:,3,0]+self.para['nbin']/2,self.para['nbin'])-self.para['nbin']/2)
+                #if result['status']['Bayes_factor'][f-1,0] > 0:
+                  #for key in fields_tmp.keys():
+                    #result['fields'][key] = fields_tmp[key]
+                  #result['fields']['major'] = np.nanargmin(dTheta)
+              #else:
+                #if result['status']['Bayes_factor'][f-1,0] > 0:
+                  #for key in fields_tmp.keys():
+                    #result['fields'][key] = fields_tmp[key]
+                  #result['fields']['major'] = np.NaN
+              
+          #print('peaks to compare:')
+          #print(result['fields']['parameter'][:,3,0])
+          #print(fields_tmp['parameter'][:,3,0])
+          #print(dTheta)
+          #if np.any(dTheta<(self.para['nbin']/10)):
+            
+          #else:
+            #print('peak detection for 2-field model was not in line with 1-field model')
+            #print(result['fields']['parameter'][:,3,0])
+            #print(fields_tmp['parameter'][:,3,0])
+            #result['status']['Bayes_factor'][-1,:] = np.NaN
+          #return result, sampler
+        #except:
+          #pass
+            
+            #print(result_tmp['status'])
+            #print(result_tmp['fields']['parameter'])
+            
+            #print('finally, add check: how many trials surpass firing rate threshold? (which one?) / assign all trials to field firing')
+            #print('save such that fields are properly assigned')
+      
+      t_process = time.time()-t_start
+      
+      #print('get spikeNr - time taken: %5.3g'%(t_end-t_start))
+      print_msg = 'p-value: %.2f, value (MI/Isec): %.2f / %.2f, '%(result['status']['MI_p_value'],result['status']['MI_value'],result['status']['Isec_value'])
+      
+      if result['fields']['nModes']>0:
+        print_msg += ' \t Bayes factor (reliability) :'
+        for f in np.where(result['fields']['Bayes_factor']>1/2)[0]:#range(result['fields']['nModes']):
+          print_msg += '\t (%d): %.2f+/-%.2f (%.2f), '%(f+1,result['fields']['Bayes_factor'][f,0],result['fields']['Bayes_factor'][f,1],result['fields']['reliability'][f])
+      if not(SNR is None):
+        print_msg += '\t SNR: %.2f, \t r_value: %.2f'%(SNR,r_value)
+      print_msg += ' \t time passed: %.2fs'%t_process
+      print(print_msg)
+      
+      #except (KeyboardInterrupt, SystemExit):
+        #raise
+    except:# SystemExit:# TypeError:#KeyboardInterrupt:
+      print('analysis failed: (-)')# p-value (MI): %.2f, \t bayes factor: %.2fg+/-%.2fg'%(result['status']['MI_p_value'],result['status']['Bayes_factor'][0,0],result['status']['Bayes_factor'][0,1]))
+      #result['fields']['nModes'] = -1
+      
+    return result#,sampler
+  
+  
+  def get_active_Ca(self,S):
+    
     active = {}
     active['S'] = S[self.dataBH['active']]    ### only consider activity during continuous runs
-    if np.count_nonzero(active['S'])==0:
-      print('no activity for this neuron')
-      result['firingstats']['rate'] = 0
-      return result
-    
     
     ### calculate firing rate
-    #baseline = _hsm(active['S'][active['S']>0])
-    #active['S'] /= baseline
-    #[spikeNr,md,sd_r] = get_spikeNr(active['S'][active['S']>0])
+    frate, S_thr, _ = self.get_firingrate(active['S'])
+    if self.para['modes']['activity']=='spikes':
+      active['S'] = np.floor(S / S_thr)[self.dataBH['active']]#(S>S_thr).astype('float')[self.dataBH['active']]#
     
-    #t_start = time.time()
-    result['firingstats']['rate'],result['firingstats']['rate_thr'] = self.get_firingrate(active['S'])
-    #t_end = time.time()
-    #print('get spikeNr - time taken: %5.3g'%(t_end-t_start))
+    if frate>0:
+      if self.para['modes']['info']:
+        if self.para['modes']['info'] == 'MI':
+          ## obtain quantized firing rate for MI calculation
+          active['qtl'] = sp.ndimage.gaussian_filter(np.floor(S / S_thr).astype('float')*self.para['f'],self.para['sigma'])#(S>S_thr).astype('float')#
+          active['qtl'] = active['qtl'][self.dataBH['active']]
+          qtls = np.quantile(active['qtl'][active['qtl']>0],np.linspace(0,1,self.para['qtl_steps']+1))
+          active['qtl'] = np.count_nonzero(active['qtl'][:,np.newaxis]>=qtls[np.newaxis,1:-1],1)
+    return active, frate
+  
+  
+  def get_correlated_trials(self,result,smooth=None):
     
-    #print("spike nr: %d"%spikeNr)
-    #rate_tmp = spikeNr / (self.dataBH['T']/self.para['f'])
-    if self.para['modes']['info']:
-      if self.para['modes']['info'] == 'MI':
-        ## obtain quantized firing rate for MI calculation
-        active['qtl'] = sp.ndimage.gaussian_filter(S,self.para['sigma'])
-        active['qtl'] = active['qtl'][self.dataBH['active']]
-        qtls = np.quantile(active['qtl'][active['qtl']>0],np.linspace(0,1,self.para['qtl_steps']+1))
-        active['qtl'] = np.count_nonzero(active['qtl'][:,np.newaxis]>=qtls[np.newaxis,1:-1],1)
+    ## check reliability
+    corr = corr0(gauss_smooth(result['firingstats']['trial_map'],smooth=(0,smooth*self.para['nbin']/self.para['L_track'])))
+    #result['firingstats']['trial_map'] = gauss_smooth(result['firingstats']['trial_map'],(0,2))
+    corr[np.isnan(corr)] = 0
+    ordered_corr,res_order,res_linkage = compute_serial_matrix(-(corr-1),'average')
+    cluster_idx = sp.cluster.hierarchy.cut_tree(res_linkage,height=0.5)
+    _, c_counts = np.unique(cluster_idx,return_counts=True)
+    c_trial = np.where((c_counts>self.para['trials_min_count']) & (c_counts>(self.para['trials_min_fraction']*self.dataBH['trials']['ct'])))[0]
     
-    ### get trial-specific activity
-    #t_start = time.time()
-    trials_S, trials_firingmap = self.get_trials_activity(active)
+    for (i,t) in enumerate(c_trial):
+      result['firingstats']['trial_field'][i,:] = (cluster_idx.T==t)
     
-    ## obtain firingmap
-    firingstats_tmp = self.get_firingstats_from_trials(trials_firingmap)
-    for key in firingstats_tmp.keys():
-      result['firingstats'][key] = firingstats_tmp[key]
+    testing = False
+    if testing and self.para['plt_bool']:
+      plt.figure()
+      plt.pcolormesh(corr[res_order,:][:,res_order],cmap='jet')
+      plt.clim([0,1])
+      plt.colorbar()
+      plt.show(block=False)
+      plt.figure() 
+      for i,r in enumerate(res_order): 
+        plt.subplot(5,5,i+1) 
+        plt.plot(np.linspace(0,self.para['L_track'],self.para['nbin']),gauss_smooth(result['firingstats']['trial_map'][r,:],2)) 
+        plt.ylim([0,20]) 
+        plt.title('trial # %d'%r) 
+      plt.show(block=False)
+    return result
+  
+  
+  def run_nestedSampling(self,firingstats,firingmap,f):
     
-    #t_end = time.time()
-    #print('get firingstats: %5.3g'%(t_end-t_start))
-    
-    #print(result['firingstats']['parNoise'])
-    #return
-    #t_start = time.time()
-    #return self.calc_Icorr(active['S'],trials_S)
-    #return
-    if self.para['modes']['info']:
-      ## obtain mutual information first - check if (computational cost of) finding fields is worth it at all
-      MI_tmp = self.test_MI(active,trials_S)
-      for key in MI_tmp.keys():
-        result['status'][key] = MI_tmp[key]
-    else:
-      result['status']['MI_value'] = np.nan
-      result['status']['MI_p_value'] = np.nan
-      result['status']['MI_z_score'] = np.nan
-    #t_end = time.time()
-    #print('calc MI - time taken: %5.3g'%(t_end-t_start))
-    
-    #return MI_tmp
-      
-    ### do further tests only if there is "significant" mutual information
-    #if (not self.para['modes']['info']) | (result['status']['MI_p_value']<0.2):
-      
-    #### -------------------------- tuning curve model -------------------------------------
-    #PC_fields['firingmap'] = savgol_filter(PC_fields['firingmap'], 5, 3)
-    #self.para['bin_array'] = np.linspace(2*math.pi/self.para['nbin'],2*math.pi,self.para['nbin']);
-    
-    hbm = HierarchicalBayesModel(result['firingstats']['map'],self.para['bin_array'],result['firingstats']['parNoise'],0)
+    hbm = HierarchicalBayesModel(firingmap,self.para['bin_array'],firingstats['parNoise'],f)
     
     ### test models with 0 vs 1 fields
-    pnames = [self.para['names'][0]]
-    break_it = False
-    for f in range(self.f_max+1):
-      
-      if break_it:
-        continue
-      hbm.change_model(f)
-      #print('model: %d'%f)
-      #t_start = time.time()
-      paramnames = pnames.copy()
+    paramnames = [self.para['names'][0]]
+    for ff in range(f):
       paramnames.extend(self.para['names'][1:]*f)
-      
-      ## hand over functions for sampler
-      my_prior_transform = hbm.transform_p
-      my_likelihood = hbm.set_logl_func()
-      
-      sampler = ultranest.ReactiveNestedSampler(paramnames, my_likelihood, my_prior_transform,wrapped_params=hbm.pTC['wrap'],vectorized=True,num_bootstraps=20)#,log_dir='/home/wollex/Data/Documents/Uni/2016-XXXX_PhD/Japan/Work/Programs/PC_analysis/test_ultra')   ## set up sampler...
+    
+    ## hand over functions for sampler
+    my_prior_transform = hbm.transform_p
+    my_likelihood = hbm.set_logl_func()
+    
+    sampler = ultranest.ReactiveNestedSampler(paramnames, my_likelihood, my_prior_transform,wrapped_params=hbm.pTC['wrap'],vectorized=True,num_bootstraps=20)#,log_dir='/home/wollex/Data/Documents/Uni/2016-XXXX_PhD/Japan/Work/Programs/PC_analysis/test_ultra')   ## set up sampler...
+    num_samples = 400
+    if f>1:
+      sampler.stepsampler = ultranest.stepsampler.RegionSliceSampler(nsteps=3)#, adaptive_nsteps='move-distance')
       num_samples = 200
-      if f>1:
-        sampler.stepsampler = ultranest.stepsampler.RegionSliceSampler(nsteps=3)#, adaptive_nsteps='move-distance')
-        num_samples = 200
+    
+    sampling_result = sampler.run(min_num_live_points=num_samples,max_iters=10000,cluster_num_live_points=20,max_num_improvement_loops=5,show_status=False,viz_callback=False)  ## ... and run it #max_ncalls=500000,(f+1)*100,
+    #t_end = time.time()
+    #print('nested sampler done, time: %5.3g'%(t_end-t_start))
+    
+    Z = [sampling_result['logz'],sampling_result['logzerr']]    ## store evidences
+    field = {'Bayes_factor':np.zeros(2)*np.NaN}
+    if f > 0:
       
-      sampling_result = sampler.run(min_num_live_points=num_samples,max_iters=10000,cluster_num_live_points=40,max_num_improvement_loops=5,show_status=False,viz_callback=False)  ## ... and run it #max_ncalls=500000,(f+1)*100,
-      #t_end = time.time()
-      #print('nested sampler done, time: %5.3g'%(t_end-t_start))
+      fields_tmp = self.detect_modes_from_posterior(sampler)
       
-      A_0 = sampling_result['posterior']['mean'][0]
-      
-      result['status']['Z'][f,:] = [sampling_result['logz'],sampling_result['logzerr']]    ## store evidences
-      
-      if f > 0:
+      if len(fields_tmp)>0:
         
-        fields_tmp = self.detect_modes_from_posterior(sampler)
-        
-        result['status']['Bayes_factor'][f-1,0] = result['status']['Z'][f,0]-result['status']['Z'][f-1,0]
-        result['status']['Bayes_factor'][f-1,1] = np.sqrt(result['status']['Z'][f-1,1]**2 + result['status']['Z'][f,1]**2)
-        
-        if f==2:
-          #try:
-          print('peaks to compare:')
-          print(result['fields']['parameter'][:,3,0])
-          f_major = np.nanargmax(result['fields']['posterior_mass'])
-          theta_major = result['fields']['parameter'][f_major,3,0]
-          print(theta_major)
-          print(fields_tmp['parameter'][:,3,0])
-          #print(fields_tmp)
-          dTheta = np.abs(np.mod(theta_major-fields_tmp['parameter'][:,3,0]+self.para['nbin']/2,self.para['nbin'])-self.para['nbin']/2)
-          print(dTheta)
-          if result['status']['Bayes_factor'][f-1,0] > 0:
-            
-            if np.nanmin(dTheta) < 5:
-              
-              for key in fields_tmp.keys():
-                result['fields'][key] = fields_tmp[key]
-              result['fields']['major'] = np.nanargmin(dTheta)
-            
-            #result['status']['Bayes_factor'][-1,:] = np.NaN
-            #return result,sampler
-          #except:
-            #pass
-          return result, sampler
-        else:
-          for key in fields_tmp.keys():
-            result['fields'][key] = fields_tmp[key]
-        
-        if result['status']['Bayes_factor'][f-1,0]<=0:
-          break_it = True
+        for key in fields_tmp.keys():
+          field[key] = fields_tmp[key]
+        field['Bayes_factor'][0] = Z[0]-self.tmp['Z'][0]
+        field['Bayes_factor'][1] = np.sqrt(Z[1]**2 + self.tmp['Z'][1]**2)
+      else:
+        field['Bayes_factor'] = np.zeros(2)*np.NaN
+    self.tmp['Z'] = Z
+      #if f==2:
+        ##try:
+        #if np.any(~np.isnan(fields_tmp['posterior_mass'])):
           
-        
-      
-    if self.para['plt_bool']:
-      print('for display: draw tuning curves from posterior distribution and evaluate TC-value for each bin. then, each bin has distribution of values and can be plotted! =)')
-      style_arr = ['--','-']
-      #col_arr = []
-      #fig,ax = plt.subplots(figsize=(5,3),dpi=150)
-      ax = plt.axes([0.6,0.625,0.35,0.25])
-      ax.bar(self.para['bin_array'],result['firingstats']['map'],facecolor='b',width=100/self.para['nbin'],alpha=0.2)
-      ax.errorbar(self.para['bin_array'],result['firingstats']['map'],result['firingstats']['CI'],ecolor='r',linestyle='',fmt='',elinewidth=0.3)#,label='$95\\%$ confidence')
-      
-      ax.plot(self.para['bin_array'],hbm.TC(np.array([A_0])),'k',linestyle='--',linewidth=1,label='$log(Z)=%4.1f\\pm%4.1f$ (non-coding)'%(result['status']['Z'][0,0],result['status']['Z'][0,1]))
-      
-      #try:
-      #print(result['fields']['nModes'])
-      for c in range(min(2,result['fields']['nModes'])):
-        if result['fields']['nModes']>1:
-          if c==0:
-            label_str = '(mode #%d)\t$log(Z)=%4.1f\\pm%4.1f$'%(c+1,result['status']['Z'][1,0],result['status']['Z'][1,1])
-          else:
-            label_str = '(mode #%d)'%(c+1)
-        else:
-          label_str = '$log(Z)=%4.1f\\pm%4.1f$ (coding)'%(result['status']['Z'][1,0],result['status']['Z'][1,1])
-        
-        ax.plot(self.para['bin_array'],hbm.TC(result['fields']['parameter'][c,:,0]),'r',linestyle='-',linewidth=0.5+result['fields']['posterior_mass'][c]*2,label=label_str)
+          #if np.any(~np.isnan(result['fields']['posterior_mass'])):
+            #f_major = np.nanargmax(result['fields']['posterior_mass'])
+            #theta_major = result['fields']['parameter'][f_major,3,0]
+            #dTheta = np.abs(np.mod(theta_major-fields_tmp['parameter'][:,3,0]+self.para['nbin']/2,self.para['nbin'])-self.para['nbin']/2)
+            #if result['fields']['Bayes_factor'][f-1,0] > 0:
+              #for key in fields_tmp.keys():
+                #result['fields'][key] = fields_tmp[key]
+              #result['fields']['major'] = np.nanargmin(dTheta)
+          #else:
+            #if result['fields']['Bayes_factor'][f-1,0] > 0:
+              #for key in fields_tmp.keys():
+                #result['fields'][key] = fields_tmp[key]
+              #result['fields']['major'] = np.NaN
+          
+          #print('peaks to compare:')
+          #print(result['fields']['parameter'][:,3,0])
+          #print(fields_tmp['parameter'][:,3,0])
+          #print(dTheta)
+          #if np.any(dTheta<(self.para['nbin']/10)):
+            
+          #else:
+            #print('peak detection for 2-field model was not in line with 1-field model')
+            #print(result['fields']['parameter'][:,3,0])
+            #print(fields_tmp['parameter'][:,3,0])
+            #result['status']['Bayes_factor'][-1,:] = np.NaN
+          #return result, sampler
         #except:
-          #1
-      #ax.plot(self.para['bin_array'],hbm.TC(par_results[1]['mean']),'r',label='$log(Z)=%5.3g\\pm%5.3g$'%(par_results[1]['Z'][0],par_results[1]['Z'][1]))
-      ax.legend(title='evidence',fontsize=8,loc='upper left',bbox_to_anchor=[0.05,1.4])
-      ax.set_xlabel('Location [bin]')
-      ax.set_ylabel('$\\bar{\\nu}$')
-      ax.spines['top'].set_visible(False)
-      ax.spines['right'].set_visible(False)
-      plt.tight_layout()
-      if self.para['plt_sv']:
-        pathSv = pathcat([self.para['pathFigs'],'PC_analysis_fit_results.png'])
-        plt.savefig(pathSv)
-        print('Figure saved @ %s'%pathSv)
-      plt.show(block=False)
+          #pass
+        #return result, sampler
+      #else:
       
-    t_process = time.time()-t_start
-    
-    #print('get spikeNr - time taken: %5.3g'%(t_end-t_start))
-    if SNR is None:
-      print('p-value (MI): %5.2g, z-score (MI): %5.2g, \t bayes factor (1): %5.2g+/-%5.2g, \t (2): %5.2g+/-%5.2g \t time passed: %5.2gs'%(result['status']['MI_p_value'],result['status']['MI_z_score'],result['status']['Bayes_factor'][0,0],result['status']['Bayes_factor'][0,1],result['status']['Bayes_factor'][1,0],result['status']['Bayes_factor'][1,1],t_process))
-    else:
-      print('p-value (MI): %5.2g, z-score (MI): %5.2g, \t bayes factor (1): %5.2g+/-%5.2g, \t (2): %5.2g+/-%5.2g \t SNR: %5.2g,\t r_value: %5.2g \t time passed: %5.2gs'%(result['status']['MI_p_value'],result['status']['MI_z_score'],result['status']['Bayes_factor'][0,0],result['status']['Bayes_factor'][0,1],result['status']['Bayes_factor'][1,0],result['status']['Bayes_factor'][1,1],SNR,r_value,t_process))
-    
-    #print('p-value (MI): %5.3g, z-score (MI): %5.3g, \t bayes factor: %7.5g+/-%7.5g \t SNR: %5.3g,\t r_value: %5.3g'%(result['status']['MI_p_value'],result['status']['MI_z_score'],result['status']['Bayes_factor'][0],result['status']['Bayes_factor'][1],SNR,r_value))# \t time passed: %7.2fs,time.time()-t_start))
-    #global n_ct
-    #print('tried')
-    #n_ct.increment()
-    #print('%d neurons processed, \t %7.5gs passed'%(n_ct.value,time.time()-t_start))
-    #except (KeyboardInterrupt, SystemExit):
-      #raise
-    #except:
-      #print('analysis failed: (-) p-value (MI): %5.3g, \t bayes factor: %7.5g+/-%7.5g'%(result['status']['MI_p_value'],result['status']['Bayes_factor'][0],result['status']['Bayes_factor'][1]))
-      ##result['fields']['nModes'] = -1
+      #if result['status']['Bayes_factor'][f-1,0]<=0:
+        #break_it = True
       
-    return result
-
-
+    return field
+  
+  
   def detect_modes_from_posterior(self,sampler,plt_bool=False):
     ### handover of sampled points
     data_tmp = ultranest.netiter.logz_sequence(sampler.root,sampler.pointpile)[0]
@@ -472,26 +562,24 @@ class detect_PC:
     nPars = data_tmp['samples'].shape[-1]
     nf = int((nPars - 1)/3)
     
-    testing = True
+    testing = False
     bins = 2*self.para['nbin']
-    offset = 50
+    offset = self.para['nbin']
     
     fields = {}
     for f in range(nf):
       
-      fields[f] = {}
-      fields[f]['nModes'] = 0
-      fields[f]['posterior_mass'] = np.zeros(3)*np.NaN
-      fields[f]['parameter'] = np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN
-      fields[f]['p_x'] = np.zeros((3,self.para['nbin']))*np.NaN
+      #fields[f] = {}
+      #fields[f]['nModes'] = 0
+      #fields[f]['posterior_mass'] = np.zeros(3)*np.NaN
+      #fields[f]['parameter'] = np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN
+      #fields[f]['p_x'] = np.zeros((3,self.para['nbin']))*np.NaN
       
       data['pos_samples'] = np.array(data['samples'][:,3+3*f])
       logp = np.exp(data['logp_posterior'])   ## even though its not logp, but p!!
       
-      
-      
       ### search for baseline (where whole prior space is sampled)
-      x_space = np.linspace(0,100,11)
+      x_space = np.linspace(0,self.para['nbin'],11)
       logX_top = -(data['logX'].min())
       logX_bottom = -(data['logX'].max())
       for i in range(10):
@@ -504,125 +592,21 @@ class detect_PC:
           logX_top = logX_base
         i+=1
       
-      mask = -data['logX'] > logX_base
-      
       post,post_bin = np.histogram(data['pos_samples'],bins=np.linspace(0,self.para['nbin'],bins+1),weights=logp*(np.random.rand(len(logp))<(logp/logp.max())))
       post /= post.sum()
       
       # construct wrapped and smoothed histogram
       post_cat = np.concatenate([post[-offset:],post,post[:offset]])
-      post_smooth = sp.ndimage.gaussian_filter(post,10,mode='wrap')
+      post_smooth = sp.ndimage.gaussian_filter(post,2,mode='wrap')
       post_smooth = np.concatenate([post_smooth[-offset:],post_smooth,post_smooth[:offset]])
       
       ## find peaks and troughs
-      mode_pos, prop = sp.signal.find_peaks(post_smooth,distance=20)
+      mode_pos, prop = sp.signal.find_peaks(post_smooth,distance=self.para['nbin']/5,height=post_smooth.max()/3)
       mode_pos = mode_pos[(mode_pos>offset) & (mode_pos<(bins+offset))]
-      trough_pos, prop = sp.signal.find_peaks(-post_smooth,distance=20)
+      trough_pos, prop = sp.signal.find_peaks(-post_smooth,distance=self.para['nbin']/5)
       
-      modes = {}
-      c_ct = 0
-      for (i,p) in enumerate(mode_pos):
-        
-        ## find neighbouring troughs
-        dp = trough_pos-p
-        t_right = dp[dp>0].min()
-        t_left = dp[dp<0].max()
-        
-        
-        p_mass = post_cat[p+t_left:p+t_right].sum()    # obtain probability mass between peaks
-        
-        if p_mass > 0.2:
-          modes[c_ct] = {}
-          modes[c_ct]['p_mass'] = p_mass
-          modes[c_ct]['left'] = post_bin[np.mod(p+t_left-offset,bins)]
-          modes[c_ct]['right'] = post_bin[np.mod(p+t_right-offset,bins)]
-          c_ct += 1
-        
-        if testing:
-          print('peak @x=%.1f'%post_bin[p-offset])
-          print('\ttroughs: [%.1f, %.1f]'%(post_bin[np.mod(p+t_left-offset,bins)],post_bin[np.mod(p+t_right-offset,bins)]))
-          print('\tposterior mass: %5.3g'%p_mass)
-        
-      nsamples = len(logp)
-      print(modes)
       
-      plt.figure()
-      plt.subplot(311)
-      plt.scatter(data['pos_samples'],-data['logX'],c=np.exp(data['logp_posterior']),marker='.',label='samples')
-      plt.plot([0,100],[logX_base,logX_base],'k--')
-      plt.xlabel('field position $\\theta$')
-      plt.ylabel('-ln(X)')
-      plt.legend(loc='lower right')
-      #plt.show(block=False)
-      
-      for (p,m) in enumerate(modes.values()):
-        
-        print(m)
-        if m['p_mass'] > 0.1:
-          
-          mask_mode = np.ones(nsamples,'bool')
-          
-          ## calculate further statistics
-          for (p2,m2) in enumerate(modes.values()):
-            if not (p==p2):
-              print(p,p2)
-              print(m2)
-              # obtain samples first 
-              if m2['left']<m2['right']:
-                mask_mode[(data['pos_samples']>m2['left']) & (data['pos_samples']<m2['right']) & (-data['logX']>logX_base)] = False
-              else:
-                mask_mode[(data['pos_samples']>m2['left']) | (data['pos_samples']<m2['right']) & (-data['logX']>logX_base)] = False
-          
-          mode_logp = logp[mask_mode]#/posterior_mass
-          mode_logp /= mode_logp.sum()
-          
-          plt.subplot(312)
-          plt.scatter(data['pos_samples'][mask_mode],-data['logX'][mask_mode],c=np.exp(data['logp_posterior'][mask_mode]),marker='.',label='samples')
-          plt.plot([0,100],[logX_base,logX_base],'k--')
-          plt.xlabel('field position $\\theta$')
-          plt.ylabel('-ln(X)')
-          plt.legend(loc='lower right')
-          #plt.show(block=False)
-          
-          
-          ## obtain parameters
-          if m['left']<m['right']:
-            fields[f]['posterior_mass'][p] = mode_logp[(data['pos_samples'][mask_mode]>m['left']) & (data['pos_samples'][mask_mode]<m['right'])].sum()
-          else:
-            fields[f]['posterior_mass'][p] = mode_logp[(data['pos_samples'][mask_mode]>m['left']) | (data['pos_samples'][mask_mode]<m['right'])].sum()
-          
-          fields[f]['parameter'][p,0,0] = get_average(data['samples'][mask_mode,0],mode_logp)
-          fields[f]['parameter'][p,1,0] = get_average(data['samples'][mask_mode,1+3*f],mode_logp)
-          fields[f]['parameter'][p,2,0] = get_average(data['samples'][mask_mode,2+3*f],mode_logp)
-          fields[f]['parameter'][p,3,0] = get_average(data['samples'][mask_mode,3+3*f],mode_logp,True,[0,self.para['nbin']])
-          
-          print(fields[f]['parameter'][p,3,0])
-          for i in range(4):
-            ### get confidence intervals from cdf
-            if i==0:
-              samples = data['samples'][mask_mode,0]
-            elif i==3:
-              samples = (data['samples'][mask_mode,3+3*f]+self.para['nbin']/2-fields[f]['parameter'][p,3,0])%self.para['nbin']-self.para['nbin']/2        ## shift whole axis such, that peak is in the center, to get proper errorbars
-            else:
-              samples = data['samples'][mask_mode,i+3*f]
-            
-            x_cdf_posterior, y_cdf_posterior = ecdf(samples,mode_logp)
-            for j in range(len(self.para['CI_arr'])):
-              fields[f]['parameter'][p,i,1+j] = x_cdf_posterior[np.where(y_cdf_posterior>=self.para['CI_arr'][j])[0][0]]
-          
-          fields[f]['p_x'][p,:],_ = np.histogram(data['pos_samples'][mask_mode],bins=np.linspace(0,self.para['nbin'],self.para['nbin']+1),weights=mode_logp*(np.random.rand(len(mode_logp))<(mode_logp/mode_logp.max())))
-          fields[f]['p_x'][p,fields[f]['p_x'][p,:]<(0.001*fields[f]['p_x'][p,:].max())] = 0
-          
-          fields[f]['parameter'][p,3,0] = fields[f]['parameter'][p,3,0] % 100
-          fields[f]['parameter'][p,3,1:] = (fields[f]['parameter'][p,3,0] + fields[f]['parameter'][p,3,1:]) % 100
-          
-          fields[f]['nModes'] += 1
-          plt.subplot(313)
-          plt.plot(fields[f]['p_x'][p,:])
-          plt.show(block=False)
-          
-      
-      if testing:
+      if testing and self.para['plt_bool']:
         plt.figure()
         plt.subplot(211)
         #bin_arr = np.linspace(-25,125,bins+2*offset)
@@ -634,311 +618,65 @@ class detect_PC:
         plt.plot(post_bin[np.mod(mode_pos-offset,bins)],post[np.mod(mode_pos-offset,bins)],'ro')
         plt.plot(post_bin[np.mod(trough_pos-offset,bins)],post[np.mod(trough_pos-offset,bins)],'bo')
         plt.show(block=False)
-      
-          ### calculate other parameters
-          #for i in range(4):
-            #if i==0:
-              #samples = data['samples'][mask,i]
-            #else:
-              #samples = data['samples'][mask,i+3*f]
-            ##samples = data['samples'][clusters[c]['mask'],i+3*f]
-              
-            #if i==2:
-              #for j in range(len(sig_space)-1):
-                #thr_low = sig_space[j]
-                #thr_up = sig_space[j+1]
-                #mask_px = np.ones(samples.shape).astype('bool')
-                #mask_px[samples<thr_low] = False
-                #mask_px[samples>=thr_up] = False
-                #fields[f]['p_x'][c_ct,0,j] = post_mode[mask_px].sum()
-            #if i==3:
-              #for j in range(len(x_space)-1):
-                #thr_low = x_space[j]
-                #thr_up = x_space[j+1]
-                #mask_px = np.ones(samples.shape).astype('bool')
-                #mask_px[samples<thr_low] = False
-                #mask_px[samples>=thr_up] = False
-                #fields[f]['p_x'][c_ct,1,j] = post_mode[mask_px].sum()
-              ##fields[f]['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i+3*f],post_mode,True,[0,100])
-              #fields[f]['parameter'][c_ct,i,0] = get_average(samples,post_mode,True,[0,100])
-              #samples = (data['samples'][mask,i+3*f]+100/2-fields[f]['parameter'][c_ct,i,0])%100-100/2        ## shift whole axis such, that peak is in the center, to get proper errorbars
-            #else:
-              ##fields[f]['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i+3*f],post_mode)
-              #fields[f]['parameter'][c_ct,i,0] = get_average(samples,post_mode)
-            
-            #### get confidence intervals from cdf
-            #x_cdf_posterior, y_cdf_posterior = ecdf(samples,post_mode)
-            #for j in range(len(self.para['CI_arr'])):
-              #fields[f]['parameter'][c_ct,i,1+j] = x_cdf_posterior[np.where(y_cdf_posterior>=self.para['CI_arr'][j])[0][0]]
-            ##fields[f]['parameter'][c_ct,i,2] = x_cdf_posterior[np.where(y_cdf_posterior>0.975)[0][0]]
-            
-            #if i==3:
-              #fields[f]['parameter'][c_ct,i,0] = fields[f]['parameter'][c_ct,i,0] % 100
-              #fields[f]['parameter'][c_ct,i,1:] = (fields[f]['parameter'][c_ct,i,0] + fields[f]['parameter'][c_ct,i,1:]) % 100
-              
-            #fields[f]['posterior_mass'][c_ct] = clusters[c]['posterior_mass']
-          
-          #if c_ct == 2:
-            #break   ## maximum 2 clusters detected. should be kinda sorted, since they are detected starting from smallest lnX
-          #c_ct += 1
-          
-      
-      print(fields[f])
-      
-      
-      
-      
-      
-      
-      
-      #### check from baseline up
-      #### gather occupied phase space & occupied probability mass
-      #x_space = np.linspace(0,100,101)
-      
-      #nsteps = 31
-      #clusters = {}
-      #blob_center = np.zeros((nsteps,1))*np.NaN
-      #blob_phase_space = np.zeros((nsteps,1))*np.NaN
-      #blob_probability_mass = np.zeros((nsteps,1))*np.NaN
-      #blob_center_CI = np.zeros((nsteps,2,1))*np.NaN
-      
-      #periodic = False
-      #nClusters = 0
-      #logX_arr = np.linspace(logX_top,logX_base,nsteps)
-      #for (logX,i) in zip(logX_arr,range(nsteps)):
-        #mask_logX = -data['logX']>logX
         
-        #cluster_hist = np.histogram(data['pos_samples'][mask_logX],bins=x_space)[0]>0
+      modes = {}
+      c_ct = 0
+      p_mass = np.zeros(len(mode_pos))
+      for (i,p) in enumerate(mode_pos):
+        try:
+          ## find neighbouring troughs
+          dp = trough_pos-p
+          t_right = p+dp[dp>0].min()
+          t_left = p+dp[dp<0].max()
+        except:
+          try:
+            t_left = np.where(post_smooth[:p]<(post_smooth[p]*0.01))[0][-1]
+          except:
+            t_left = 0
+          try:
+            t_right = p+np.where(post_smooth[p:]<(post_smooth[p]*0.01))[0][0]
+          except:
+            nbin+2*offset
         
-        ### remove "noise" clusters
-        #cluster_hist = sp.ndimage.morphology.binary_opening(sp.ndimage.morphology.binary_closing(np.concatenate((cluster_hist[-10:],cluster_hist,cluster_hist[:10]))))[10:-10]
-        #if not any(cluster_hist):
-          #continue
+        p_mass[i] = post_cat[t_left:t_right].sum()    # obtain probability mass between troughs
+        if p_mass[i] > 0.05:
+          modes[c_ct] = {}
+          modes[c_ct]['p_mass'] = p_mass[i]
+          modes[c_ct]['peak'] = post_bin[p-offset]
+          modes[c_ct]['left'] = post_bin[np.mod(t_left-offset,bins)]
+          modes[c_ct]['right'] = post_bin[np.mod(t_right-offset,bins)]
+          c_ct += 1
         
-        #blobs = measure.label(cluster_hist)
-        #nblobs = blobs.max()
-        
-        #if (blobs[0]>0) & (blobs[-1]>0):
-          #periodic = True
-          #nblobs-=1
-        
-        #for c in range(1,nblobs+1):
-          
-          #if len(blob_phase_space) < nblobs:
-            #blob_center.append([])
-            #blob_phase_space.append([])
-            #blob_probability_mass.append([])
-            #blob_center_CI.append([])
-            
-          #if c == 1 & periodic:
-            #val_last = x_space[np.where(blobs==c)[0][-1]]
-            #val_first = x_space[np.where(blobs==blobs[-1])[0][0]]
-            #mask_cluster = np.logical_or((val_first <= data['pos_samples']),(data['pos_samples'] < val_last))
-            #blobs[blobs==blobs[-1]] = blobs[0]      ## assign components to each other, wrapped by periodicity of phase space
-            
-          #else:
-            #val_first = x_space[np.where(blobs==c)[0][0]]
-            #val_last = x_space[np.where(blobs==c)[0][-1]]
-            #mask_cluster = (val_first <= data['pos_samples']) & (data['pos_samples'] < val_last)
-          
-          #mask = (mask_cluster & mask_logX)
-          
-          #if np.count_nonzero(mask)>50:
-            #p_posterior_cluster = np.exp(data['logp_posterior'][mask])
-            #posterior_mass = (p_posterior_cluster).sum()
-            #p_posterior_cluster /= posterior_mass
-            #masked_samples = data['pos_samples'][mask]
-            
-            #center_tmp = get_average(masked_samples,p_posterior_cluster,True,[0,100])  ## project to positive axis again
-            
-            #### test for overlap with other clusters
-            #assigned = overlap = False
-            #for cc in clusters.keys():
-              
-              #mask_joint = mask & clusters[cc]['mask']
-                
-              #if any(mask_joint):     ### does the cluster have an overlap with another one?
-                
-                #if clusters[cc]['active']:    ### clusters can only be assigned to active clusters
-                
-                  #if assigned:
-                    
-                    #if (clusters[c_id]['posterior_mass'] > clusters[cc]['posterior_mass']):
-                      #clusters[cc]['active'] = False
-                      #if clusters[cc]['appeared'] > 3:
-                        #clusters[c_id]['active'] = False
-                        #overlap = True
-                    #else:
-                      #clusters[c_id]['active'] = False
-                      #if clusters[c_id]['appeared'] > 3:
-                        #clusters[cc]['active'] = False
-                        #overlap = True
-                    
-                  #elif ((np.exp(data['logp_posterior'][mask_joint]).sum() / clusters[cc]['posterior_mass']) > 0):# & abs((center_tmp -:
-                    #### if it's a significant overlap, not changing the clusterstats significantly, assign to existing one
-                    #c_id = cc
-                    #appeared = clusters[c_id]['appeared']+1
-                    #assigned = True
-                  #else:
-                    #### if overlap is non-significant, disable "small" cluster
-                    #clusters[cc]['active'] = False
-                #else:
-                  #overlap = True
-                
-            #if overlap:
-              #continue
-            #elif not assigned:
-              #### if no overlap was found, start new cluster
-              #c_id = nClusters
-              #nClusters+=1
-              #appeared = 1
-            
-            #n_samples = len(p_posterior_cluster)
-            
-            #clusters[c_id] = {'periodic':periodic & (c==1),'mask':mask,'center':center_tmp,'phase_space':np.mean(blobs==c),'posterior_mass':posterior_mass,'baseline':logX,'n_samples':n_samples,'appeared':appeared,'active':True}
-            
-            #if c_id >= blob_center.shape[1]:
-              #cat_cluster = np.zeros((nsteps,1))*np.nan
-              #blob_center = np.concatenate((blob_center,cat_cluster),1)
-              #blob_phase_space = np.concatenate((blob_phase_space,cat_cluster),1)
-              #blob_probability_mass = np.concatenate((blob_probability_mass,cat_cluster),1)
-              
-              #cat_cluster = np.zeros((nsteps,2,1))*np.nan
-              #blob_center_CI = np.concatenate((blob_center_CI,cat_cluster),2)
-            
-            #blob_center[i,c_id] = center_tmp
-            #blob_phase_space[i,c_id] = np.mean(blobs==c)
-            #blob_probability_mass[i,c_id] = posterior_mass
-            
-            #### get confidence intervals from cdf
-            #x_cdf_posterior, y_cdf_posterior = ecdf(masked_samples,p_posterior_cluster)
-            #blob_center_CI[i,0,c_id] = x_cdf_posterior[np.where(y_cdf_posterior>=0.025)[0][0]]
-            #blob_center_CI[i,1,c_id] = x_cdf_posterior[np.where(y_cdf_posterior>0.975)[0][0]]
-          
-      ##print(clusters)
-      ##print(blob_center)
-      ##print(blob_center_CI)
-      ##print(blob_phase_space)
-      ##print(blob_probability_mass)
+        if testing and self.para['plt_bool']:
+          print('peak @x=%.1f'%post_bin[p-offset])
+          print('\ttroughs: [%.1f, %.1f]'%(post_bin[np.mod(t_left-offset,bins)],post_bin[np.mod(t_right-offset,bins)]))
+          print('\tposterior mass: %5.3g'%p_mass[i])
       
-      #### remove overlapping and non-significant clusters
-      #logX_baseline = np.inf
-      #c_ct=0
-      #c_arr = []
-      #for c in range(nClusters):
-        #clusters[c]['active'] = True
-        #if c in clusters:
-          #if (clusters[c]['posterior_mass'] < 0.05):
-            #clusters[c]['active'] = False
-            #continue
-          #if (clusters[c]['appeared'] <= 3):
-            #clusters[c]['active'] = False
-            #continue
-          #c_arr.append(c)
-        #logX_baseline = min(clusters[c]['baseline'],logX_baseline)
-        #c_ct+=1
+      nsamples = len(logp)
+      #if testing and self.para['plt_bool']: 
+        #plt.figure()
+        #plt.subplot(311)
+        #plt.scatter(data['pos_samples'],-data['logX'],c=np.exp(data['logp_posterior']),marker='.',label='samples')
+        #plt.plot([0,self.para['nbin']],[logX_base,logX_base],'k--')
+        #plt.xlabel('field position $\\theta$')
+        #plt.ylabel('-ln(X)')
+        #plt.legend(loc='lower right')
+        ###plt.show(block=False)
+      if len(p_mass)<1:
+        return {}
       
-      #### for each cluster, obtain self.para values and confidence intervals
-      #fields[f] = {}
-      #fields[f]['nModes'] = min(3,c_ct)
-      #fields[f]['posterior_mass'] = np.zeros(3)*np.NaN
-      #fields[f]['parameter'] = np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN
-      #fields[f]['p_x'] = np.zeros((3,2,self.para['nbin']))*np.NaN
+      p = np.argmax(p_mass)
+      m = modes[p]
+      #for (p,m) in enumerate(modes.values()):
+      if m['p_mass'] > 0.3 and ((m['p_mass']<p_mass).sum()<3):
+        
+        field = self.define_field(data,logX_base,modes,p,f)
+        field['posterior_mass'] = m['p_mass']
+      else:
+        field = {}
+          
+      #plt.show(block=False)
       
-      #mask_logX = -data['logX']>logX_baseline
-      #cluster_hist = np.histogram(data['pos_samples'][mask_logX],bins=x_space)[0]>0
-      ### remove "noise" clusters
-      #cluster_hist = sp.ndimage.morphology.binary_opening(sp.ndimage.morphology.binary_closing(np.concatenate((cluster_hist[-10:],cluster_hist,cluster_hist[:10]))))[10:-10]
-      
-      #blobs = measure.label(cluster_hist)
-      #if (blobs[0]>0) & (blobs[-1]>0):
-        #periodic = True
-      #masks = {}
-      #for i in range(1,blobs.max()):
-        #masks[i] = {}
-        #if i == 1 & periodic:
-          #val_last = x_space[np.where(blobs==i)[0][-1]]
-          #val_first = x_space[np.where(blobs==blobs[-1])[0][0]]
-          #mask_cluster = np.logical_or((val_first <= data['pos_samples']),(data['pos_samples'] < val_last))
-          ##blobs[blobs==blobs[-1]] = blobs[0]      ## assign components to each other, wrapped by periodicity of phase space
-        #else:
-          #val_first = x_space[np.where(blobs==i)[0][0]]
-          #val_last = x_space[np.where(blobs==i)[0][-1]]
-          #mask_cluster = (val_first <= data['pos_samples']) & (data['pos_samples'] < val_last)
-        #masks[i]['baseline'] = (mask_cluster & mask_logX)
-      
-      #c_ct = 0
-      #sig_space = np.linspace(0,10,101)
-      #for c in clusters.keys():
-        #if clusters[c]['active']:
-          #mask = np.ones(data['samples'].shape[0]).astype('bool')
-          
-          #for i in range(1,len(masks)):
-            #if np.count_nonzero(masks[i]['baseline'] & clusters[c]['mask'])==0:
-              #mask[masks[i]['baseline']] = False
-          
-          ### find, which cluster mask belongs to
-          #for cc in clusters.keys():
-            #if not cc==c:
-              #mask[clusters[cc]['mask']] = False
-              ##posterior_mass -= clusters[cc]['posterior_mass']
-          
-          #p_posterior_cluster = np.exp(data['logp_posterior'][mask])#/posterior_mass
-          #p_posterior_cluster /= p_posterior_cluster.sum()
-          
-          ### calculate other parameters
-          #for i in range(4):
-            #if i==0:
-              #samples = data['samples'][mask,i]
-            #else:
-              #samples = data['samples'][mask,i+3*f]
-            ##samples = data['samples'][clusters[c]['mask'],i+3*f]
-              
-            #if i==2:
-              #for j in range(len(sig_space)-1):
-                #thr_low = sig_space[j]
-                #thr_up = sig_space[j+1]
-                #mask_px = np.ones(samples.shape).astype('bool')
-                #mask_px[samples<thr_low] = False
-                #mask_px[samples>=thr_up] = False
-                #fields[f]['p_x'][c_ct,0,j] = p_posterior_cluster[mask_px].sum()
-            #if i==3:
-              #for j in range(len(x_space)-1):
-                #thr_low = x_space[j]
-                #thr_up = x_space[j+1]
-                #mask_px = np.ones(samples.shape).astype('bool')
-                #mask_px[samples<thr_low] = False
-                #mask_px[samples>=thr_up] = False
-                #fields[f]['p_x'][c_ct,1,j] = p_posterior_cluster[mask_px].sum()
-              ##fields[f]['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i+3*f],p_posterior_cluster,True,[0,100])
-              #fields[f]['parameter'][c_ct,i,0] = get_average(samples,p_posterior_cluster,True,[0,100])
-              #samples = (data['samples'][mask,i+3*f]+100/2-fields[f]['parameter'][c_ct,i,0])%100-100/2        ## shift whole axis such, that peak is in the center, to get proper errorbars
-            #else:
-              ##fields[f]['parameter'][c_ct,i,0] = get_average(data['samples'][clusters[c]['mask'],i+3*f],p_posterior_cluster)
-              #fields[f]['parameter'][c_ct,i,0] = get_average(samples,p_posterior_cluster)
-            
-            #### get confidence intervals from cdf
-            #x_cdf_posterior, y_cdf_posterior = ecdf(samples,p_posterior_cluster)
-            #for j in range(len(self.para['CI_arr'])):
-              #fields[f]['parameter'][c_ct,i,1+j] = x_cdf_posterior[np.where(y_cdf_posterior>=self.para['CI_arr'][j])[0][0]]
-            ##fields[f]['parameter'][c_ct,i,2] = x_cdf_posterior[np.where(y_cdf_posterior>0.975)[0][0]]
-            
-            #if i==3:
-              #fields[f]['parameter'][c_ct,i,0] = fields[f]['parameter'][c_ct,i,0] % 100
-              #fields[f]['parameter'][c_ct,i,1:] = (fields[f]['parameter'][c_ct,i,0] + fields[f]['parameter'][c_ct,i,1:]) % 100
-              
-            #fields[f]['posterior_mass'][c_ct] = clusters[c]['posterior_mass']
-          
-          #if c_ct == 2:
-            #break   ## maximum 2 clusters detected. should be kinda sorted, since they are detected starting from smallest lnX
-          #c_ct += 1
-        
-        
-        
-        
-        
-        
-        #cc+=1
           #print('val: %5.3g, \t (%5.3g,%5.3g)'%(val[c,i],CI[c,i,0],CI[c,i,1]))
       #print('time took (post-process posterior): %5.3g'%(time.time()-t_start))
       #print(fields[f]['parameter'])
@@ -974,7 +712,7 @@ class detect_PC:
         
         
         ax_NS.scatter(data['pos_samples'],-data['logX'],c=np.exp(data['logp_posterior']),marker='.',label='samples')
-        ax_NS.plot([0,100],[logX_base,logX_base],'k--')
+        ax_NS.plot([0,self.para['nbin']],[logX_base,logX_base],'k--')
         ax_NS.set_xlabel('field position $\\theta$')
         ax_NS.set_ylabel('-ln(X)')
         ax_NS.legend(loc='lower right')
@@ -1000,12 +738,12 @@ class detect_PC:
         nsteps = 5
         logX_arr = np.linspace(logX_top,logX_base,nsteps)
         for (logX,i) in zip(logX_arr,range(nsteps)):
-          ax_NS.plot([0,100],[logX,logX],'--',color=[1,i/(2*nsteps),i/(2*nsteps)],linewidth=0.5)
+          ax_NS.plot([0,self.para['nbin']],[logX,logX],'--',color=[1,i/(2*nsteps),i/(2*nsteps)],linewidth=0.5)
         
         #ax_center.set_xticks([])
         #ax_center.set_xlim([logX_base,logX_top])
         #ax_prob.set_xlim([logX_base,logX_top])
-        #ax_center.set_ylim([0,100])
+        #ax_center.set_ylim([0,self.para['nbin']])
         #ax_center.set_ylabel('$\\theta$')
         #ax_prob.set_ylim([0,1])
         #ax_prob.set_xlabel('-ln(X)')
@@ -1050,74 +788,142 @@ class detect_PC:
         plt.show(block=False)
     
     
-    if nf > 1:
+    #if nf > 1:
       
-      print('detected from nested sampling:')
-      print(fields[0]['parameter'][:,3,0])
-      print(fields[0]['posterior_mass'])
-      print(fields[1]['parameter'][:,3,0])
-      print(fields[1]['posterior_mass'])
+      #if testing and self.para['plt_bool']:
+        #print('detected from nested sampling:')
+        #print(fields[0]['parameter'][:,3,0])
+        #print(fields[0]['posterior_mass'])
+        #print(fields[1]['parameter'][:,3,0])
+        #print(fields[1]['posterior_mass'])
       
-      fields_return = {}
-      fields_return['nModes'] = 0
-      fields_return['posterior_mass'] = np.zeros(3)*np.NaN
-      fields_return['parameter'] = np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN
-      fields_return['p_x'] = np.zeros((3,self.para['nbin']))*np.NaN
+      #fields_return = {}
+      #fields_return['nModes'] = 0
+      #fields_return['posterior_mass'] = np.zeros(3)*np.NaN
+      #fields_return['parameter'] = np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN
+      #fields_return['p_x'] = np.zeros((3,self.para['nbin']))*np.NaN
       
-      for f in range(fields[0]['nModes']):
-        p_cluster = fields[0]['posterior_mass'][f]
-        dTheta = np.abs(np.mod(fields[0]['parameter'][f,3,0]-fields[1]['parameter'][:,3,0]+self.para['nbin']/2,self.para['nbin'])-self.para['nbin']/2)
-        if np.any(dTheta<5):  ## take field with larger probability mass to have better sampling
-          f2 = np.where(dTheta<5)[0][0]
-          if fields[0]['posterior_mass'][f] > fields[1]['posterior_mass'][f2]:
-            handover_f = 0
-            f2 = f
-          else:
-            handover_f = 1
-            p_cluster = fields[1]['posterior_mass'][f2]
+      #for f in range(fields[0]['nModes']):
+        #p_cluster = fields[0]['posterior_mass'][f]
+        #dTheta = np.abs(np.mod(fields[0]['parameter'][f,3,0]-fields[1]['parameter'][:,3,0]+self.para['L_track']/2,self.para['L_track'])-self.para['L_track']/2)
+        #if np.any(dTheta<5):  ## take field with larger probability mass to have better sampling
+          #f2 = np.nanargmin(dTheta)
+          #if fields[0]['posterior_mass'][f] > fields[1]['posterior_mass'][f2]:
+            #handover_f = 0
+            #f2 = f
+          #else:
+            #handover_f = 1
+            #p_cluster = fields[1]['posterior_mass'][f2]
+        #else:
+          #handover_f = 0
+          #f2 = f
+          
+        #if p_cluster>0.3:
+          #fields_return['parameter'][fields_return['nModes'],...] = fields[handover_f]['parameter'][f2,...]
+          #fields_return['p_x'][fields_return['nModes'],...] = fields[handover_f]['p_x'][f2,...]
+          #fields_return['posterior_mass'][fields_return['nModes']] = fields[handover_f]['posterior_mass'][f2]
+          #fields_return['nModes'] += 1
+          #if fields_return['nModes']>=3:
+            #break
+      
+      #for f in range(fields[1]['nModes']):
+        #if fields_return['nModes']>=3:
+          #break
+        
+        #dTheta = np.abs(np.mod(fields[1]['parameter'][f,3,0]-fields[0]['parameter'][:,3,0]+self.para['L_track']/2,self.para['L_track'])-self.para['L_track']/2)
+        
+        #dTheta2 = np.abs(np.mod(fields[1]['parameter'][f,3,0]-fields_return['parameter'][:,3,0]+self.para['L_track']/2,self.para['L_track'])-self.para['L_track']/2)
+        
+        
+        #if (not np.any(dTheta<5)) and (not np.any(dTheta2<5)) and (fields[1]['posterior_mass'][f]>0.3):  ## take field with larger probability mass to have better sampling
+          #fields_return['parameter'][fields_return['nModes'],...] = fields[1]['parameter'][f,...]
+          #fields_return['p_x'][fields_return['nModes'],...] = fields[1]['p_x'][f,...]
+          #fields_return['posterior_mass'][fields_return['nModes']] = fields[1]['posterior_mass'][f]
+          #fields_return['nModes'] += 1
+      #if testing and self.para['plt_bool']:
+        #print(fields_return['parameter'][:,3,0])
+        #print(fields_return['posterior_mass'])
+    #else:
+    return field
+  
+  
+  def define_field(self,data,logX_base,modes,p,f):
+    
+    field = {}
+    field['posterior_mass'] = np.NaN
+    field['parameter'] = np.zeros((4,1+len(self.para['CI_arr'])))*np.NaN
+    field['p_x'] = np.zeros(self.para['nbin'])*np.NaN
+    #fields[f]['posterior_mass'][fields[f]['nModes']]
+    
+    logp = np.exp(data['logp_posterior'])
+    nsamples = len(logp)
+    samples = data['samples']
+    mask_mode = np.ones(nsamples,'bool')
+    
+    ## calculate further statistics
+    for (p2,m2) in enumerate(modes.values()):
+      if not (p==p2):
+        # obtain samples first 
+        if m2['left']<m2['right']:
+          mask_mode[(samples[:,3]>m2['left']) & (samples[:,3]<m2['right']) & (-data['logX']>logX_base)] = False
         else:
-          handover_f = 0
-          f2 = f
-          
-        if p_cluster>0.5:
-          fields_return['parameter'][fields_return['nModes'],...] = fields[handover_f]['parameter'][f2,...]
-          fields_return['p_x'][fields_return['nModes'],...] = fields[handover_f]['p_x'][f2,...]
-          fields_return['posterior_mass'][fields_return['nModes']] = fields[handover_f]['posterior_mass'][f2]
-          fields_return['nModes'] += 1
+          mask_mode[((samples[:,3]>m2['left']) | (samples[:,3]<m2['right'])) & (-data['logX']>logX_base)] = False
+    
+    mode_logp = logp[mask_mode]#/posterior_mass
+    mode_logp /= mode_logp.sum()#logp.sum()#
+    
+    #if testing and self.para['plt_bool']:
+      ##plt.figure()
+      #plt.subplot(312)
+      #plt.scatter(data['pos_samples'][mask_mode],-data['logX'][mask_mode],c=np.exp(data['logp_posterior'][mask_mode]),marker='.',label='samples')
+      #plt.plot([0,self.para['nbin']],[logX_base,logX_base],'k--')
+      #plt.xlabel('field position $\\theta$')
+      #plt.ylabel('-ln(X)')
+      #plt.legend(loc='lower right')
+    
+    ## obtain parameters
+    field['parameter'][0,0] = get_average(samples[mask_mode,0],mode_logp)
+    field['parameter'][1,0] = get_average(samples[mask_mode,1+3*f],mode_logp)
+    field['parameter'][2,0] = get_average(samples[mask_mode,2+3*f],mode_logp)
+    field['parameter'][3,0] = get_average(samples[mask_mode,3+3*f],mode_logp,True,[0,self.para['nbin']])
+    #print(field['parameter'][2,0])
+    for i in range(4):
+      ### get confidence intervals from cdf
+      if i==0:
+        samples_tmp = samples[mask_mode,0]
+      elif i==3:
+        samples_tmp = (samples[mask_mode,3+3*f]+self.para['nbin']/2-field['parameter'][3,0])%self.para['nbin']-self.para['nbin']/2        ## shift whole axis such, that peak is in the center, to get proper errorbars
+      else:
+        samples_tmp = samples[mask_mode,i+3*f]
       
-      for f in range(fields[1]['nModes']):
-        
-        dTheta = np.abs(np.mod(fields[1]['parameter'][f,3,0]-fields[0]['parameter'][:,3,0]+self.para['nbin']/2,self.para['nbin'])-self.para['nbin']/2)
-        
-        dTheta2 = np.abs(np.mod(fields[1]['parameter'][f,3,0]-fields_return['parameter'][:,3,0]+self.para['nbin']/2,self.para['nbin'])-self.para['nbin']/2)
-        
-        
-        if (not np.any(dTheta<5)) and (not np.any(dTheta2<5)) and (fields[1]['posterior_mass'][f]>0.5):  ## take field with larger probability mass to have better sampling
-          fields_return['parameter'][fields_return['nModes'],...] = fields[1]['parameter'][f,...]
-          fields_return['p_x'][fields_return['nModes'],...] = fields[1]['p_x'][f,...]
-          fields_return['posterior_mass'][fields_return['nModes']] = fields[1]['posterior_mass'][f]
-          fields_return['nModes'] += 1
-          
-      
-    else:
-      fields_return = fields[0]
-      
-      
-      
-      
-    #print(fields_return)
-    return fields_return
-
-
+      x_cdf_posterior, y_cdf_posterior = ecdf(samples_tmp,mode_logp)
+      for j in range(len(self.para['CI_arr'])):
+        field['parameter'][i,1+j] = x_cdf_posterior[np.where(y_cdf_posterior>=self.para['CI_arr'][j])[0][0]]
+    
+    field['p_x'],_ = np.histogram(samples[mask_mode,3],bins=np.linspace(0,self.para['nbin'],self.para['nbin']+1),weights=mode_logp*(np.random.rand(len(mode_logp))<(mode_logp/mode_logp.max())),density=True)
+    field['p_x'][field['p_x']<(0.001*field['p_x'].max())] = 0
+    
+    field['parameter'][3,0] = field['parameter'][3,0] % self.para['nbin']
+    field['parameter'][3,1:] = (field['parameter'][3,0] + field['parameter'][3,1:]) % self.para['nbin']
+    
+    ## rescaling to length 100
+    field['parameter'][2,:] *= self.para['L_track']/self.para['nbin']
+    field['parameter'][3,:] *= self.para['L_track']/self.para['nbin']
+    
+    return field
+  
+  
   def get_trials_activity(self,active):
     
     ## preallocate
     trials_map = np.zeros((self.dataBH['trials']['ct'],self.para['nbin']))
     
+    #frate = gauss_smooth(active['S']*self.para['f'],self.para['sigma'])
+    
     trials_S = {}
     for t in range(self.dataBH['trials']['ct']):
       trials_S[t] = {}
-      trials_S[t]['S'] = active['S'][self.dataBH['trials']['frame'][t]:self.dataBH['trials']['frame'][t+1]];    ## should be quartiles?!
+      trials_S[t]['S'] = active['S'][self.dataBH['trials']['frame'][t]:self.dataBH['trials']['frame'][t+1]]#gauss_smooth(active['S'][self.dataBH['trials']['frame'][t]:self.dataBH['trials']['frame'][t+1]]*self.para['f'],self.para['f']);    ## should be quartiles?!
       if self.para['modes']['info'] == 'MI':
         trials_S[t]['qtl'] = active['qtl'][self.dataBH['trials']['frame'][t]:self.dataBH['trials']['frame'][t+1]];    ## should be quartiles?!
       
@@ -1133,59 +939,64 @@ class detect_PC:
       
       #[spikeNr,md,sd_r] = get_spikeNr(trials_S[t]['S'][trials_S[t]['S']>0]);
       #trials_rate[t] = spikeNr/(self.dataBH['trials']['T'][t]/self.para['f']);
-    trials_map /= np.nansum(trials_map,1)[:,np.newaxis]
+    #trials_map /= np.nansum(trials_map,1)[:,np.newaxis]
     
     return trials_S, trials_map#, trials_rate
 
 
-  def get_firingstats_from_trials(self,trials_firingmap):
+  def get_firingstats_from_trials(self,trials_firingmap,trials=None,complete=True):
     
     ### construct firing rate map from bootstrapping over (normalized) trial firing maps
+    if trials is None:
+      trials = np.arange(self.dataBH['trials']['ct'])
     
+    #trials_firingmap = trials_firingmap[trials,:]
+    dwelltime = self.dataBH['trials']['dwelltime'][trials,:]
     firingstats = {}
     firingmap_bs = np.zeros((self.para['nbin'],self.para['N_bs']))
     
-    base_sample = np.random.randint(0,self.dataBH['trials']['ct'],(self.para['N_bs'],self.dataBH['trials']['ct']))
+    base_sample = np.random.randint(0,len(trials),(self.para['N_bs'],len(trials)))
     
     for L in range(self.para['N_bs']):
       #dwelltime = self.dataBH['trials']['dwelltime'][base_sample[L,:],:].sum(0)
-      #firingmap_bs[:,L] = trials_firingmap[base_sample[L,:],:].sum(0)/dwelltime
+      firingmap_bs[:,L] = np.nanmean(trials_firingmap[trials[base_sample[L,:]],:],0)#/dwelltime
       #mask = (dwelltime==0)
       #firingmap_bs[mask,L] = 0
       
-      firingmap_bs[:,L] = np.nanmean(trials_firingmap[base_sample[L,:],:],0)# / self.dataBH['trials']['dwelltime'][base_sample[L,:],:],0)
+      #firingmap_bs[:,L] = np.nanmean(trials_firingmap[base_sample[L,:],:]/ self.dataBH['trials']['dwelltime'][base_sample[L,:],:],0)
     firingstats['map'] = np.nanmean(firingmap_bs,1)
-    firingstats['map'][~(firingstats['map']>0)] = 1/(self.para['nbin']*self.dataBH['T'])     ## set 0 firing rates to lowest possible (0 leads to problems in model, as 0 noise, thus likelihood = 0)
     
+    if complete:
+      ## parameters of gamma distribution can be directly inferred from mean and std
+      firingstats['std'] = np.nanstd(firingmap_bs,1)
+      firingstats['std'][firingstats['std']==0] = np.nanmean(firingstats['std'])
+      prc = [2.5,97.5]
+      firingstats['CI'] = np.nanpercentile(firingmap_bs,prc,1);   ## width of gaussian - from 1-SD confidence interval
+      
+      ### fit linear dependence of noise on amplitude (with 0 noise at fr=0)
+      firingstats['parNoise'] = jackknife(firingstats['map'],firingstats['std'])
+      if self.para['plt_theory_bool'] and self.para['plt_bool']:
+        self.plt_model_selection(firingmap_bs,firingstats,trials_firingmap)
+    
+    firingstats['map'] = np.maximum(firingstats['map'],1/dwelltime.sum(0))#1/(self.para['nbin'])     ## set 0 firing rates to lowest possible (0 leads to problems in model, as 0 noise, thus likelihood = 0)
+    firingstats['map'][dwelltime.sum(0)<0.2] = np.NaN#1/(self.para['nbin']*self.dataBH['T'])
     ### estimate noise of model
-    ## parameters of gamma distribution can be directly inferred from mean and std
-    firingstats['std'] = np.nanstd(firingmap_bs,1)
-    prc = [2.5,97.5]
-    firingstats['CI'] = np.nanpercentile(firingmap_bs,prc,1);   ## width of gaussian - from 1-SD confidence interval
-    ### fit linear dependence of noise on amplitude (with 0 noise at fr=0)
-    firingstats['parNoise'] = jackknife(firingstats['map'],firingstats['std'])
-    
-    if self.para['plt_theory_bool']:
-      self.plt_model_selection(firingmap_bs,firingstats['parNoise'],trials_firingmap)
-      #return
     return firingstats
-
-
-  def get_info_value(self,activity,dwelltime):
+  
+  
+  def get_info_value(self,activity,dwelltime,mode='MI'):
     
-    if self.para['modes']['info'] == 'MI':
+    if mode == 'MI':
       p_joint = self.get_p_joint(activity)   ## need activity trace
-      return get_MI(p_joint,dwelltime,self.para['qtl_weight'])
+      return get_MI(p_joint,dwelltime/dwelltime.sum(),self.para['qtl_weight'])
       
-    elif self.para['modes']['info'] == 'I_sec':
+    elif mode == 'Isec':
       fmap = self.get_firingmap(activity,self.dataBH['binpos_coarse_active'],dwelltime,coarse=True)
-      fmap /= fmap.sum()
-      return np.nansum(dwelltime*fmap*np.log2(fmap/fmap.mean()))
+      Isec_arr = dwelltime/dwelltime.sum()*(fmap/np.nanmean(fmap))*np.log2(fmap/np.nanmean(fmap))
       
-      #firingmap = imgaussfilt(get_firingmap(activity,binpos,dwelltime,self.para,True),self.para['sigma'],
-                              #'Padding','circular','FilterDomain','spatial')
-      #return get_I_sec(firingmap,dwelltime,self.para)
-    
+      #return np.nansum(Isec_arr[-self.para['nbin']//2:])
+      return np.nansum(Isec_arr)
+      
 
   def get_p_joint(self,activity):
     
@@ -1288,20 +1099,29 @@ class detect_PC:
     else:
       S_key = 'S'
     
-    MI = {'MI_p_value':np.NaN,'MI_value':np.NaN,'MI_z_score':np.NaN}
-    rand_distr = np.zeros(self.para['repnum'])*np.NaN
+    MI = {'MI_p_value':np.NaN,'MI_value':np.NaN,'MI_z_score':np.NaN,
+          'Isec_p_value':np.NaN,'Isec_value':np.NaN,'Isec_z_score':np.NaN}
+    MI_rand_distr = np.zeros(self.para['repnum'])*np.NaN
+    Isec_rand_distr = np.zeros(self.para['repnum'])*np.NaN
     
     ### first, get actual MI value
-    norm_dwelltime = self.dataBH['trials']['dwelltime'].sum(0)*self.para['f']/self.dataBH['T']
-    norm_dwelltime_coarse = np.zeros(self.para['nbin_coarse'])
-    for i in range(self.para['nbin_coarse']):
-      norm_dwelltime_coarse[i] = norm_dwelltime[i*self.para['coarse_factor']:(i+1)*self.para['coarse_factor']].sum()
+    norm_dwelltime = self.dataBH['trials']['dwelltime'].sum(0)#/self.dataBH['trials']['dwelltime'].sum()#*self.para['f']/self.dataBH['T']
     
-    MI['MI_value'] = self.get_info_value(active[S_key],norm_dwelltime_coarse)
-    #return MI
+    if self.para['nbin_coarse'] == self.para['nbin']:
+      norm_dwelltime_coarse = norm_dwelltime
+    else:
+      norm_dwelltime_coarse = np.zeros(self.para['nbin_coarse'])
+      for i in range(self.para['nbin_coarse']):
+        norm_dwelltime_coarse[i] = norm_dwelltime[i*self.para['coarse_factor']:(i+1)*self.para['coarse_factor']].sum()
+    
+    frate = gauss_smooth(active['S']*self.para['f'],self.para['sigma'])
+    
+    pos_act = self.dataBH['position'][self.dataBH['active']]
+    
+    MI['MI_value'] = self.get_info_value(active[S_key],norm_dwelltime_coarse,mode='MI')
+    MI['Isec_value'] = self.get_info_value(frate,norm_dwelltime_coarse,mode='Isec')
+    
     ### shuffle according to specified mode
-    #t_start_shuffle = time.time()
-    
     trial_ct = self.dataBH['trials']['ct']
     for L in range(self.para['repnum']):
       
@@ -1311,18 +1131,12 @@ class detect_PC:
         ## trial shuffling
         trials = np.random.permutation(trial_ct)
         
-        shuffled_activity = np.roll(np.hstack([np.roll(trials_S[t][S_key],int(random.random()*self.dataBH['trials']['T'][t])) for t in trials]),int(random.random()*self.dataBH['T']))
+        shuffled_activity_qtl = np.roll(np.hstack([np.roll(trials_S[t][S_key],int(random.random()*self.dataBH['trials']['T'][t])) for t in trials]),int(random.random()*self.dataBH['T']))
         
-        ### subsequent global shuffling
-        #if self.para['modes']['activity'] == 'spikes':
-          #spike_times_L = np.where(shuffled_activity)[0]
-          #spikes_L = shuffled_activity[spike_times_L]
-          #ISI_L = np.diff(spike_times_L)
-          #shuffled_activity = shuffling('dithershift',shuffle_peaks,spike_times=spike_times_L,spikes=spikes_L,T=self.dataBH['T'],ISI=ISI_L,w=2*self.para['f'])
-        #else:
-          #shuffled_activity = shuffling('shift',shuffle_peaks,spike_train=shuffled_activity)
-      
-      
+        #shuffled_activity_S = np.roll(np.hstack([np.roll(trials_S[t]['S'],int(random.random()*self.dataBH['trials']['T'][t])) for t in trials]),int(random.random()*self.dataBH['T']))
+        
+        #shuffled_activity_S = gauss_smooth(shuffled_activity_S*self.para['f'],self.para['sigma'])
+        
       elif self.para['modes']['shuffle'] == 'shuffle_global':
         if self.para['modes']['activity'] == 'spikes':
           shuffled_activity = shuffling('dithershift',shuffle_peaks,spike_times=spike_times,spikes=spikes,T=self.dataBH['T'],ISI=ISI,w=2*self.para['f'])
@@ -1331,22 +1145,66 @@ class detect_PC:
         
       elif self.para['modes']['shuffle'] == 'randomize':
         shuffled_activity = active[S_key][np.random.permutation(len(active[S_key]))];
-      #
+      
       #t_start_info = time.time()
-      #print(shuffled_activity)
-      rand_distr[L] = self.get_info_value(shuffled_activity,norm_dwelltime_coarse)
+      MI_rand_distr[L] = self.get_info_value(shuffled_activity_qtl,norm_dwelltime_coarse,mode='MI')
+      #Isec_rand_distr[L] = self.get_info_value(shuffled_activity_S,norm_dwelltime_coarse,mode='Isec')
+      
       #print('info calc: time taken: %5.3g'%(time.time()-t_start_info))
     #print('shuffle: time taken: %5.3g'%(time.time()-t_start_shuffle))
     
-    MI_mean = np.nanmean(rand_distr)
-    MI_std = np.nanstd(rand_distr)
+    MI_mean = np.nanmean(MI_rand_distr)
+    MI_std = np.nanstd(MI_rand_distr)
     MI['MI_z_score'] = (MI['MI_value'] - MI_mean)/MI_std
-    if MI['MI_value'] > rand_distr.max():
+    if MI['MI_value'] > MI_rand_distr.max():
       MI['MI_p_value'] = 1e-10#1/self.para['repnum']
     else:
-      x,y = ecdf(rand_distr)
-      min_idx = np.argmin(abs(x-MI['MI_value']));
-      MI['MI_p_value'] = 1 - y[min_idx];
+      x,y = ecdf(MI_rand_distr)
+      min_idx = np.argmin(abs(x-MI['MI_value']))
+      MI['MI_p_value'] = 1 - y[min_idx]
+    
+    
+    #Isec_mean = np.nanmean(Isec_rand_distr)
+    #Isec_std = np.nanstd(Isec_rand_distr)
+    #MI['Isec_z_score'] = (MI['Isec_value'] - Isec_mean)/Isec_std
+    #if MI['Isec_value'] > Isec_rand_distr.max():
+      #MI['Isec_p_value'] = 1e-10#1/self.para['repnum']
+    #else:
+      #x,y = ecdf(Isec_rand_distr)
+      #min_idx = np.argmin(abs(x-MI['Isec_value']))
+      #MI['Isec_p_value'] = 1 - y[min_idx]
+    
+    
+    
+    #Isec_mean = np.nanmean(Isec_rand_distr,0)
+    #Isec_std = np.nanstd(Isec_rand_distr,0)
+    #p_val = np.zeros(self.para['nbin_coarse'])
+    #if ~np.any(MI['Isec_value'] > (Isec_mean+Isec_std)):
+      #MI['Isec_p_value'][:] = 1#1/self.para['repnum']
+    #else:
+      #for i in range(self.para['nbin_coarse']):
+        #if MI['Isec_value'][i] > Isec_rand_distr[:,i].max():
+          #p_val[i] = 1/self.para['repnum']
+        #else:
+          #x,y = ecdf(Isec_rand_distr[:,i])
+          #min_idx = np.argmin(abs(x-MI['Isec_value'][i]))
+          #p_val[i] = 1 - y[min_idx]
+    #p_val.sort()
+    ##print(p_val)
+    #MI['Isec_p_value'] = np.exp(np.log(p_val[:5]).mean())
+    ##MI['Isec_z_score'] = np.max((MI['Isec_value'] - Isec_mean)/Isec_std)
+    
+    
+    #plt.figure()
+    #plt.subplot(211)
+    #plt.plot(MI['Isec_value'])
+    #plt.errorbar(np.arange(self.para['nbin_coarse']),Isec_mean,Isec_std)
+    #plt.subplot(212)
+    #plt.plot(MI['Isec_p_value'])
+    #plt.yscale('log')
+    #plt.show(block=False)
+    
+    
     #print('p_value: %7.5g'%MI['MI_p_value'])
     
     #if pl['bool']:
@@ -1365,48 +1223,60 @@ class detect_PC:
     result['status'] = {'MI_value':np.NaN,
                         'MI_p_value':np.NaN,
                         'MI_z_score':np.NaN,
-                        'Z':np.zeros((self.f_max+1,2))*np.NaN,
-                        'Bayes_factor':np.zeros((self.f_max,2))*np.NaN,
+                        'Isec_value':np.NaN,
+                        'Isec_p_value':np.NaN,
+                        'Isec_z_score':np.NaN,
+                        #'Z':np.zeros((self.f_max+1,2))*np.NaN,
+                        #'Bayes_factor':np.zeros((self.f_max,2))*np.NaN,
                         'SNR':np.NaN,
                         'r_value':np.NaN}
     
-    result['fields'] = {'parameter':np.zeros((3,4,1+len(self.para['CI_arr'])))*np.NaN,          ### (field1,field2) x (A0,A,std,theta) x (mean,CI_low,CI_top)
-                        'posterior_mass':np.zeros(3)*np.NaN,
-                        'p_x':np.zeros((3,2,self.para['nbin']))*np.NaN,
-                        'nModes':0,
-                        'major':np.NaN}
+    result['fields'] = {'parameter':np.zeros((5,4,1+len(self.para['CI_arr'])))*np.NaN,          ### (field1,field2) x (A0,A,std,theta) x (mean,CI_low,CI_top)
+                        'posterior_mass':np.zeros(5)*np.NaN,
+                        'p_x':np.zeros((5,self.para['nbin']))*np.NaN,
+                        'reliability':np.zeros(5)*np.NaN,
+                        'Bayes_factor':np.zeros((5,2))*np.NaN,
+                        'nModes':0}
+                        #'major':np.NaN}
     
     result['firingstats'] = {'rate':np.NaN,
-                            'rate_thr':np.NaN,
-                            'map':np.zeros(self.para['nbin'])*np.NaN,
-                            'std':np.zeros(self.para['nbin'])*np.NaN,
-                            'CI':np.zeros((2,self.para['nbin']))*np.NaN,
-                            'parNoise':np.NaN}
+                             'map':np.zeros(self.para['nbin'])*np.NaN,
+                             'std':np.zeros(self.para['nbin'])*np.NaN,
+                             'CI':np.zeros((2,self.para['nbin']))*np.NaN,
+                             'trial_map':np.zeros((self.dataBH['trials']['ct'],self.para['nbin']))*np.NaN,
+                             'trial_field':np.zeros((5,self.dataBH['trials']['ct']),'bool'),
+                             'parNoise':np.zeros(2)*np.NaN}
     return result
     
     
   def build_PC_results(self,nCells):
     results = {}
     results['status'] = {'MI_value':np.zeros(nCells)*np.NaN,
-                        'MI_p_value':np.zeros(nCells)*np.NaN,
-                        'MI_z_score':np.zeros(nCells)*np.NaN,
-                        'Z':np.zeros((nCells,self.f_max+1,2))*np.NaN,
-                        'Bayes_factor':np.zeros((nCells,self.f_max,2))*np.NaN,
-                        'SNR':np.zeros(nCells)*np.NaN,
-                        'r_value':np.zeros(nCells)*np.NaN}
+                         'MI_p_value':np.zeros(nCells)*np.NaN,
+                         'MI_z_score':np.zeros(nCells)*np.NaN,
+                         'Isec_value':np.zeros(nCells)*np.NaN,
+                         'Isec_p_value':np.zeros(nCells)*np.NaN,
+                         'Isec_z_score':np.zeros(nCells)*np.NaN,
+                         #'Z':np.zeros((nCells,self.f_max+1,2))*np.NaN,
+                         #'Bayes_factor':np.zeros((nCells,self.f_max,2))*np.NaN,
+                         'SNR':np.zeros(nCells)*np.NaN,
+                         'r_value':np.zeros(nCells)*np.NaN}
                   
-    results['fields'] = {'parameter':np.zeros((nCells,3,4,1+len(self.para['CI_arr'])))*np.NaN,          ### (mean,std,CI_low,CI_top)
-                        'p_x':sp.sparse.COO((nCells,3,self.para['nbin'])),#np.zeros((nCells,3,2,self.para['nbin'])),##
-                        'posterior_mass':np.zeros((nCells,3))*np.NaN,
-                        'nModes':np.zeros(nCells).astype('int'),
-                        'major':np.zeros(nCells)*np.NaN}
+    results['fields'] = {'parameter':np.zeros((nCells,5,4,1+len(self.para['CI_arr'])))*np.NaN,          ### (mean,std,CI_low,CI_top)
+                         'p_x':np.zeros((nCells,5,self.para['nbin'])),##sp.sparse.COO((nCells,3,self.para['nbin'])),#
+                         'posterior_mass':np.zeros((nCells,5))*np.NaN,
+                         'reliability':np.zeros((nCells,5))*np.NaN,
+                         'Bayes_factor':np.zeros((nCells,5,2))*np.NaN,
+                         'nModes':np.zeros(nCells).astype('int')}
+                         #'major':np.zeros(nCells)*np.NaN}
     
     results['firingstats'] = {'rate':np.zeros(nCells)*np.NaN,
-                              'rate_thr':np.zeros(nCells)*np.NaN,
                               'map':np.zeros((nCells,self.para['nbin']))*np.NaN,
                               'std':np.zeros((nCells,self.para['nbin']))*np.NaN,
                               'CI':np.zeros((nCells,2,self.para['nbin']))*np.NaN,
-                              'parNoise':np.zeros(nCells)*np.NaN}
+                              'trial_map':np.zeros((nCells,self.dataBH['trials']['ct'],self.para['nbin']))*np.NaN,
+                              'trial_field':np.zeros((nCells,5,self.dataBH['trials']['ct']),'bool'),
+                              'parNoise':np.zeros((nCells,2))*np.NaN}
     return results
 
 
@@ -1453,7 +1323,7 @@ class detect_PC:
                         #}
                 #}
     
-  def get_firingmap(self,S,binpos,dwelltime,coarse=False):
+  def get_firingmap(self,S,binpos,dwelltime=None,coarse=False):
     
     ### calculates the firing map
     spike_times = np.where(S)
@@ -1471,12 +1341,12 @@ class detect_PC:
     return firingmap
   
   
-  def get_firingrate(self,S):
+  def get_firingrate(self,S,sd_r=None):
     
     S[S<0.0001*S.max()]=0
     Ns = (S>0).sum()
     if Ns==0:
-      return 0
+      return 0,np.NaN,np.NaN
     else:
       trace = S[S>0]
       baseline = np.median(trace)
@@ -1486,41 +1356,181 @@ class detect_PC:
       Ns_baseline = (trace>0).sum()
       noise = np.sqrt((trace**2).sum()/(Ns_baseline*(1-2/np.pi)))
       
-      firing_threshold_adapt = sstats.norm.ppf((1-0.01)**(1/Ns))
-      N_spikes = np.floor(S / (baseline + firing_threshold_adapt*noise)).sum()
-      return N_spikes/(S.shape[0]/self.para['f']),firing_threshold_adapt
+      #sd_r = sstats.norm.ppf((1-0.1)**(1/Ns)) if sd_r is None else sd_r
+      sd_r = 1
+      firing_threshold_adapt = baseline + sd_r*noise
+      
+      N_spikes = np.floor(S / firing_threshold_adapt).sum()
+      return N_spikes/(S.shape[0]/self.para['f']),firing_threshold_adapt,S > firing_threshold_adapt#np.floor(S / firing_threshold_adapt)#
   
   
-  def plt_model_selection(self,fmap_bs,parsNoise,trials_fmap):
+  
+  def plt_results(self,result,t):
+    
+    #print('for display: draw tuning curves from posterior distribution and evaluate TC-value for each bin. then, each bin has distribution of values and can be plotted! =)')
+    style_arr = ['--','-']
+    #col_arr = []
+    #fig,ax = plt.subplots(figsize=(5,3),dpi=150)
+    
+    hbm = HierarchicalBayesModel(result['firingstats']['map'],self.para['bin_array'],result['firingstats']['parNoise'],0)
+    
+    plt.figure()
+    ax = plt.axes([0.6,0.625,0.35,0.25])
+    ax.bar(self.para['bin_array'],result['firingstats']['map'],facecolor='b',width=1,alpha=0.2)
+    ax.errorbar(self.para['bin_array'],result['firingstats']['map'],result['firingstats']['CI'],ecolor='r',linestyle='',fmt='',elinewidth=0.3)#,label='$95\\%$ confidence')
+    
+    ax.plot(self.para['bin_array'],hbm.TC(np.array([result['fields']['parameter'][t,0,0]])),'k',linestyle='--',linewidth=1)#,label='$log(Z)=%4.1f\\pm%4.1f$ (non-coding)'%(result['status']['Z'][0,0],result['status']['Z'][0,1]))
+    
+    #try:
+    #print(result['fields']['nModes'])
+    #for c in range(min(2,result['fields']['nModes'])):
+    #if result['fields']['nModes']>1:
+      #if c==0:
+      #label_str = '(mode #%d)\t$log(Z)=%4.1f\\pm%4.1f$'%(c+1,result['status']['Z'][1,0],result['status']['Z'][1,1])
+      #else:
+    label_str = '(mode #%d)'%(t+1)
+    #else:
+      #label_str = '$log(Z)=%4.1f\\pm%4.1f$ (coding)'%(result['status']['Z'][1,0],result['status']['Z'][1,1])
+    
+    para = result['fields']['parameter'][t,...]
+    
+    para[2,:] *= self.para['nbin']/self.para['L_track']
+    para[3,:] *= self.para['nbin']/self.para['L_track']
+    
+    ax.plot(self.para['bin_array'],hbm.TC(para[:,0]),'r',linestyle='-',linewidth=0.5+result['fields']['posterior_mass'][t]*2,label=label_str)
+      #except:
+        #1
+    #ax.plot(self.para['bin_array'],hbm.TC(par_results[1]['mean']),'r',label='$log(Z)=%5.3g\\pm%5.3g$'%(par_results[1]['Z'][0],par_results[1]['Z'][1]))
+    ax.legend(title='evidence',fontsize=8,loc='upper left',bbox_to_anchor=[0.05,1.4])
+    ax.set_xlabel('Location [bin]')
+    ax.set_ylabel('$\\bar{\\nu}$')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    plt.tight_layout()
+    if self.para['plt_sv']:
+      pathSv = pathcat([self.para['pathFigs'],'PC_analysis_fit_results.png'])
+      plt.savefig(pathSv)
+      print('Figure saved @ %s'%pathSv)
+    plt.show(block=False)
+  
+  
+  def plt_data(self,n,S=None,activity_mode='calcium'):
+    
+    if (S is None) and ~hasattr(self,'S'):
+      pathDat = os.path.join(self.para['pathSession'],'results_redetect.mat')
+      ld = loadmat(pathDat,variable_names=['S','C'])
+      self.S = ld['S']
+      self.C = ld['C']
+    S_raw = self.S[n,:]
+    C = self.C[n,:]
+    rate,S_thr,_ = self.get_firingrate(S_raw[self.dataBH['active']])
+    if activity_mode == 'spikes':
+      S = np.floor(S_raw/S_thr).astype('float')
+    else:
+      S = S_raw
+    if ~hasattr(self,'results'):
+      self.results = {}
+      self.results['status'] = loadmat(self.para['svname_status'])
+      self.results['parameter'] = loadmat(self.para['svname_fields'])
+      self.results['firingstats'] = loadmat(self.para['svname_firingstats'])
+      
+    t_start = 0#200
+    t_end = 600#470
+    n_trial = 12
+    
+    plt.figure(figsize=(7,4),dpi=300)
+    ax_Ca = plt.axes([0.1,0.6,0.5,0.35])
+    ax_dwell = plt.axes([0.7,0.9,0.2,0.075])
+    ax_loc = plt.axes([0.1,0.1,0.5,0.5])
+    ax1 = plt.axes([0.6,0.1,0.35,0.5])
+    #ax2 = plt.axes([0.6,0.275,0.35,0.175])
+    #ax3 = plt.axes([0.1,0.08,0.4,0.25])
+    #ax4 = plt.axes([0.6,0.08,0.35,0.175])
+    
+    idx_longrun = self.dataBH['active']
+    t_longrun = self.dataBH['time'][idx_longrun]
+    t_stop = self.dataBH['time'][~idx_longrun]
+    ax_Ca.bar(t_stop,np.ones(len(t_stop))*1.2*S.max(),color=[0.9,0.9,0.9],zorder=0)
+    
+    ax_Ca.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[1.2*S_raw.max(),1.2*S_raw.max()],color=[0,0,1,0.2],zorder=1)
+    
+    ax_Ca.plot(self.dataBH['time'],C,'k',linewidth=0.2)
+    ax_Ca.plot(self.dataBH['time'],S_raw,'r',linewidth=1)
+    ax_Ca.plot([0,self.dataBH['time'][-1]],[S_thr,S_thr])
+    ax_Ca.set_ylim([0,1.2*S_raw.max()])
+    ax_Ca.set_xlim([t_start,t_end])
+    ax_Ca.set_xticks([])
+    ax_Ca.set_ylabel('Ca$^{2+}$')
+    ax_Ca.set_yticks([])
+    
+    ax_loc.plot(self.dataBH['time'],self.dataBH['position'],'.',color=[0.6,0.6,0.6],zorder=5,markeredgewidth=0,markersize=1)
+    idx_active = (S>0) & self.dataBH['active']
+    idx_inactive = (S>0) & ~self.dataBH['active']
+    
+    t_active = self.dataBH['time'][idx_active]
+    pos_active = self.dataBH['position'][idx_active]
+    S_active = S[idx_active]
+    
+    t_inactive = self.dataBH['time'][idx_inactive]
+    pos_inactive = self.dataBH['position'][idx_inactive]
+    S_inactive = S[idx_inactive]
+    if activity_mode == 'spikes':
+      ax_loc.scatter(t_active,pos_active,s=S_active,c='r',zorder=10)
+      ax_loc.scatter(t_inactive,pos_inactive,s=S_inactive,c='k',zorder=10)
+    else:
+      ax_loc.scatter(t_active,pos_active,s=(S_active/S.max())**2*10+0.1,color='r',zorder=10)
+      ax_loc.scatter(t_inactive,pos_inactive,s=(S_inactive/S.max())**2*10+0.1,color='k',zorder=10)
+    ax_loc.bar(t_stop,np.ones(len(t_stop))*self.para['L_track'],color=[0.9,0.9,0.9],zorder=0)
+    ax_loc.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[self.para['L_track'],self.para['L_track']],color=[0,0,1,0.2],zorder=1)
+    
+    ax_loc.set_ylim([0,self.para['L_track']])
+    ax_loc.set_xlim([t_start,t_end])
+    ax_loc.set_xlabel('t [s]')
+    ax_loc.set_ylabel('Location [bin]')
+    
+    ax_dwell.bar(self.para['bin_array'],self.dataBH['trials']['dwelltime'].sum(0))
+    
+    fmap = self.get_firingmap(S[self.dataBH['active']],self.dataBH['binpos'][self.dataBH['active']],self.dataBH['trials']['dwelltime'].sum(0))
+    #fmap /= np.nansum(fmap)
+    bin_array = np.linspace(0,self.para['L_track'],self.para['nbin'])
+    ax1.barh(bin_array,fmap,facecolor='r',alpha=0.2,height=self.para['L_track']/self.para['nbin'],label='$\\bar{\\nu}$')
+    
+    fmap = self.results['firingstats']['map'][n,:]
+    fmap_norm = np.nansum(self.results['firingstats']['map'][n,:])
+    ax1.barh(bin_array,self.results['firingstats']['map'][n,:],height=self.para['L_track']/self.para['nbin'],facecolor='b',alpha=0.2,label='$\\bar{\\nu}$')
+    #ax1.barh(self.para['bin_array'][i],fr_mu[i],facecolor='b',height=1)
+    ax1.errorbar(self.results['firingstats']['map'][n,:],bin_array,xerr=self.results['firingstats']['CI'][n,...],ecolor='r',linewidth=0.2,linestyle='',fmt='',label='1 SD confidence')
+    
+    ##flierprops = dict(marker='.', markerfacecolor='k', markersize=0.5)
+    ##h_bp = ax1.boxplot(Y,flierprops=flierprops)#,positions=self.para['bin_array'])
+    ax1.set_yticks([])#np.linspace(0,100,6))
+    ##ax1.set_yticklabels(np.linspace(0,100,6).astype('int'))
+    ax1.set_ylim([0,self.para['L_track']])
+    ax1.set_xlim([0,np.nanmax(self.results['firingstats']['map'][n,:])*1.2])
+    ax1.set_xticks([])
+    ##ax1.set_xlabel('Ca$^{2+}$-event rate $\\nu$')
+    ax1.spines['right'].set_visible(False)
+    ax1.spines['top'].set_visible(False)
+    ##ax1.set_ylabel('Position on track')
+    ax1.legend(title='# trials = %d'%self.dataBH['trials']['ct'],loc='lower left',bbox_to_anchor=[0.55,0.025],fontsize=8)#[h_bp['boxes'][0]],['trial data'],
+    
+    plt.show(block=False)
+  
+  def plt_model_selection(self,fmap_bs,firingstats,trials_fmap):
     
     rc('font',size=10)
     rc('axes',labelsize=12)
     rc('xtick',labelsize=8)
     rc('ytick',labelsize=8)
-    sig2 = False   ## estimate variance from 2-sigma or from 1-sigma interval (more accurate from 1-sigma interval, as it becomes less gaussian, the more data it encompasses
-    if sig2: 
-      prc = [2.5,97.5]
-      sig_fact = 1.96
-    else:
-      prc = [15.8,84.2]
-      sig_fact = 1
-    fr_mu = np.nanmean(fmap_bs,1)                 ## average of firing rate (centre of gaussian)
-    fr_CI = np.nanpercentile(fmap_bs,prc,1);   ## width of gaussian - from 1-SD confidence interval
-    fr_std = np.nanstd(fmap_bs,1)
     
-    #fig = plt.figure(figsize=(4,3),dpi=150)
-    #ax = plt.axes([0.15,0.2,0.8,0.75])
+    prc = [15.8,84.2]
     
-    #ax.bar(self.para['bin_array'],fr_mu,color='b',alpha=0.2,width=1,label='$\\bar{\\nu}$')
-    #ax.errorbar(self.para['bin_array'],fr_mu,fr_CI,ecolor='r',elinewidth=0.5,linestyle='',fmt='',label='$95\\%$ confidence')
+    fr_mu = firingstats['map']#gauss_smooth(np.nanmean(fmap_bs,1),2)
+    fr_CI = firingstats['CI']
+    fr_std = firingstats['std']
     
-    #ax.set_xticks(np.linspace(0,100,6))
-    #ax.set_xticklabels(np.linspace(0,100,6).astype('int'))
-    #ax.set_ylim([-0.1,np.nanmax(fr_mu)*2])
-    #ax.set_ylabel('Ca$^{2+}$-event rate $\\nu$',fontsize=12)
-    #ax.set_xlabel('Position on track',fontsize=12)
-    #ax.legend(loc='upper left')
-    #plt.show(block=False)
+    #print(fr_mu)
+    #print()
     
     fig = plt.figure(figsize=(7,5),dpi=300)
     
@@ -1529,53 +1539,68 @@ class detect_PC:
     ld = loadmat(pathDat,variable_names=['S','C'])
     
     C = ld['C'][self.para['n'],:]
-    S = ld['S'][self.para['n'],:]
+    S_raw = ld['S'][self.para['n'],:]
+    rate,S_thr,_ = self.get_firingrate(S_raw[self.dataBH['active']])
+    if self.para['modes']['activity'] == 'spikes':
+      S = S_raw>S_thr
+    else:
+      S = S_raw
     
     t_start = 0#200
     t_end = 600#470
     n_trial = 12
     
     ax_Ca = plt.axes([0.1,0.8,0.5,0.175])
+    ax_loc = plt.axes([0.1,0.5,0.5,0.3])
+    ax_acorr = plt.axes([0.7,0.9,0.2,0.075])
+    ax1 = plt.axes([0.6,0.5,0.35,0.3])
+    ax2 = plt.axes([0.6,0.275,0.35,0.175])
+    ax3 = plt.axes([0.1,0.08,0.4,0.25])
+    ax4 = plt.axes([0.6,0.08,0.35,0.175])
+    
     idx_longrun = self.dataBH['active']
     t_longrun = self.dataBH['time'][idx_longrun]
     t_stop = self.dataBH['time'][~idx_longrun]
-    ax_Ca.bar(t_stop,np.ones(len(t_stop))*1.2*S.max(),color=[0.9,0.9,0.9],zorder=0)
+    ax_Ca.bar(t_stop,np.ones(len(t_stop))*1.2*S_raw.max(),color=[0.9,0.9,0.9],zorder=0)
     
-    ax_Ca.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[1.2*S.max(),1.2*S.max()],color=[0,0,1,0.2],zorder=1)
+    ax_Ca.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[1.2*S_raw.max(),1.2*S_raw.max()],color=[0,0,1,0.2],zorder=1)
     
     ax_Ca.plot(self.dataBH['time'],C,'k',linewidth=0.2)
-    ax_Ca.plot(self.dataBH['time'],S,'r',linewidth=1)
-    ax_Ca.set_ylim([0,1.2*S.max()])
+    ax_Ca.plot(self.dataBH['time'],S_raw,'r',linewidth=1)
+    ax_Ca.plot([0,self.dataBH['time'][-1]],[S_thr,S_thr])
+    ax_Ca.set_ylim([0,1.2*S_raw.max()])
     ax_Ca.set_xlim([t_start,t_end])
     ax_Ca.set_xticks([])
     ax_Ca.set_ylabel('Ca$^{2+}$')
     ax_Ca.set_yticks([])
     
-    ax_loc = plt.axes([0.1,0.5,0.5,0.3])
     
-    ax_loc.plot(self.dataBH['time'],self.dataBH['binpos'],'.',color=[0.6,0.6,0.6],zorder=5,markeredgewidth=0,markersize=1)
+    ax_loc.plot(self.dataBH['time'],self.dataBH['position'],'.',color=[0.6,0.6,0.6],zorder=5,markeredgewidth=0,markersize=1)
     idx_active = (S>0) & self.dataBH['active']
     idx_inactive = (S>0) & ~self.dataBH['active']
     
     t_active = self.dataBH['time'][idx_active]
-    pos_active = self.dataBH['binpos'][idx_active]
+    pos_active = self.dataBH['position'][idx_active]
     S_active = S[idx_active]
     
     t_inactive = self.dataBH['time'][idx_inactive]
-    pos_inactive = self.dataBH['binpos'][idx_inactive]
+    pos_inactive = self.dataBH['position'][idx_inactive]
     S_inactive = S[idx_inactive]
-    ax_loc.scatter(t_active,pos_active,s=S_active/S.max()*10+0.5,c='r',zorder=10)
-    ax_loc.scatter(t_inactive,pos_inactive,s=S_inactive/S.max()*10+0.5,c='k',zorder=10)
-    ax_loc.bar(t_stop,np.ones(len(t_stop))*100,color=[0.9,0.9,0.9],zorder=0)
-    ax_loc.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[100,100],color=[0,0,1,0.2],zorder=1)
+    if self.para['modes']['activity'] == 'spikes':
+      ax_loc.scatter(t_active,pos_active,s=1,color='r',zorder=10)
+      ax_loc.scatter(t_inactive,pos_inactive,s=1,color='k',zorder=10)
+    else:
+      ax_loc.scatter(t_active,pos_active,s=(S_active/S.max())**2*10+0.1,color='r',zorder=10)
+      ax_loc.scatter(t_inactive,pos_inactive,s=(S_inactive/S.max())**2*10+0.1,color='k',zorder=10)
+    ax_loc.bar(t_stop,np.ones(len(t_stop))*self.para['L_track'],color=[0.9,0.9,0.9],zorder=0)
+    ax_loc.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[self.para['L_track'],self.para['L_track']],color=[0,0,1,0.2],zorder=1)
     
-    ax_loc.set_ylim([0,100])
+    ax_loc.set_ylim([0,self.para['L_track']])
     ax_loc.set_xlim([t_start,t_end])
     ax_loc.set_xlabel('t [s]')
     ax_loc.set_ylabel('Location [bin]')
     
     nC,T = ld['C'].shape
-    ax_acorr = plt.axes([0.7,0.9,0.2,0.075])
     n_arr = np.random.randint(0,nC,20)
     lags = 300
     t=np.linspace(0,lags/15,lags+1)
@@ -1591,9 +1616,15 @@ class detect_PC:
     ax_acorr.set_xlabel('$\Delta t$ [s]')
     ax_acorr.set_ylabel('corr.')
     
-    ax1 = plt.axes([0.6,0.5,0.35,0.3])
+    
     i = random.randint(0,self.para['nbin']-1)
     #ax1 = plt.subplot(211)
+    #for i in range(3):
+      #trials = np.where(self.result['firingstats']['trial_field'][i,:])[0]
+      #if len(trials)>0:
+        #fr_mu_trial = gauss_smooth(np.nanmean(self.result['firingstats']['trial_map'][trials,:],0),2)
+        #ax1.barh(self.para['bin_array'],fr_mu_trial,alpha=0.5,height=1,label='$\\bar{\\nu}$')
+    
     ax1.barh(self.para['bin_array'],fr_mu,facecolor='b',alpha=0.2,height=1,label='$\\bar{\\nu}$')
     ax1.barh(self.para['bin_array'][i],fr_mu[i],facecolor='b',height=1)
     
@@ -1606,8 +1637,9 @@ class detect_PC:
     #h_bp = ax1.boxplot(Y,flierprops=flierprops)#,positions=self.para['bin_array'])
     ax1.set_yticks([])#np.linspace(0,100,6))
     #ax1.set_yticklabels(np.linspace(0,100,6).astype('int'))
-    ax1.set_ylim([0,100])
-    ax1.set_xlim([0,np.nanmax(fr_mu)*1.2])
+    ax1.set_ylim([0,self.para['nbin']])
+    
+    ax1.set_xlim([0,np.nanmax(fr_mu[np.isfinite(fr_mu)])*1.2])
     ax1.set_xticks([])
     #ax1.set_xlabel('Ca$^{2+}$-event rate $\\nu$')
     ax1.spines['right'].set_visible(False)
@@ -1615,18 +1647,14 @@ class detect_PC:
     #ax1.set_ylabel('Position on track')
     ax1.legend(title='# trials = %d'%self.dataBH['trials']['ct'],loc='lower left',bbox_to_anchor=[0.55,0.025],fontsize=8)#[h_bp['boxes'][0]],['trial data'],
     
-    ax2 = plt.axes([0.6,0.275,0.35,0.175])
     #ax2 = plt.subplot(426)
-    ax2.plot(np.linspace(0,5,101),parsNoise*np.linspace(0,5,101),'--',color=[0.5,0.5,0.5],label='lq-fit')
+    ax2.plot(np.linspace(0,5,101),firingstats['parNoise'][1]+firingstats['parNoise'][0]*np.linspace(0,5,101),'--',color=[0.5,0.5,0.5],label='lq-fit')
     ax2.plot(fr_mu,fr_std,'r.',markersize=1)#,label='$\\sigma(\\nu)$')
-    ax2.set_xlim([0,np.nanmax(fr_mu)*1.2])
+    ax2.set_xlim([0,np.nanmax(fr_mu[np.isfinite(fr_mu)])*1.2])
     #ax2.set_xlabel('firing rate $\\nu$')
     ax2.set_xticks([])
     ax2.set_ylim([0,np.nanmax(fr_std)*1.2])
     ax2.set_ylabel('$\\sigma_{\\nu}$')
-    
-    ax3 = plt.axes([0.1,0.08,0.4,0.25])
-    #ax3 = plt.subplot(223)
     
     
     ax1.bar(self.para['bin_array'][i],fr_mu[i],color='b')
@@ -1641,9 +1669,6 @@ class detect_PC:
     
     def gamma_fun(x,alpha,beta):
       return beta**alpha * x**(alpha-1) * np.exp(-beta*x) / sp.special.gamma(alpha)
-    
-    #fm = trials_fmap/self.dataBH['trials']['dwelltime']
-    #ax3.plot(fm[:,i],np.zeros(fm.shape[0]),'kx')
     
     ax3.plot(x_arr,sstats.gamma.pdf(x_arr,alpha,0,1/beta),'r',label='fit: $\\Gamma(\\alpha,\\beta)$')
     #ax3.plot(x_arr,gamma_fun(x_arr,alpha,beta),'r',label='fit: $\\Gamma(\\alpha,\\beta)$')
@@ -1663,10 +1688,6 @@ class detect_PC:
     #ax2.set_title("estimating noise")
     
     ax3.legend(fontsize=8)
-    #ax3.set_title('bootstrapped data at bin %d'%i)
-    
-    ax4 = plt.axes([0.6,0.08,0.35,0.175])
-    #ax4 = plt.subplot(428)
     
     D_KL_gamma = np.zeros(self.para['nbin'])
     D_KL_gauss = np.zeros(self.para['nbin'])
@@ -1675,10 +1696,6 @@ class detect_PC:
     D_KS_stats = np.zeros(self.para['nbin'])
     p_KS_stats = np.zeros(self.para['nbin'])
     
-    
-    
-    
-    #print('this is ordered by bins, not by firing rate?!')
     for i in range(self.para['nbin']):
       x_arr = np.linspace(0,fmap_bs[i,:].max()*1.2,self.para['nbin']+1)
       offset = (x_arr[1]-x_arr[0])/2
@@ -1686,56 +1703,12 @@ class detect_PC:
       alpha, beta = gamma_paras(fr_mu[i],fr_std[i])
       mu, shape = lognorm_paras(fr_mu[i],fr_std[i])
       
-      #print(fmap_bs[i,:])
-      
       D_KS_stats[i],p_KS_stats[i] = sstats.kstest(fmap_bs[i,:],'gamma',args=(alpha,offset,1/beta))
-      #print('bin #%d'%i)
-      #print(fm[:,i])
-      #if np.any(np.isfinite(fm[:,i])):
-        #D_KS_stats[i],p_KS_stats[i] = sstats.kstest(fm[~np.isnan(fm[:,i]),i],'gamma',args=(alpha,offset,1/beta))
-        #print(D_KS_stats[i],p_KS_stats[i])
-        
-      #hist_cdf = np.cumsum(act_hist[0])
-      #hist_cdf /= hist_cdf[-1]
-      #offset = (x_arr[1]-x_arr[0])/2
-      #D_KL_gamma[i] = abs(sstats.gamma.cdf(act_hist[1][:-1]+offset,alpha,0,1/beta) - hist_cdf).max()
-      #D_KL_gauss[i] = abs(sstats.truncnorm.cdf(act_hist[1][:-1]+offset,(0-fr_mu[i])/fr_std[i],np.inf,loc=fr_mu[i],scale=fr_std[i]) - hist_cdf).max()
-      #D_KL_lognorm[i] = abs(sstats.lognorm.cdf(act_hist[1][:-1]+offset,s=shape,loc=0,scale=np.exp(mu)) - hist_cdf).max()
       
-      #if D_KL_gamma[i] > 0.1:
-        
-        #print('D_KL (Gamma): ',D_KL_gamma[i])
-        #plt.figure()
-        #plt.subplot(121)
-        #plt.bar(act_hist[1][:-1],act_hist[0],width=x_arr[1]-x_arr[0])
-        
-        #plt.plot(x_arr,sstats.gamma.pdf(act_hist[1],alpha,0,1/beta),'r',label='fit: $\\Gamma(\\alpha,\\beta)$')
-        ##plt.plot(x_arr,sstats.lognorm.pdf(x_arr,s=shape,loc=0,scale=np.exp(mu)),'b',label='fit: $lognorm(\\alpha,\\beta)$')
-        #plt.plot(x_arr,sstats.norm.pdf(x_arr,loc=fr_mu[i],scale=fr_std[i]),'g',label='fit: $gauss(\\mu,\\sigma)$')
-        
-        #plt.legend()
-        
-        #plt.subplot(122)
-        #plt.bar(act_hist[1][:-1],hist_cdf,width=x_arr[1]-x_arr[0])
-        #plt.plot(x_arr,sstats.gamma.cdf(act_hist[1],alpha,0,1/beta),'r',label='fit: $\\Gamma(\\alpha,\\beta)$')
-        ##plt.plot(x_arr,sstats.lognorm.cdf(x_arr,s=shape,loc=0,scale=np.exp(mu)),'b',label='fit: $lognorm(\\alpha,\\beta)$')
-        #plt.plot(x_arr,sstats.norm.cdf(x_arr,loc=fr_mu[i],scale=fr_std[i]),'g',label='fit: $gauss(\\mu,\\sigma)$')
-        
-        #plt.legend()
-        
-        #plt.show(block=False)
-    
-    #ax4.plot(fr_mu,p_KS_stats,'k.')
-    #ax4.set_yscale('log')
-    #ax4.set_ylim([10**(-30),1])
-    #ax4.plot(fr_mu,D_KL_gamma,'rx')
     ax4.plot(fr_mu,D_KS_stats,'k.',markersize=1)
-    #ax4.plot(fr_mu,D_KL_gauss,'gx')
-    #ax4.plot(fr_mu,D_KL_lognorm,'bx')
-    ax4.set_xlim([0,np.nanmax(fr_mu)*1.2])
+    ax4.set_xlim([0,np.nanmax(fr_mu[np.isfinite(fr_mu)])*1.2])
     ax4.set_xlabel('$\\bar{\\nu}$')
     ax4.set_ylabel('$D_{KS}$')
-    #ax4.set_title('comparing data vs model')
     
     plt.tight_layout()
     if self.para['plt_sv']:
@@ -1745,64 +1718,65 @@ class detect_PC:
     plt.show(block=False)
     
     
-    x_arr = np.linspace(0,100,1001)
-    hbm = HierarchicalBayesModel(np.random.rand(1001),x_arr,parsNoise,1)
-    A_0 = 0.6
-    A = 1
-    std = 5
-    theta = 63
-    TC = hbm.TC(np.array([A_0,A,std,theta]))
-    
-    plt.figure(figsize=(6,4),dpi=150)
-    plt.bar(np.linspace(0,100,100),fr_mu,color='b',alpha=0.2,width=1,label='$\\bar{\\nu}$')
-    plt.plot(x_arr,TC,'k',label='tuning curve model TC($x$;$A_0$,A,$\\sigma$,$\\theta$)')
-    
-    x_offset = 10
-    y_arr = np.linspace(0,2.5,1001)
-    alpha, beta = gamma_paras(A_0,A_0/2)
-    x1 = sstats.gamma.pdf(y_arr,alpha,0,1/beta)
-    x1 = -10*x1/x1.max()+x_offset
-    x2 = x_offset*np.ones(1001)
-    plt.plot(x_offset,A_0,'ko')
-    plt.fill_betweenx(y_arr,x1,x2,facecolor='b',alpha=0.2,edgecolor=None)
-    
-    #idx = 550
-    #x_offset = x_arr[idx]
-    #plt.plot(x_offset,TC[idx],'ko')
-    
-    #alpha, beta = gamma_paras(TC[idx],TC[idx]/2)
-    #x1 = sstats.gamma.pdf(y_arr,alpha,0,1/beta)
-    #x1 = -10*x1/x1.max()+x_offset
-    #x2 = x_offset*np.ones(1001)
-    #plt.fill_betweenx(y_arr,x1,x2,facecolor='b',alpha=0.2,edgecolor=None,label='assumed noise')
-    
-    ### add text to show parameters
-    plt_text = False
-    if plt_text:
-      plt.annotate("", xy=(theta+3*std, A_0), xytext=(theta+3*std, A_0+A),
-            arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
-      plt.text(theta+3*std+2,A_0+A/2,'A')
+    if False:
+      x_arr = np.linspace(0,self.para['nbin'],1001)
+      hbm = HierarchicalBayesModel(np.random.rand(1001),x_arr,firingstats['parNoise'],1)
+      A_0 = 0.01
+      A = 0.02
+      std = 5
+      theta = 63
+      TC = hbm.TC(np.array([A_0,A,std,theta]))
       
-      plt.annotate("", xy=(theta, A_0*0.9), xytext=(theta+2*std, A_0*0.9),
-            arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
-      plt.text(theta+2,A_0*0.6,'$2\\sigma$')
+      plt.figure(figsize=(6,4),dpi=150)
+      plt.bar(np.linspace(0,self.para['nbin'],self.para['nbin']),fr_mu,color='b',alpha=0.2,width=1,label='$\\bar{\\nu}$')
+      plt.plot(x_arr,TC,'k',label='tuning curve model TC($x$;$A_0$,A,$\\sigma$,$\\theta$)')
       
-      plt.annotate("", xy=(90, 0), xytext=(90, A_0),
-            arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
-      plt.text(92,A_0/2,'$A_0$')
+      x_offset = 10
+      y_arr = np.linspace(0,0.1,1001)
+      alpha, beta = gamma_paras(A_0,A_0/2)
+      x1 = sstats.gamma.pdf(y_arr,alpha,0,1/beta)
+      x1 = -10*x1/x1.max()+x_offset
+      x2 = x_offset*np.ones(1001)
+      plt.plot(x_offset,A_0,'ko')
+      plt.fill_betweenx(y_arr,x1,x2,facecolor='b',alpha=0.2,edgecolor=None)
       
-      plt.annotate("", xy=(theta, 0), xytext=(theta,A_0+A),
-            arrowprops=dict(arrowstyle="-"))
-      plt.text(theta,A_0+A*1.1,'$\\theta$')
-    
-    plt.xlabel('Position on track $x$')
-    plt.ylabel('Ca$^{2+}$ event rate (model)')
-    plt.yticks([])
-    #plt.legend(loc='upper left')
-    #plt.ylim([0,2.5])
-    plt.tight_layout()
-    plt.show(block=False)
-
+      #idx = 550
+      #x_offset = x_arr[idx]
+      #plt.plot(x_offset,TC[idx],'ko')
+      
+      #alpha, beta = gamma_paras(TC[idx],TC[idx]/2)
+      #x1 = sstats.gamma.pdf(y_arr,alpha,0,1/beta)
+      #x1 = -10*x1/x1.max()+x_offset
+      #x2 = x_offset*np.ones(1001)
+      #plt.fill_betweenx(y_arr,x1,x2,facecolor='b',alpha=0.2,edgecolor=None,label='assumed noise')
+      
+      ### add text to show parameters
+      plt_text = False
+      if plt_text:
+        plt.annotate("", xy=(theta+3*std, A_0), xytext=(theta+3*std, A_0+A),
+              arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
+        plt.text(theta+3*std+2,A_0+A/2,'A')
+        
+        plt.annotate("", xy=(theta, A_0*0.9), xytext=(theta+2*std, A_0*0.9),
+              arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
+        plt.text(theta+2,A_0*0.6,'$2\\sigma$')
+        
+        plt.annotate("", xy=(90, 0), xytext=(90, A_0),
+              arrowprops=dict(arrowstyle="<->", connectionstyle="arc3"))
+        plt.text(92,A_0/2,'$A_0$')
+        
+        plt.annotate("", xy=(theta, 0), xytext=(theta,A_0+A),
+              arrowprops=dict(arrowstyle="-"))
+        plt.text(theta,A_0+A*1.1,'$\\theta$')
+      
+      plt.xlabel('Position on track $x$')
+      plt.ylabel('Ca$^{2+}$ event rate (model)')
+      plt.yticks([])
+      #plt.legend(loc='upper left')
+      #plt.ylim([0,2.5])
+      plt.tight_layout()
+      plt.show(block=False)
+  
 #### ---------------- end of class definition -----------------
 
 
@@ -1814,13 +1788,12 @@ class HierarchicalBayesModel:
   def __init__(self, data, x_arr, parsNoise, f):
     
     self.data = data
+    self.nbin = data.shape[0]
     self.parsNoise = parsNoise
     self.x_arr = x_arr
     self.x_max = x_arr.max()
     self.Nx = len(self.x_arr)
     self.change_model(f)
-    
-    self.nbin = 100
     
     ### steps for lookup-table (if used)
     #self.lookup_steps = 100000
@@ -1845,16 +1818,16 @@ class HierarchicalBayesModel:
         #plt.plot(self.x_arr,np.squeeze(mean_model[i,:]))
       #plt.show(block=False)
       
-      SD_model = self.parsNoise*mean_model
+      SD_model = self.parsNoise[1] + self.parsNoise[0]*mean_model
       
       alpha = (mean_model/SD_model)**2
       beta = mean_model/SD_model**2
       
-      logl = (alpha*np.log(beta) - np.log(sp.special.gamma(alpha)) + (alpha-1)*np.log(self.data) - beta*self.data ).sum(1)
+      logl = np.nansum(alpha*np.log(beta) - np.log(sp.special.gamma(alpha)) + (alpha-1)*np.log(self.data) - beta*self.data ,1)#.sum(1)
       if self.f>1:
         p_theta = p[:,slice(3,None,3)]
         dTheta = np.squeeze(np.abs(np.mod(p_theta[:,1]-p_theta[:,0]+self.nbin/2,self.nbin)-self.nbin/2))
-        logl[dTheta<10] = -1e300
+        logl[dTheta<(self.nbin/10)] = -1e300
       
       return logl
       
@@ -1870,27 +1843,6 @@ class HierarchicalBayesModel:
     
     if p.shape[-1]>1:
       p_out = p*self.prior_stretch + self.prior_offset
-      #print(p_out[:,slice(3,None,3)])
-      #if self.f > 1:
-        #p_theta = p_out[:,slice(3,None,3)]
-        #for f in range(1,self.f):
-          #dTheta = np.diag(np.abs(np.mod(p_theta[:,f]-p_theta[:,:f]+nbin/2,nbin)-nbin/2))
-          #idx_update = dTheta<10
-          #while np.any(idx_update):
-            #p_theta[idx_update,f] = np.random.uniform(self.prior_offset[3*f],self.prior_offset[3*f]+self.prior_stretch[3*f],idx_update.sum())
-            
-            #dTheta = np.diag(np.abs(np.mod(p_theta[:,f]-p_theta[:,:f]+nbin/2,nbin)-nbin/2))
-            #idx_update = dTheta<10
-        
-        #p_out[:,slice(3,None,3)] = p_theta
-        ####for i in range(p.shape[0]):
-          ####if p_theta[i,1] < p_theta[i,0]:
-            ####p1 = p_out[i,1:4]
-            ####p2 = p_out[i,4:7]
-            ####p_out[i,1:4] = p2
-            ####p_out[i,4:7] = p1
-          
-          
       #p_out[...,2] = self.prior_stretch[2]*self.lookup_beta[(p[...,2]*self.lookup_steps).astype('int')]
     else:
       p_out = p*self.prior_stretch[0] + self.prior_offset[0]
@@ -1898,9 +1850,12 @@ class HierarchicalBayesModel:
     return p_out
   
   def set_priors(self):
-    self.prior_stretch = np.array(np.append(1,[1,9.5,100]*self.f))
-    self.prior_offset = np.array(np.append(0,[0,1,0]*self.f))
-  
+    self.prior_offset = np.array(np.append(0,[2,2,0]*self.f))
+    prior_max = np.array(np.append(10,[100,20,self.nbin]*self.f))
+    self.prior_stretch = prior_max-self.prior_offset
+    #print(self.prior_stretch)
+    #self.prior_stretch = np.array(np.append(1,[1,6-1,self.nbin]*self.f))
+    
   def change_model(self,f):
     self.f = f
     self.nPars = 1+3*f
@@ -1917,11 +1872,12 @@ class HierarchicalBayesModel:
       if len(p.shape)==1:
         p = p[np.newaxis,:]
       p = p[...,np.newaxis]
-      TC = np.ones((p.shape[0],self.Nx))*p[:,0]
+      TC = np.ones((p.shape[0],self.Nx))*p[:,0,:]
       if p.shape[1] > 1:
         for j in [-1,0,1]:   ## loop, to have periodic boundary conditions
           #TC += p[:,1]*np.exp(-(self.x_arr[np.newaxis,:]-p[:,3]+self.x_max*j)**2/(2*p[:,2]**2))
-          TC += (p[:,slice(1,None,3)]*np.exp(-(self.x_arr[np.newaxis,:]-p[:,slice(3,None,3)]+self.x_max*j)**2/(2*p[:,slice(2,None,3)]**2))).sum(-1)
+          TC += (p[:,slice(1,None,3),:]*np.exp(-(self.x_arr[np.newaxis,np.newaxis,:]-p[:,slice(3,None,3),:]+self.x_max*j)**2/(2*p[:,slice(2,None,3),:]**2))).sum(1)
+          #TC += (p[:,slice(1,None,3)]*np.exp(-(self.x_arr[np.newaxis,:]-p[:,slice(3,None,3)]+self.x_max*j)**2/(2*p[:,slice(2,None,3)]**2))).sum(-1)
       
       return np.squeeze(TC)
     
@@ -2036,8 +1992,8 @@ def ecdf(x,p=None):
   
   if type(p)==np.ndarray:
     #assert abs(1-p.sum()) < 10**(-2), 'probability is not normalized, sum(p) = %5.3g'%p.sum()
-    if abs(1-p.sum()) < 10**(-2):
-      p /= p.sum()
+    #if abs(1-p.sum()) < 10**(-2):
+    p /= p.sum()
     sort_idx = np.argsort(x)
     x = x[sort_idx]
     y = np.cumsum(p[sort_idx])
@@ -2100,13 +2056,10 @@ def complex_to_periodic(phi,bounds):
   
 
 
-def jackknife(X,Y,W=None):
+def jackknife(X,Y,W=None,rank=1):
   
   ## jackknifing a linear fit (with possible weights)
   ## W_i = weights of value-tuples (X_i,Y_i)
-  
-  if len(X.shape) < 2:
-    X = X[:,np.newaxis]
   
   if type(W) == np.ndarray:
     print('weights given (not working)')
@@ -2114,22 +2067,33 @@ def jackknife(X,Y,W=None):
     Xw = X * np.sqrt(W[:,np.newaxis])
     Yw = Y * np.sqrt(W)
   else:
-    Xw = X
+    if rank==1:
+      Xw = X
+    elif rank==2:
+      Xw = np.vstack([X,np.ones(len(X))]).T
     Yw = Y
+  
+  if len(Xw.shape) < 2:
+    Xw = Xw[:,np.newaxis]
   
   N_data = len(Y);
   
-  fit_jk = np.zeros(N_data);
-  mask_all = np.ones(N_data).astype('bool')
+  fit_jk = np.zeros((N_data,2));
+  mask_all = (~np.isnan(Y)) & (~np.isnan(X))
+  
   for i in range(N_data):
     mask = np.copy(mask_all)
     mask[i] = False;
     try:
-      fit_jk[i] = np.linalg.lstsq(Xw[mask,:],Yw[mask])[0]
+      if rank==1:
+        fit_jk[i,0] = np.linalg.lstsq(Xw[mask,:],Yw[mask])[0]
+      elif rank==2:
+        fit_jk[i,:] = np.linalg.lstsq(Xw[mask,:],Yw[mask])[0]
+      #fit_jk[i,1] = 0
     except:
-      fit_jk[i] = np.NaN
+      fit_jk[i,:] = np.NaN
   
-  return np.nanmean(fit_jk)
+  return np.nanmean(fit_jk,0)
 
 ### -------------- lognorm distribution ---------------------
 def lognorm_paras(mean,sd):

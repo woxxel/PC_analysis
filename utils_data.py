@@ -6,15 +6,17 @@
 import numpy as np
 from utils import pathcat
 
-def set_para(basePath,mouse,s,nP=0,plt_bool=False,sv_bool=False):
+def set_para(basePath,mouse,s,nP=0,nbin=100,plt_bool=False,sv_bool=False):
   
   ## set paths:
   pathMouse = pathcat([basePath,mouse])
   pathSession = pathcat([pathMouse,'Session%02d'%s])
   
-  nbin = 100
+  coarse_factor = int(nbin/20)
+  #nbin = 100
+  #coarse_factor = 5
   qtl_steps = 4
-  coarse_factor = 5
+  
   
   fact = 1 ## factor from path length to bin number
   
@@ -52,17 +54,25 @@ def set_para(basePath,mouse,s,nP=0,plt_bool=False,sv_bool=False):
           'coarse_factor':coarse_factor,
           'nbin_coarse':int(nbin/coarse_factor),
           'pxtomu':536/512,
+          'L_track':100,
+          
+          'rate_thr':4,
+          'width_thr':5,
+          
+          'trials_min_count':3,
+          'trials_min_fraction':0.2,
+          
           
           'nP':nP,
           'N_bs':10000,'repnum':1000,
-          'qtl_steps':qtl_steps,'sigma':1,
+          'qtl_steps':qtl_steps,'sigma':5,
           'qtl_weight':np.ones(qtl_steps)/qtl_steps,
           'names':['A_0','A','SD','theta'],
           #'CI_arr':[0.001,0.025,0.05,0.159,0.5,0.841,0.95,0.975,0.999],
           'CI_arr':[0.025,0.05,0.95,0.975],
           
           'plt_bool':plt_bool&(nP==0),
-          'plt_theory_bool':False&(nP==0),
+          'plt_theory_bool':True&(nP==0),
           'plt_sv':sv_bool&(nP==0),
           
           'mouse':mouse,
@@ -77,7 +87,7 @@ def set_para(basePath,mouse,s,nP=0,plt_bool=False,sv_bool=False):
           'svname_firingstats':pathcat([pathSession,'PC_fields_firingstats.mat']),
           
           ### modes, how to perform PC detection
-          'modes':{'activity':'calcium',          ## data provided: 'calcium' or 'spikes'
+          'modes':{'activity':'calcium',#'spikes',#          ## data provided: 'calcium' or 'spikes'
                     'info':'MI',                   ## information calculated: 'MI', 'Isec' (/second), 'Ispike' (/spike)
                     'shuffle':'shuffle_trials'     ## how to shuffle: 'shuffle_trials', 'shuffle_global', 'randomize'
                   },

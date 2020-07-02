@@ -58,7 +58,7 @@ class cluster:
                  'svPCs':pathcat([self.pathMouse,'clusterPCs_%s.pkl'%dataSet]),
                  'svCompare':pathcat([self.pathMouse,'clusterCompare_%s.pkl'%dataSet]),
                  
-                 'field_count_max':            2,
+                 'field_count_max':            5,
                  
                  'session_min_correlation':    s_corr_min,
                  'session_max_shift':          50,
@@ -72,9 +72,11 @@ class cluster:
                  
                  'fr_thr':                     0,
                  
-                 'Bayes_thr':                  0,
                  'MI_alpha':                   1,
+                 'MI_thr':                     0.1,
                  
+                 'Bayes_thr':                  0,
+                 'reliability_thr':            0.1,
                  'ampl_thr':                   0,
                  'Arate_thr':                  0,
                  'pmass_thr':                  0.5,
@@ -85,7 +87,7 @@ class cluster:
   def run_complete(self,sessions=None,n_processes=0,reprocess=False):
         
     if (not os.path.exists(self.svCluster)) | reprocess:
-      self.process_sessions(n_processes=n_processes,reprocess=reprocess)
+      self.process_sessions(sessions=sessions,n_processes=n_processes,reprocess=reprocess)
       self.get_IDs()
       self.get_stats(n_processes=n_processes)
       
@@ -102,7 +104,7 @@ class cluster:
       #self.meta['nC'] = self.PCs['status'].shape[0]
       #self.session_classification(sessions)
   
-  def process_sessions(self,n_processes=0,reprocess=False):
+  def process_sessions(self,sessions=None,n_processes=0,reprocess=False):
     if reprocess | (not os.path.exists(self.meta['svSessions'])):
       
       self.sessions = {'shift':np.zeros((self.nSes,2)),
@@ -114,7 +116,7 @@ class cluster:
                        'bool':np.zeros(self.meta['nSes']).astype('bool')}
       
       self.get_reference_frame()
-      self.session_classification()
+      self.session_classification(sessions=sessions)
       #self.save([False,True,False,False,False])
     
   def get_reference_frame(self):
@@ -147,13 +149,16 @@ class cluster:
   
   def session_classification(self,sessions=None,max_shift=None,min_corr=None):
     
+    self.sessions['bool'][:] = False
     if sessions is None:
       self.sStart = 0
       self.sEnd = self.meta['nSes']
     else:
-      self.sStart = sessions[0]
-      self.sEnd = sessions[-1]
+      self.sStart = sessions[0]-1
+      self.sEnd = sessions[-1]+1
     
+    print(self.sStart)
+    print(self.sEnd)
     if not (max_shift is None):
       self.meta['session_max_shift'] = max_shift
     if not (min_corr is None):
@@ -163,7 +168,8 @@ class cluster:
     self.sessions['bool'][np.array([np.sqrt(x**2+y**2) for (x,y) in self.sessions['shift']])>self.meta['session_max_shift']] = False ## huge shift
     self.sessions['bool'][self.sessions['corr'][:,1]<self.meta['session_min_correlation']] = False ## huge shift
     self.sessions['bool'][np.isnan(self.sessions['corr'][:,1])] = False
-    self.sessions['bool'][0] = True
+    if self.sStart == 0:
+      self.sessions['bool'][0] = True
     #if self.meta['mouse'] == '762':
       #try:
         #self.sessions['bool'][40] = False  ## very bad imaging quality (check video)
@@ -184,8 +190,11 @@ class cluster:
     self.meta['nC'] = nC = assignments.shape[0]
     extend_dict(self.IDs,nC)
     self.IDs['clusterID'][range(nC),:] = np.vstack([np.ones(nC),range(nC)]).T;
-    
+    print(assignments.shape)
+    print(self.session_order)
     for (s,_) in tqdm(enumerate(self.session_order),total=self.meta['nSes'],leave=False):
+      if s >= assignments.shape[1]:
+        break
       ### assign neuron IDs
       idx_c = np.where(~np.isnan(assignments[:,s]))[0]
       n_arr = assignments[idx_c,s].astype('int')
@@ -297,7 +306,7 @@ class cluster:
     #return (p,n)
   
   
-  def get_stats(self,n_processes=0,complete=True):
+  def get_stats(self,n_processes=0,complete=False):
     
     t_start = time.time()
     
@@ -315,6 +324,9 @@ class cluster:
                   'MI_value':np.zeros((0,self.nSes)),
                   'MI_p_value':np.zeros((0,self.nSes)),
                   'MI_z_score':np.zeros((0,self.nSes)),
+                  
+                  'Isec_value':np.zeros((0,self.nSes)),
+                  
                   'Bayes_factor':np.zeros((0,self.nSes))
                   }
     
@@ -375,22 +387,26 @@ class cluster:
       
       if complete:
         self.stats['firingrate'][idx_c,s] = firingrate[s0][n_arr]
-      
+      else:
         pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%s0]);
         pathFiringstats = pathcat([pathSession,'PC_fields_firingstats.mat']);
         firingstats_tmp = sio.loadmat(pathFiringstats,squeeze_me=True)
+        
+        self.stats['firingrate'][idx_c,s] = firingstats_tmp['rate'][n_arr]
         self.stats['firingmap'][idx_c,s,:] = firingstats_tmp['map'][n_arr,:]
         #self.stats['firingmap'][idx_c,s,1,:] = firingstats_tmp['std'][n_arr,:]
         #self.stats['firingmap'][idx_c,s,2:,:] = firingstats_tmp['CI'][n_arr,:,:]
-      
-      
+        
         pathStatus = pathcat([pathSession,'PC_fields_status.mat']);
         status = sio.loadmat(pathStatus,squeeze_me=True);
         
         self.stats['MI_value'][idx_c,s] = status['MI_value'][n_arr]
         self.stats['MI_p_value'][idx_c,s] = status['MI_p_value'][n_arr]
         self.stats['MI_z_score'][idx_c,s] = status['MI_z_score'][n_arr]
-        self.stats['Bayes_factor'][idx_c,s] = status['Bayes_factor'][n_arr,0]-status['Bayes_factor'][n_arr,1]
+        
+        self.stats['Isec_value'][idx_c,s] = status['Isec_value'][n_arr]
+        
+        #self.stats['Bayes_factor'][idx_c,s] = status['Bayes_factor'][n_arr,0,0]-status['Bayes_factor'][n_arr,0,1]
         #self.stats['Bayes']['Z'][idx_c,s,:,:] = status['Z'][n_arr,:,:]
         
         idx_active = self.stats['firingrate'][:,s]>0
@@ -441,6 +457,8 @@ class cluster:
     
     self.fields = {'nModes':np.zeros((0,self.nSes)).astype('uint8'),
                    'status':np.zeros((0,self.nSes,self.meta['field_count_max'])).astype('uint8'),
+                   'Bayes_factor':np.zeros((0,self.nSes,self.meta['field_count_max'])),
+                   'reliability':np.zeros((0,self.nSes,self.meta['field_count_max'])),
                    'posterior_mass':np.zeros((0,self.nSes,self.meta['field_count_max'])),
                    'baseline':np.zeros((0,self.nSes,self.meta['field_count_max'],3)),
                    'amplitude':np.zeros((0,self.nSes,self.meta['field_count_max'],3)),
@@ -470,14 +488,17 @@ class cluster:
           if self.fields['nModes'][c,s] > 0:   ## cell is PC
             
             ### hand over field parameters
-            self.fields['location'][c,s,:,:] = fields['parameter'][n,:self.meta['field_count_max'],3,(0,3,7)].transpose(1,0)
-            self.fields['width'][c,s,:,:] = fields['parameter'][n,:self.meta['field_count_max'],2,(0,3,7)].transpose(1,0)
-            self.fields['amplitude'][c,s,:,:] = fields['parameter'][n,:self.meta['field_count_max'],1,(0,3,7)].transpose(1,0)
-            self.fields['baseline'][c,s,:,:] = fields['parameter'][n,:self.meta['field_count_max'],0,(0,3,7)].transpose(1,0)
+            self.fields['location'][c,s,:,:] = fields['parameter'][n,:self.meta['field_count_max'],3,(0,1,4)].transpose(1,0)
+            self.fields['width'][c,s,:,:] = fields['parameter'][n,:self.meta['field_count_max'],2,(0,1,4)].transpose(1,0)
+            self.fields['amplitude'][c,s,:,:] = fields['parameter'][n,:self.meta['field_count_max'],1,(0,1,4)].transpose(1,0)
+            self.fields['baseline'][c,s,:,:] = fields['parameter'][n,:self.meta['field_count_max'],0,(0,1,4)].transpose(1,0)
             
-            self.fields['p_x'][c,s,:,:] = fields['p_x'][n,:self.meta['field_count_max'],1,:]
+            self.fields['p_x'][c,s,:,:] = fields['p_x'][n,:self.meta['field_count_max'],:]
             self.fields['posterior_mass'][c,s,:] = fields['posterior_mass'][n,:self.meta['field_count_max']]
-          
+            
+            self.fields['Bayes_factor'][c,s,...] = fields['Bayes_factor'][n,:self.meta['field_count_max'],0]
+            self.fields['reliability'][c,s,:] = fields['reliability'][n,:self.meta['field_count_max']]
+            
       else:
         print('Data for Session %d does not exist'%s)
     
@@ -495,7 +516,7 @@ class cluster:
     
     pathComp = pathcat([self.para['pathMouse'],'compareSessions.pkl'])
     if reprocess | (not os.path.exists(pathComp)):
-      self.compare = {'pointer':sp.sparse.lil_matrix((self.meta['nC'],nSes**2)),
+      self.compare = {'pointer':sp.sparse.lil_matrix((self.meta['nC'],nSes**2*self.meta['field_count_max']**2)),
                       'shifts':[],
                       'shifts_distr':[],
                       'inter_active':[],
@@ -505,7 +526,9 @@ class cluster:
       
       if n_processes>1:
         pool = get_context("spawn").Pool(n_processes)
-        res = pool.starmap(get_field_shifts,zip(self.status,self.fields['p_x']))#self.meta['nC']))
+        loc = self.fields['location'][...,0]
+        #loc[~self.status_fields] = np.NaN
+        res = pool.starmap(get_field_shifts,zip(self.status,self.fields['p_x'],loc))#self.meta['nC']))
         i=0
         for c,r in enumerate(res):
           for key in r['shifts_distr']:
@@ -518,6 +541,7 @@ class cluster:
             self.compare['inter_coding'].append(r['inter_coding'][key])
         
         self.compare['shifts'] = np.array(self.compare['shifts'])
+        
         self.compare['inter_active'] = np.array(self.compare['inter_active'])
         self.compare['inter_coding'] = np.array(self.compare['inter_coding'])
         
@@ -525,34 +549,6 @@ class cluster:
         self.compare['pointer'] = self.compare['pointer'].tocoo()
       else:
         print('please use parallel processing for this')
-      
-      
-      #get intercoding states:
-        
-        #number/fraction of active sessions
-        #number/fraction of coding sessions
-      
-      
-      
-        #for c in tqdm(range(self.meta['nC']),leave=False):
-          #res = get_field_shifts(self.status[c,...],self.fields['p_x'][c,...])
-          #self.compare['shifts'][c,...] = res['shifts']
-          #self.compare['shifts'][c,...] = res['shifts']
-          
-                #self.compare['shifts'][c,s1,s2], self.compare['shifts_distr'][c,s1,s2] = periodic_distr_distance(self.fields['p_x'][c,s1,0,1,:],self.fields['p_x'][c,s2,0,1,:],self.fields['parameter'][c,s1,0,3,0],self.fields['parameter'][c,s2,0,3,0],self.para['nbin'],mode='bootstrap')
-                
-                
-                
-                #ic_tmp=np.zeros(5)                ## 0: #active sessions, 1: #coding sessions, 2: fraction active sessions, 3: fraction coding sessions, 4: ?
-                #ic_tmp[0] = np.sum(self.stats['status'][c,s1+1:s2,1])
-                #ic_tmp[1] = np.sum(np.any(self.stats['status'][c,s1+1:s2,2:],-1))
-                #ic_tmp[2] = ic_tmp[0]/(s2-s1-1) if (s2-s1)>1 else 1
-                #ic_tmp[3] = ic_tmp[1]/(s2-s1-1) if (s2-s1)>1 else 1
-                
-                #self.compare['ref_pos'][c,s1,s2] = self.fields['parameter'][c,s1,0,3,0]
-                #self.compare['inter_coding'][c,s1,s2] = ic_tmp
-        
-      #pickleData(self.compare,self.meta['svCompare'],'save')
       
     else:
       self.compare = pickleData([],self.meta['svCompare'],'load')
@@ -563,7 +559,7 @@ class cluster:
   
   def update_status(self,complete=True,
                     SNR_thr=None,rval_thr=None,CNN_thr=None,pm_thr=None,
-                    fr_thr=None,Bayes_thr=None,alpha=None,
+                    fr_thr=None,Bayes_thr=None,reliability_thr=None,alpha=None,MI_thr=None,
                     ampl_thr=None,Arate_thr=None,pmass_thr=None,CI_thr=None):
     
     print('further, implement method to calculate inter-coding intervals, etc, after updating statusses')
@@ -575,9 +571,12 @@ class cluster:
                 
                 'firingrate':   self.meta['fr_thr'] if fr_thr is None else fr_thr,
                 
-                'Bayes':        self.meta['Bayes_thr'] if Bayes_thr is None else Bayes_thr,
                 'alpha':        self.meta['MI_alpha'] if alpha is None else alpha,
+                'MI':           self.meta['MI_thr'] if MI_thr is None else MI_thr,
                 'CNN':          self.meta['CNN_thr'] if CNN_thr is None else CNN_thr,
+                
+                'Bayes':        self.meta['Bayes_thr'] if Bayes_thr is None else Bayes_thr,
+                'reliability':  self.meta['reliability_thr'] if reliability_thr is None else reliability_thr,
                 
                 'ampl':         self.meta['ampl_thr'] if ampl_thr is None else ampl_thr,
                 'A_rate':       self.meta['Arate_thr'] if Arate_thr is None else Arate_thr,
@@ -611,14 +610,18 @@ class cluster:
       idx_fields = (self.fields['amplitude'][...,0]>self.thr['ampl']) & \
                   (A_rate>self.thr['A_rate']) & \
                   (self.fields['posterior_mass']>self.thr['p_mass']) & \
-                  (CI_width<self.thr['CI'])
+                  (CI_width<self.thr['CI']) & \
+                  (self.fields['Bayes_factor']>self.thr['Bayes']) & \
+                  (self.fields['reliability']>self.thr['reliability'])
       
+      self.status_fields = idx_fields
       ### place cell: defined by: Bayes factor, MI(val,p_val,z_score)
       self.stats['MI_p_value'][self.stats['MI_p_value']==0.001] = 10**(-10)    ## need this - can't get any lower than 0.001 with 1000 shuffles...
-      idx_PC = np.zeros((self.meta['nC'],self.meta['nSes']),'bool')
+      idx_PC = np.ones((self.meta['nC'],self.meta['nSes']),'bool')
       for s in np.where(self.sessions['bool'])[0]:
         idx_PC[:,s] = fdr_control(self.stats['MI_p_value'][:,s],self.thr['alpha'])
-      idx_PC = idx_PC & np.any(idx_fields,-1) & (self.stats['Bayes_factor']>self.thr['Bayes'])
+      idx_PC = idx_PC & np.any(idx_fields,-1) & (self.stats['MI_value']>self.thr['MI'])
+      
       self.status[...,2] = idx_PC & self.status[...,1]
       
       self.status[:,~self.sessions['bool'],:] = False
@@ -633,7 +636,7 @@ class cluster:
         for s in range(self.meta['nSes']):
           if self.status[c,s,2]:
             
-            for f in range(self.fields['nModes'][c,s]):
+            for f in np.where(idx_fields[c,s,:])[0]:#range(self.fields['nModes'][c,s]):
               if idx_fields[c,s,f]:
                 
                 if self.para['zone_idx']['reward'][0] <= self.fields['location'][c,s,f,0] <= self.para['zone_idx']['reward'][-1]:
@@ -651,7 +654,16 @@ class cluster:
     print('PC-characterization done. Time taken: %7.5f'%(t_end-t_start))
   
   
+  def get_reliability(self):
   
+    fmap = gauss_smooth(result['firingstats']['trial_map'],(0,5*self.para['nbin']/self.para['L_track']))
+    field_bin = int(result['fields']['parameter'][t,3,0]*(self.para['nbin']/self.para['L_track']))
+    print(field_bin)
+    print(fmap[:,field_bin])
+    print(fmap[:,field_bin]>self.para['rate_thr'])
+    print(result['firingstats']['trial_field'][t,:])
+    
+    
   
   def save(self,svBool=np.ones(5).astype('bool')):
     
@@ -681,32 +693,55 @@ class cluster:
       self.compare = pickleData([],self.meta['svCompare'],'load')
 
 
-def get_field_shifts(status,p_x):
+def get_field_shifts(status,p_x,loc):
   nSes = status.shape[0]
+  nfields = p_x.shape[1]
   nbin = p_x.shape[-1]
+  L_track=100
   out = {'shifts': {},
          'shifts_distr': {},
          'inter_active':{},
          'inter_coding':{}}
+  
   for s1 in range(nSes):
     if np.any(status[s1,2:]):
       for s2 in range(s1+1,nSes):
         if np.any(status[s2,2:]):
-          idx = np.ravel_multi_index((s1,s2),(nSes,nSes))
-          #if any(self.PCs['status'][c,s1,2:]) & any(self.PCs['status'][c,s2,2:]):
-          shifts, shifts_distr = periodic_distr_distance(p_x[s1,0,:],p_x[s2,0,:],nbin,mode='bootstrap')
           
-          out['shifts'][idx] = shifts
-          out['shifts_distr'][idx] = list(shifts_distr)
+          #f1_arr = np.where(~np.isnan(loc[s1,:]))[0]
+          #f2_arr = np.where(~np.isnan(loc[s2,:]))[0]
           
-          inter_active = status[s1+1:s2,1].sum()
-          inter_coding = status[s1+1:s2,2].sum()
-          if s2-s1==1:
-            out['inter_active'][idx] = [inter_active,1] 
-            out['inter_coding'][idx] = [inter_coding,1]
-          else:
-            out['inter_active'][idx] = [inter_active,inter_active/(s2-s1-1)] 
-            out['inter_coding'][idx] = [inter_coding,inter_coding/(s2-s1-1)]
+          #f_norm = len(f1_arr)*len(f2_arr)
+          #i=0
+          #for f1 in f1_arr:
+            #for f2 in f2_arr:
+              #idx = np.ravel_multi_index((s1,s2,i),(nSes,nSes,nfields**2))
+              #shifts, shifts_distr = periodic_distr_distance(p_x[s1,f1,:],p_x[s2,f2,:],nbin,L_track,mode='bootstrap')
+              #shifts_distr /= f_norm
+          
+          d = np.abs(np.mod(loc[s1,:][:,np.newaxis] - loc[s2,:]+nbin/2,nbin)-nbin/2)
+          d[np.isnan(d)] = nbin
+          f1,f2 = sp.optimize.linear_sum_assignment(d)
+          for f in zip(f1,f2):
+            
+            if d[f] < nbin:
+              
+              idx = np.ravel_multi_index((s1,s2,f[0]),(nSes,nSes,nfields**2))
+              shifts, shifts_distr = periodic_distr_distance(p_x[s1,f[0],:],p_x[s2,f[1],:],nbin,L_track,mode='bootstrap')
+              
+              out['shifts'][idx] = shifts
+              out['shifts_distr'][idx] = list(shifts_distr)
+              
+              inter_active = status[s1+1:s2,1].sum()
+              inter_coding = status[s1+1:s2,2].sum()
+              if s2-s1==1:
+                out['inter_active'][idx] = [inter_active,1] 
+                out['inter_coding'][idx] = [inter_coding,1]
+              else:
+                out['inter_active'][idx] = [inter_active,inter_active/(s2-s1-1)] 
+                out['inter_coding'][idx] = [inter_coding,inter_coding/(s2-s1-1)]
+              #i+=1
+  
   return out
 
 
