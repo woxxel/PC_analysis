@@ -5,6 +5,7 @@
 '''
 import numpy as np
 from utils import pathcat
+from get_t_measures import *
 
 def set_para(basePath,mouse,s,nP=0,nbin=100,plt_bool=False,sv_bool=False):
   
@@ -48,6 +49,8 @@ def set_para(basePath,mouse,s,nP=0,nbin=100,plt_bool=False,sv_bool=False):
   zone_mask['active'] = nbin+1
   zone_mask['silent'] = nbin+2
   
+  print('now')
+  
   para = {'nbin':nbin,'f':15,
           'bin_array':np.linspace(0,nbin-1,nbin),
           'bin_array_centers':np.linspace(0,nbin,nbin+1)-0.5,
@@ -62,6 +65,7 @@ def set_para(basePath,mouse,s,nP=0,nbin=100,plt_bool=False,sv_bool=False):
           'trials_min_count':3,
           'trials_min_fraction':0.2,
           
+          't_measures': get_t_measures(mouse),
           
           'nP':nP,
           'N_bs':10000,'repnum':1000,

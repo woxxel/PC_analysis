@@ -8,7 +8,7 @@ from tqdm import *
 import matplotlib.pyplot as plt
 
 #sys.path.append('/home/wollex/Data/Science/PhD/Programs/PC_analysis')
-from utils import pathcat, find_modes, normalize_sparse_array
+from utils import pathcat, find_modes, normalize_sparse_array, _hsm
 
 
 class CalciumTraces:
@@ -72,10 +72,23 @@ class CalciumTraces:
   
   def plot_trace(self,n,sig=2,SNR_thr=2):
     
+    self.baseline_C_med = np.zeros(self.nCells)
+    self.baseline_C_hsm = np.zeros(self.nCells)
+    
+    self.baseline_S_med = np.zeros(self.nCells)
+    self.baseline_S_hsm = np.zeros(self.nCells)
+    
+    self.baseline_C_med[n] = np.median(self.data['C'][n,:])
+    self.baseline_C_hsm[n] = _hsm(np.sort(self.data['C'][n,:]))
+    
+    S = self.data['S'][n,self.data['S'][n,:]>0]
+    self.baseline_S_med[n] = np.median(S)
+    self.baseline_S_hsm[n] = _hsm(np.sort(S))
+    
     #data_thr_C = self.data_thr_C[:,0] + sig*self.data_thr_C[:,1]
     
-    self.N_spikes_C = np.floor(self.data['C'] / (self.baseline_C[:,np.newaxis] + sig*self.noise_C[:,np.newaxis])).sum(1)
-    self.N_spikes_S = np.floor(self.data['S'] / (self.baseline_S[:,np.newaxis] + sig*self.noise_S[:,np.newaxis])).sum(1)
+    #self.N_spikes_C = np.floor(self.data['C'] / (self.baseline_C[:,np.newaxis] + sig*self.noise_C[:,np.newaxis])).sum(1)
+    #self.N_spikes_S = np.floor(self.data['S'] / (self.baseline_S[:,np.newaxis] + sig*self.noise_S[:,np.newaxis])).sum(1)
     
     #self.N_spikes_S = np.zeros(self.nCells)*np.NaN
     #data_thr_S = self.data_thr_S[:,0] + sig*self.data_thr_S[:,1]
@@ -87,18 +100,21 @@ class CalciumTraces:
     plt.figure()
     ax1 = plt.subplot(221)
     ax1.plot(t_arr,self.data['C'][n,:],'k')
-    ax1.plot(t_arr,np.ones(T)*self.baseline_C[n],'g--')
+    ax1.plot(t_arr,np.ones(T)*self.baseline_C_med[n],'g--')
+    ax1.plot(t_arr,np.ones(T)*self.baseline_C_hsm[n],'r--')
     ax1.plot(t_arr,np.ones(T)*self.baseline_C[n]+sig*self.noise_C[n],'g')
     
     ax = plt.subplot(222)
     ax.plot(np.sort(self.data['C'][n,:]))
-    ax.plot(np.ones(self.T)*self.baseline_C[n],'g--')
+    ax.plot(np.ones(self.T)*self.baseline_C_med[n],'g--')
+    ax.plot(np.ones(self.T)*self.baseline_C_hsm[n],'r--')
     #ax.plot(np.ones(self.T)*self.data_thr_C[n,0],'r')
     
     #print(N_spikes_S.sum())
     ax2 = plt.subplot(223,sharex=ax1)
     ax2.plot(t_arr,self.data['S'][n,:],'r')
-    ax2.plot(t_arr,np.ones(T)*self.baseline_S[n],'g--')
+    ax2.plot(t_arr,np.ones(T)*self.baseline_S_med[n],'g--')
+    ax2.plot(t_arr,np.ones(T)*self.baseline_S_hsm[n],'r--')
     ax2.plot(t_arr,np.ones(T)*self.baseline_S[n]+sig*self.noise_S[n],'g')
     
     #ax2.plot(t_arr,self.df_f[n,:],'r')
@@ -107,7 +123,8 @@ class CalciumTraces:
     
     ax = plt.subplot(224)
     ax.plot(np.sort(self.data['S'][n,:]),'r')
-    ax.plot(np.ones(T)*self.baseline_S[n],'g--')
+    ax.plot(np.ones(T)*self.baseline_S_med[n],'g--')
+    ax.plot(np.ones(T)*self.baseline_S_hsm[n],'r--')
     ax.plot(np.ones(T)*self.baseline_S[n]+sig*self.noise_S[n],'g')
     
     #ax = plt.subplot(426)
@@ -115,7 +132,7 @@ class CalciumTraces:
     
     #ax.plot(np.sort(self.data['S'][n,:]))
     
-    plt.show(block=False)
+    plt.show(block=True)
   
   def plot_stats(self,sig=2,SNR_thr=2,r_thr=0):
     
