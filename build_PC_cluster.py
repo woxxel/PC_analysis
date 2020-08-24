@@ -69,7 +69,7 @@ class cluster:
                      'SNR_thr':                    3,
                      'rval_thr':                   0,
                      'CNN_thr':                    0.6,
-                     'pm_thr':                     0.05,
+                     'pm_thr':                     0.5,
 
                      'fr_thr':                     0,
 
@@ -81,6 +81,7 @@ class cluster:
                      'A0_thr':                     1,
                      'A_thr':                      3,
                      'Arate_thr':                  0,
+                     'sigma_thr':                  2,
                      'pmass_thr':                  0.5,
                      'CI_thr':                     self.para['nbin']
                      }
@@ -117,9 +118,11 @@ class cluster:
                            'N_original':np.zeros(self.nSes)*np.NaN,
                            #'rotation_anchor':np.zeros((self.nSes,3))*np.NaN,     ## point on plane
                            #'rotation_normal':np.zeros((self.nSes,3))*np.NaN,     ## normal describing plane}
-                           'bool':np.zeros(self.meta['nSes']).astype('bool')}
+                           'bool':np.zeros(self.meta['nSes']).astype('bool'),
+                           'trial_ct':np.zeros(self.meta['nSes'],'int')}
 
             self.get_reference_frame()
+            self.get_nTrials()
             self.session_classification(sessions=sessions)
             #self.save([False,True,False,False,False])
 
@@ -137,30 +140,30 @@ class cluster:
                 except:
                     Cn2 = np.array(A2.sum(1).reshape(self.meta['dims']))
 
-            if s>0:
-                self.sessions['corr'][s,1],(y_shift,x_shift) = calculate_img_correlation(Cnref,Cn2,plot_bool=False)
-                corr_T,(y_shift_T,x_shift_T) = calculate_img_correlation(Cnref,Cn2.T,plot_bool=False)
+                if s>0:
+                    self.sessions['corr'][s,1],(y_shift,x_shift) = calculate_img_correlation(Cnref,Cn2,plot_bool=False)
+                    corr_T,(y_shift_T,x_shift_T) = calculate_img_correlation(Cnref,Cn2.T,plot_bool=False)
 
-                if (corr_T > self.sessions['corr'][s,1]) & (corr_T > self.meta['session_min_correlation']):
-                    # print('corr: %.3f vs %.3f'%(self.sessions['corr'][s,1],corr_T))
-                    self.sessions['corr'][s,1] = corr_T
-                    self.sessions['transpose'][s] = ~self.sessions['transpose'][s-1]
-                    x_shift, y_shift = [x_shift_T,y_shift_T]
+                    if (corr_T > self.sessions['corr'][s,1]) & (corr_T > self.meta['session_min_correlation']):
+                        # print('corr: %.3f vs %.3f'%(self.sessions['corr'][s,1],corr_T))
+                        self.sessions['corr'][s,1] = corr_T
+                        self.sessions['transpose'][s] = ~self.sessions['transpose'][s-1]
+                        x_shift, y_shift = [x_shift_T,y_shift_T]
+                    else:
+                        self.sessions['transpose'][s] = self.sessions['transpose'][s-1]
+
+                    self.sessions['shift'][s,:], self.sessions['flow_field'][s,...], _, self.sessions['corr'][s,0] = get_shift_and_flow(Aref,A2,self.meta['dims'],projection=1,transpose_it=self.sessions['transpose'][s],plot_bool=False)
+                    # print('Session %d'%s)
+
+                    #self.sessions['corr'][s,1],(y_shift,x_shift) = calculate_img_correlation(A2ref.sum(1),A2.sum(1),plot_bool=False)
+                    if self.sessions['corr'][s,1]>=self.meta['session_min_correlation']:
+                        A2ref = A2.copy()
+                        Cnref = Cn2.copy()
                 else:
-                    self.sessions['transpose'][s] = self.sessions['transpose'][s-1]
-
-                self.sessions['shift'][s,:], self.sessions['flow_field'][s,...], _, self.sessions['corr'][s,0] = get_shift_and_flow(Aref,A2,self.meta['dims'],projection=1,transpose_it=self.sessions['transpose'][s],plot_bool=False)
-                # print('Session %d'%s)
-
-                #self.sessions['corr'][s,1],(y_shift,x_shift) = calculate_img_correlation(A2ref.sum(1),A2.sum(1),plot_bool=False)
-                if self.sessions['corr'][s,1]>=self.meta['session_min_correlation']:
+                    Aref = A2.copy()    ## keep template of first session for calculating session alignment statistics
                     A2ref = A2.copy()
-                    Cnref = Cn2.copy()
-            else:
-                Aref = A2.copy()    ## keep template of first session for calculating session alignment statistics
-                A2ref = A2.copy()
 
-                Cnref = Cn2.copy()
+                    Cnref = Cn2.copy()
 
             ## load originally detected data
             pathLoad = pathcat([pathSession,'results_OnACID.mat'])
@@ -170,6 +173,29 @@ class cluster:
                     self.sessions['N_original'][s] = results_original[1][1][0]
                 else:
                     print('nope')
+
+    def get_nTrials(self):
+
+        for s in range(self.meta['nSes']):
+            pathSession = os.path.join(self.meta['pathMouse'],'Session%02d'%(s+1))
+            for file in os.listdir(pathSession):
+              if file.endswith("aligned.mat"):
+                  pathBH = os.path.join(pathSession, file)
+
+            f = h5py.File(pathBH,'r')
+            key_array = ['position']
+
+            # test =
+            # print(f['alignedData']['resampled'].keys())
+            position = np.squeeze(f.get('alignedData/resampled/position').value)
+            position -= position.min()
+            position /= position.max()
+            f.close()
+
+            # frame = np.hstack([0, np.where(np.diff(position)<-0.1)[0]+1,len(position)])
+            frame = np.where(np.diff(position)<-0.1)[0]+1
+            self.sessions['trial_ct'][s] = len(frame)-1
+
 
     def session_classification(self,sessions=None,max_shift=None,min_corr=None):
 
@@ -181,7 +207,7 @@ class cluster:
             self.sStart = max(0,sessions[0]-1)
             self.sEnd = sessions[-1]+1
 
-        print([self.sStart,self.sEnd])
+        # print([self.sStart,self.sEnd])
         if not (max_shift is None):
             self.meta['session_max_shift'] = max_shift
         if not (min_corr is None):
@@ -193,9 +219,15 @@ class cluster:
         self.sessions['bool'][np.isnan(self.sessions['corr'][:,1])] = False
         if self.sStart == 0:
             self.sessions['bool'][0] = True
-        #if self.meta['mouse'] == '762':
+        for s in np.where(self.sessions['bool'])[0]:
+            pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%(s+1)])
+            pathLoad = pathcat([pathSession,self.meta['CNMFname']])
+            if not os.path.exists(pathLoad):
+                self.sessions['bool'][s] = False
+
+        if self.meta['mouse'] == '762':
           #try:
-            #self.sessions['bool'][40] = False  ## very bad imaging quality (check video)
+            self.sessions['bool'][39] = False  ## very bad imaging quality (check video)
             #self.sessions['bool'][66] = False     ## very bad imaging quality (check video)
           #except:
             #1
@@ -360,70 +392,67 @@ class cluster:
         p_matched = ld_dat['p_matched']
         p_all = ld_dat['p_same']
         cm = ld_dat['cm']
+        # print(cm.shape)
 
         for (s,s0) in tqdm(enumerate(self.session_order),total=self.meta['nSes'],leave=False):
             # print('Session: %d'%s0)
-            if not self.sessions['bool'][s]:
-                continue
+            # if not self.sessions['bool'][s]:
+                # continue
+            try:
 
-            # try:
-            pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%s0])
-            pathLoad = pathcat([pathSession,self.meta['CNMFname']])
-            results_CNMF = sio.loadmat(pathLoad,variable_names=['A','SNR','r_values','CNN'],squeeze_me=True)
-            # cm = com(results_CNMF['A'],512,512)
+                idx_c = np.where(np.isfinite(self.IDs['neuronID'][:,s,1]))[0]
+                n_arr = self.IDs['neuronID'][idx_c,s,1].astype('int')
+                nCells = len(n_arr)
 
-            idx_c = np.where(np.isfinite(self.IDs['neuronID'][:,s,1]))[0]
-            n_arr = self.IDs['neuronID'][idx_c,s,1].astype('int')
-            nCells = len(n_arr)
+                pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%s0])
+                pathLoad = pathcat([pathSession,self.meta['CNMFname']])
+                if os.path.exists(pathLoad):
+                    results_CNMF = sio.loadmat(pathLoad,variable_names=['A','SNR','r_values','CNN'],squeeze_me=True)
 
-            self.stats['com'][idx_c,s,:] = cm[idx_c,s,:]
-            if self.dataSet == 'redetect':
-                self.stats['SNR'][idx_c,s] = results_CNMF['SNR'][n_arr]
-                self.stats['r_values'][idx_c,s] = results_CNMF['r_values'][n_arr]
-                self.stats['CNN'][idx_c,s] = results_CNMF['CNN'][n_arr]
+                    self.stats['com'][idx_c,s,:] = cm[idx_c,s,:]
+                    if self.dataSet == 'redetect':
+                        self.stats['SNR'][idx_c,s] = results_CNMF['SNR'][n_arr]
+                        self.stats['r_values'][idx_c,s] = results_CNMF['r_values'][n_arr]
+                        self.stats['CNN'][idx_c,s] = results_CNMF['CNN'][n_arr]
 
-            #if complete:
-            #self.stats['firingrate'][idx_c,s] = firingrate[s0][n_arr]
-            #else:
+                #if complete:
+                #self.stats['firingrate'][idx_c,s] = firingrate[s0][n_arr]
+                #else:
 
-            pathFiringstats = pathcat([pathSession,'PC_fields_firingstats.mat'])
+                pathFiringstats = pathcat([pathSession,'PC_fields_firingstats.mat'])
+                if os.path.exists(pathFiringstats):
+                    firingstats_tmp = sio.loadmat(pathFiringstats,squeeze_me=True)
+                    # print(idx_c.shape,n_arr.shape)
+                    self.stats['firingrate'][idx_c,s] = firingstats_tmp['rate'][n_arr]
+                    self.stats['firingmap'][idx_c,s,:] = firingstats_tmp['map'][n_arr,:]
 
-            if os.path.exists(pathFiringstats):
-                firingstats_tmp = sio.loadmat(pathFiringstats,squeeze_me=True)
-                # print(idx_c.shape,n_arr.shape)
-                self.stats['firingrate'][idx_c,s] = firingstats_tmp['rate'][n_arr]
-                self.stats['firingmap'][idx_c,s,:] = firingstats_tmp['map'][n_arr,:]
+                    pathStatus = pathcat([pathSession,'PC_fields_status.mat'])
+                    status = sio.loadmat(pathStatus,squeeze_me=True)
+                    try:
+                        self.stats['MI_value'][idx_c,s] = status['MI_value'][n_arr]
+                        self.stats['MI_p_value'][idx_c,s] = status['MI_p_value'][n_arr]
+                        self.stats['MI_z_score'][idx_c,s] = status['MI_z_score'][n_arr]
 
-                #self.stats['firingmap'][idx_c,s,1,:] = firingstats_tmp['std'][n_arr,:]
-                #self.stats['firingmap'][idx_c,s,2:,:] = firingstats_tmp['CI'][n_arr,:,:]
+                        self.stats['Isec_value'][idx_c,s] = status['Isec_value'][n_arr]
+                    except:
+                        pass
 
-                pathStatus = pathcat([pathSession,'PC_fields_status.mat'])
-                status = sio.loadmat(pathStatus,squeeze_me=True)
-                try:
-                    self.stats['MI_value'][idx_c,s] = status['MI_value'][n_arr]
-                    self.stats['MI_p_value'][idx_c,s] = status['MI_p_value'][n_arr]
-                    self.stats['MI_z_score'][idx_c,s] = status['MI_z_score'][n_arr]
-
-                    self.stats['Isec_value'][idx_c,s] = status['Isec_value'][n_arr]
-                except:
-                    pass
-
-            #self.stats['Bayes_factor'][idx_c,s] = status['Bayes_factor'][n_arr,0,0]-status['Bayes_factor'][n_arr,0,1]
-            #self.stats['Bayes']['Z'][idx_c,s,:,:] = status['Z'][n_arr,:,:]
-
-            # idx_active = self.stats['firingrate'][:,s]>0
-
+                if s in p_all.keys():
+                    if (s>0):# & self.sessions['bool'][s]:     ## store matched score and best score (with matched removed)
+                        # print('s:%d'%s)
+                        # print()
+                        idx_c = idx_c[idx_c<p_all[s].shape[0]]    # remove entries of first-occurence neurons (no matching possible)
+                        self.stats['match_score'][idx_c,s,0] = p_matched[idx_c,s]
+                        scores_now = p_all[s].toarray()
+                        self.stats['match_score'][idx_c,s,1] = [max(scores_now[c,np.where(scores_now[c,:]!=self.stats['match_score'][c,s,0])[0]]) for c in idx_c]
+                    else:
+                        self.stats['match_score'][idx_c,s,:] = [1,0]
+            except:
+                print('passing session %d'%s)
 
 
-
-            self.stats['match_score'][idx_c,s,0] = 1
-            if (s>0) & self.sessions['bool'][s]:     ## store matched score and best score (with matched removed)
-                idx_c = idx_c[idx_c<p_all[s].shape[0]]    # remove entries of first-occurence neurons (no matching possible)
-                self.stats['match_score'][idx_c,s,0] = p_matched[idx_c,s]
-                scores_now = p_all[s].toarray()
-                self.stats['match_score'][idx_c,s,1] = [max(scores_now[c,np.where(scores_now[c,:]!=self.stats['match_score'][c,s,0])[0]]) for c in idx_c]
-        self.save([False,False,True,False,False])
-        print('stats obtained - time taken: %5.3g'%(time.time()-t_start))
+        # self.save([False,False,True,False,False])
+        # print('stats obtained - time taken: %5.3g'%(time.time()-t_start))
 
 
     def get_PC_fields(self):
@@ -432,6 +461,7 @@ class cluster:
                        'status':np.zeros((0,self.nSes,self.meta['field_count_max'])).astype('uint8'),
                        'Bayes_factor':np.zeros((0,self.nSes,self.meta['field_count_max'])),
                        'reliability':np.zeros((0,self.nSes,self.meta['field_count_max'])),
+                       'trial_act':np.zeros((0,self.nSes,self.meta['field_count_max'],self.sessions['trial_ct'].max()),'bool'),
                        'max_rate':np.zeros((0,self.nSes,self.meta['field_count_max'])),
                        'posterior_mass':np.zeros((0,self.nSes,self.meta['field_count_max'])),
                        'baseline':np.zeros((0,self.nSes,self.meta['field_count_max'],3)),
@@ -442,9 +472,9 @@ class cluster:
         extend_dict(self.fields,self.meta['nC'])
 
         t_start = time.time()
-        for (s,_) in tqdm(enumerate(self.session_order),total=self.meta['nSes'],leave=False):
+        for (s,s0) in tqdm(enumerate(self.session_order),total=self.meta['nSes'],leave=False):
 
-            pathSession = pathcat([self.pathMouse,'Session%02d'%(s+1)]);
+            pathSession = pathcat([self.pathMouse,'Session%02d'%(s0)]);
             pathFields = pathcat([pathSession,'PC_fields_para.mat']);
             pathFiringstats = pathcat([pathSession,'PC_fields_firingstats.mat']);
 
@@ -459,14 +489,15 @@ class cluster:
                 # for (c,n) in zip(idx_c,n_arr):
                 #     for f in np.where(np.any(firingstats_tmp['trial_field'][n,...],-1)>0)[0]:
                 #         maps = np.nanmean(firingstats_tmp['trial_map'][n,np.where(firingstats_tmp['trial_field'][n,f,:])[0],:],0)
+                #
                 #         self.fields['max_rate'][c,s,f] = np.nanmax(gauss_smooth(maps,2))
-
 
 
                 ### hand over all other values
                 fields = sio.loadmat(pathFields,squeeze_me=True);
                 self.fields['nModes'][idx_c,s] = np.minimum(2,(np.isfinite(fields['parameter'][n_arr,:,3,0]).sum(1)).astype('int'))
-
+                # print(firingstats_tmp['trial_field'].shape)
+                # return
                 for (c,n) in zip(idx_c,n_arr):
 
                     if self.fields['nModes'][c,s] > 0:   ## cell is PC
@@ -482,21 +513,25 @@ class cluster:
                         self.fields['Bayes_factor'][c,s,...] = fields['Bayes_factor'][n,:self.meta['field_count_max'],0]
 
                         for f in np.where(~np.isnan(fields['parameter'][n,:,3,0]))[0]:
+                            if firingstats_tmp['trial_map'].shape[1]==self.sessions['trial_ct'][s]:
+                                self.fields['reliability'][c,s,f], self.fields['max_rate'][c,s,f], self.fields['trial_act'][c,s,f,:self.sessions['trial_ct'][s]] = get_reliability(firingstats_tmp['trial_map'][n,...],firingstats_tmp['map'][n,...],fields['parameter'][n,...],f)
+                            else:
+                                self.fields['reliability'][c,s,f], self.fields['max_rate'][c,s,f], self.fields['trial_act'][c,s,f,:self.sessions['trial_ct'][s]] = get_reliability(firingstats_tmp['trial_map'][n,1:,...],firingstats_tmp['map'][n,...],fields['parameter'][n,...],f)
 
-                            self.fields['reliability'][c,s,f], self.fields['max_rate'][c,s,f], _ = get_reliability(firingstats_tmp['trial_map'][n,...],firingstats_tmp['map'][n,...],fields['parameter'][n,...],f)
+                            # self.fields['trial_act'][c,s,f,:self.sessions['trial_ct'][s]] = firingstats_tmp['trial_field'][n,f,:]
+                        # print(self.fields['trial_act'][c,s,:,:self.sessions['trial_ct'][s]])
                         # self.fields['reliability'][c,s,:] = fields['reliability'][n,:self.meta['field_count_max']]
 
             else:
-                print('Data for Session %d does not exist'%s)
+                print('Data for Session %d does not exist'%s0)
 
-        self.save([False,False,False,True,False])
+        # self.save([False,False,False,True,False])
         t_end = time.time()
-        print('Fields obtained and saved, time spend: %6.4f'%(t_end-t_start))
+        # print('Fields obtained and saved, time spend: %6.4f'%(t_end-t_start))
 
 
     ### calculate shifts within clusters
     def compareSessions(self,reprocess=False,n_processes=0):
-        print('method chooses first field automatically - though I want most significant (mostly same) - how to?')
         t_start = time.time()
         nSes = self.meta['nSes']
 
@@ -512,7 +547,7 @@ class cluster:
 
             if n_processes>1:
                 pool = get_context("spawn").Pool(n_processes)
-                loc = self.fields['location'][...,0]
+                loc = np.copy(self.fields['location'][...,0])
                 loc[~self.status_fields] = np.NaN
                 res = pool.starmap(get_field_shifts,zip(self.status,self.fields['p_x'],loc))#self.meta['nC']))
                 i=0
@@ -534,21 +569,22 @@ class cluster:
                 self.compare['shifts_distr'] = sp.sparse.csr_matrix(self.compare['shifts_distr'])
                 self.compare['pointer'] = self.compare['pointer'].tocoo()
             else:
-                print('please use parallel processing for this')
+                pass
+                # print('please use parallel processing for this')
 
         else:
             self.compare = pickleData([],self.meta['svCompare'],'load')
         t_end = time.time()
-        print('Place field shifts calculated - time %5.3f'%(t_end-t_start))
+        # print('Place field shifts calculated - time %5.3f'%(t_end-t_start))
 
 
 
     def update_status(self,complete=True,
                         SNR_thr=None,rval_thr=None,CNN_thr=None,pm_thr=None,
                         fr_thr=None,Bayes_thr=None,reliability_thr=None,alpha=None,MI_thr=None,
-                        A0_thr=None,A_thr=None,Arate_thr=None,pmass_thr=None,CI_thr=None):
+                        A0_thr=None,A_thr=None,Arate_thr=None,sigma_thr=None,pmass_thr=None,CI_thr=None):
 
-        print('further, implement method to calculate inter-coding intervals, etc, after updating statusses')
+        # print('further, implement method to calculate inter-coding intervals, etc, after updating statusses')
 
         self.thr = {'SNR':          self.meta['SNR_thr'] if SNR_thr is None else SNR_thr,
                     'r_values':     self.meta['rval_thr'] if rval_thr is None else rval_thr,
@@ -567,6 +603,7 @@ class cluster:
                     'A_0':          self.meta['A0_thr'] if A0_thr is None else A0_thr,
                     'A':            self.meta['A_thr'] if A_thr is None else A_thr,
                     'A_rate':       self.meta['Arate_thr'] if Arate_thr is None else Arate_thr,
+                    'sigma':        self.meta['sigma_thr'] if sigma_thr is None else sigma_thr,
                     'p_mass':       self.meta['pmass_thr'] if pmass_thr is None else pmass_thr,
                     'CI':           self.meta['CI_thr'] if CI_thr is None else CI_thr
                     }
@@ -602,6 +639,7 @@ class cluster:
             idx_fields = (self.fields['baseline'][...,0]>morphed_A0_thr) & \
                         (self.fields['amplitude'][...,0]>self.thr['A']) & \
                         (A_rate>self.thr['A_rate']) & \
+                        (self.fields['width'][...,0]>self.thr['sigma']) & \
                         (self.fields['posterior_mass']>self.thr['p_mass']) & \
                         (CI_width<self.thr['CI']) & \
                         (self.fields['Bayes_factor']>self.thr['Bayes']) & \
@@ -626,7 +664,7 @@ class cluster:
             #self.fields['status'][idx_reward] = 4
             #self.fields['status'][~self.status[...,2],:] = False
 
-            for c in tqdm(range(self.meta['nC'])):
+            for c in range(self.meta['nC']):
                 for s in range(self.meta['nSes']):
                     if self.status[c,s,2]:
 
@@ -645,7 +683,7 @@ class cluster:
 
 
         t_end = time.time()
-        print('PC-characterization done. Time taken: %7.5f'%(t_end-t_start))
+        # print('PC-characterization done. Time taken: %7.5f'%(t_end-t_start))
 
 
     def cluster_classification(self,idxes=None,min_cluster_count=None,border_margin=None):
@@ -786,12 +824,12 @@ def get_field_shifts(status,p_x,loc):
                       #shifts_distr /= f_norm
 
                   d = np.abs(np.mod(loc[s1,:][:,np.newaxis] - loc[s2,:]+nbin/2,nbin)-nbin/2)
+                  # print(d)
                   d[np.isnan(d)] = nbin
                   f1,f2 = sp.optimize.linear_sum_assignment(d)
                   for f in zip(f1,f2):
 
                       if d[f] < nbin:
-
                           idx = np.ravel_multi_index((s1,s2,f[0],f[1]),(nSes,nSes,nfields,nfields))
                           shifts, shifts_distr = periodic_distr_distance(p_x[s1,f[0],:],p_x[s2,f[1],:],nbin,L_track,mode='bootstrap')
 
@@ -810,6 +848,114 @@ def get_field_shifts(status,p_x,loc):
 
     return out
 
+class multi_cluster:
+    def __init__(self):
+        self.cMice = {}
+        self.set_sessions()
+
+    def set_sessions(self):
+        self.sessions = {'34':   {'total':22,
+                             'analyze':[3,15]},
+                    '35':   {'total':22,
+                             'analyze':[3,15]},
+                    '65':   {'total':44,
+                             'analyze':[3,20]}, ## maybe until 28
+                    '66':   {'total':45,
+                             'analyze':[3,21]}, ## maybe until 29
+                    '72':   {'total':44,
+                             'analyze':[3,20]}, ## maybe until 28
+                    '243':  {'total':71,
+                             'analyze':[33,50]},
+                    '244':  {'total':np.NaN,
+                             'analyze':[np.NaN,np.NaN]},
+                    '245':  {'total':73,
+                             'analyze':[33,52]},
+                    '246':  {'total':63,
+                             'analyze':[33,42]},
+                    '756':  {'total':20,
+                             'analyze':[3,20]},
+                    '757':  {'total':20,
+                             'analyze':[3,20]},
+                    '758':  {'total':20,
+                             'analyze':[3,20]},
+                    '839':  {'total':20,
+                             'analyze':[3,20]},
+                    '840':  {'total':18,
+                             'analyze':[3,18]},
+                    '841':  {'total':np.NaN,
+                             'analyze':[np.NaN,np.NaN]},
+                    '842':  {'total':np.NaN,
+                             'analyze':[np.NaN,np.NaN]},
+                    '879':  {'total':15,
+                             'analyze':[3,15]},
+                    '882':  {'total':np.NaN,
+                             'analyze':[np.NaN,np.NaN]},
+                    '884':  {'total':15,
+                             'analyze':[3,15]},
+                    '886':  {'total':19,
+                             'analyze':[3,19]}, ## dont know yet
+                    '549':  {'total':20,
+                             'analyze':[3,20]}, #bad matching?!
+                    '551':  {'total':20,
+                             'analyze':[3,20]},
+                    '918shKO':  {'total':28,
+                             'analyze':[3,15]},
+                    '931wt':    {'total':28,
+                             'analyze':[3,15]},
+                    '943shKO':  {'total':28,
+                             'analyze':[3,15]},
+                    '231':  {'total':105,
+                             'analyze':[33,87]},   ## check again
+                    '232':  {'total':74,
+                             'analyze':[3,72]},
+                    '236':  {'total':28,
+                             'analyze':[3,28]},
+                    '762':  {'total':112,
+                             'analyze':[3,87]},
+                    }
+
+
+    def load_mice(self,mice,load=False,reload=False):
+
+        for mouse in mice:
+            if (not (mouse in self.cMice.keys())) | reload:
+
+                if mouse in ['34','35','65','66','72','243','244','756','757','758','839','840','841','842','879','882','884','886']:
+                    basePath = '/media/wollex/Analyze_AS3/Data'
+                elif mouse in ['549','551']:
+                    basePath = '/media/wollex/Analyze_AS1/others'
+                elif mouse in ['918shKO','931wt','943shKO']:
+                    basePath = '/media/wollex/Analyze_AS1/Shank'
+                elif mouse in ['231','232','236','245','246','762']:
+                    basePath = '/media/wollex/Analyze_AS1/linstop'
+                else:
+                    print('Mouse %s does not exist'% mouse)
+
+                self.cMice[mouse] = cluster(basePath,mouse,self.sessions[mouse]['total'],dataSet='redetect')
+                if not load:
+                    self.cMice[mouse].run_complete(sessions=self.sessions[mouse]['analyze'],n_processes=4,reprocess=True)
+                else:
+                    self.cMice[mouse].load()
+
+    def update_all(self,mice=None,which=None,SNR_thr=3,rval_thr=0,Bayes_thr=10,rel_thr=0.1,A_thr=3,A0_thr=1,pm_thr=0.5):
+
+        if mice is None:
+            mice = self.cMice.keys()
+
+        progress = tqdm(mice,leave=True)
+
+
+        for mouse in tqdm(mice):
+            progress.set_description('updating mouse %s...'%mouse)
+            if 'sessions' in which:
+                self.cMice[mouse].session_classification(self.sessions[mouse]['analyze'])
+                # self.cMice[mouse].session_classification()
+            if 'stats' in which:
+                self.cMice[mouse].get_stats(n_processes=4)
+            if 'status' in which:
+                self.cMice[mouse].update_status(SNR_thr=SNR_thr,rval_thr=rval_thr,Bayes_thr=Bayes_thr,reliability_thr=rel_thr,A_thr=A_thr,A0_thr=A0_thr,MI_thr=0,pm_thr=pm_thr)
+            if 'compare' in which:
+                self.cMice[mouse].compareSessions(reprocess=True,n_processes=4)
 
 # def get_firingrate(S,f=15,sd_r=1):
 #

@@ -86,8 +86,7 @@ def _hsm(data):
     return _hsm(data[j:j + N])
 
 
-def periodic_distr_distance(p1,p2,nbin,L_track,mu1=None,mu2=None,mode='wasserstein'):
-
+def periodic_distr_distance(p1,p2,nbin,L_track,mu1=None,mu2=None,N_bs=1000,mode='wasserstein'):
 
   if mode=='wasserstein':
     ### test, whether any distribution is cut off by "periodic bounds"
@@ -118,16 +117,26 @@ def periodic_distr_distance(p1,p2,nbin,L_track,mu1=None,mu2=None,mode='wasserste
     return d_out
   else:
     ## get distance via bootstrapping
-    N_bs = 100
 
     cdf1 = np.cumsum(p1)
     cdf2 = np.cumsum(p2)
-    x1 = np.argmin(abs(np.random.rand(N_bs,1)-cdf1[np.newaxis,:]),1)
-    x2 = np.argmin(abs(np.random.rand(N_bs,1)-cdf2[np.newaxis,:]),1)
-    #print('test bootstrapping:')
+
+    rnd1 = np.random.rand(N_bs,1)
+    rnd2 = np.random.rand(N_bs,1)
+    x1 = np.argmin(abs(rnd1-cdf1[np.newaxis,:]),1)
+    x2 = np.argmin(abs(rnd2-cdf2[np.newaxis,:]),1)
+
+    ## correct for very low probabilities, where very first entry is taken - should rather be entry, closest to distribution (>0, but <distr)
+    for i in np.where(x1==0)[0]:
+        tmp = abs(rnd1[i]-cdf1)
+        x1[i] = np.where(tmp==tmp.min())[0][-1]
+    for i in np.where(x2==0)[0]:
+        tmp = abs(rnd2[i]-cdf2)
+        x2[i] = np.where(tmp==tmp.min())[0][-1]
+
     shift_distr = np.zeros(N_bs)
-    #for i in range(N_bs):
-      ## generate two samples from distribution from cdfs
+
+    ## generate two samples from distribution from cdfs
     shift_distr = (x2-x1 + L_track/2)%L_track -L_track/2
     d_out = get_average(shift_distr,1,periodic=True,bounds=[-L_track/2,L_track/2])
     p_out = np.histogram(shift_distr,np.linspace(-L_track/2,L_track/2,nbin+1),density=True)[0]
@@ -135,18 +144,18 @@ def periodic_distr_distance(p1,p2,nbin,L_track,mu1=None,mu2=None,mode='wasserste
     #CI = np.percentile(shift_distr,[5,95])
     #print('CI: %5.3f,%5.3f'%(CI[0],CI[1]))
 
-    #plt.figure()
-    #plt.subplot(211)
-    #plt.plot(p1)
-    #plt.plot(p2,'r')
-    #plt.subplot(212)
-    #plt.hist(shift_distr,np.linspace(-50,50,101),density=True)
-    #plt.plot(np.linspace(-49.5,49.5,100),p_out)
-    #plt.plot(d_out,0,'rx')
-    ##d_raw = abs((d_raw+nbin/2)%nbin-nbin/2) * shift_sign
-    ##plt.plot(d_raw,0,'kx')
-    #plt.xlim([-50,50])
-    #plt.show(block=True)
+    # plt.figure()
+    # plt.subplot(211)
+    # plt.plot(p1)
+    # plt.plot(p2,'r')
+    # plt.subplot(212)
+    # plt.hist(shift_distr,np.linspace(-50,50,101),density=True)
+    # plt.plot(np.linspace(-49.5,49.5,100),p_out)
+    # plt.plot(d_out,0,'rx')
+    # #d_raw = abs((d_raw+nbin/2)%nbin-nbin/2) * shift_sign
+    # #plt.plot(d_raw,0,'kx')
+    # plt.xlim([-50,50])
+    # plt.show(block=False)
     return d_out, p_out
 
 
@@ -686,17 +695,17 @@ def compute_serial_matrix(dist_mat,method="ward"):
 
     return seriated_dist, res_order, res_linkage
 
-def gauss_smooth(X,smooth=None):
+def gauss_smooth(X,smooth=None,mode='wrap'):
   if (smooth is None) or not np.any(np.array(smooth)>0):
     return X
   else:
     V = X.copy()
     V[np.isnan(X)] = 0
-    VV = sp.ndimage.gaussian_filter(V,smooth,mode='wrap')
+    VV = sp.ndimage.gaussian_filter(V,smooth,mode=mode)
 
     W = 0*X.copy()+1
     W[np.isnan(X)] = 0
-    WW = sp.ndimage.gaussian_filter(W,smooth,mode='wrap')
+    WW = sp.ndimage.gaussian_filter(W,smooth,mode=mode)
 
   return VV/WW
 

@@ -187,15 +187,16 @@ class detect_PC:
     velocity = np.diff(np.append(position[0],position))*self.para['f']*self.para['L_track']/position.max()
     velocity[velocity<0] = 0
     velocity = sp.ndimage.gaussian_filter(velocity,2)
-
     self.dataBH['active'] = sp.ndimage.binary_opening(velocity>2,structure=np.ones(int(self.para['f']/2)))
     self.dataBH['active'] = sp.ndimage.binary_closing(velocity>2,structure=np.ones(int(self.para['f']/2)))
     self.dataBH['time'] = load_behavior['time'][:T]
-
     idx_teleport = np.where(np.diff(self.dataBH['binpos'])<-10)[0]
 
-    self.dataBH['active'][:max(0,idx_teleport[0]-1)] = False
-    self.dataBH['active'][idx_teleport[-1]:] = False
+    if not (self.dataBH['binpos'][0] < 5):
+        self.dataBH['active'][:max(0,idx_teleport[0]+1)] = False
+
+    if not (self.dataBH['binpos'][-1] >= 95):
+        self.dataBH['active'][idx_teleport[-1]:] = False
 
     self.dataBH['binpos_active'] = self.dataBH['binpos'][self.dataBH['active']]
     self.dataBH['binpos_coarse_active'] = self.dataBH['binpos_coarse'][self.dataBH['active']]
@@ -330,7 +331,7 @@ class detect_PC:
 
       #except (KeyboardInterrupt, SystemExit):
         #raise
-    except:# SystemExit:# TypeError:#KeyboardInterrupt:
+    except:# TypeError:#KeyboardInterrupt:
       print('analysis failed: (-)')# p-value (MI): %.2f, \t bayes factor: %.2fg+/-%.2fg'%(result['status']['MI_p_value'],result['status']['Bayes_factor'][0,0],result['status']['Bayes_factor'][0,1]))
       #result['fields']['nModes'] = -1
 
