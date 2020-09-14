@@ -115,7 +115,7 @@ def get_t_measures(mouse):
         t_measures[104] = 2425;
 
     elif mouse in ['232']:
-        t_measures = np.zeros(105)
+        t_measures = np.zeros(74)
 
         t_measures[0] = 0;
         t_measures[1] = 4;
@@ -191,29 +191,29 @@ def get_t_measures(mouse):
         t_measures[71] = 1924;
         t_measures[72] = 1944;
         t_measures[73] = 1948;
-        t_measures[74] = 2016;
-        t_measures[75] = 2020;
-        t_measures[76] = 2040;
-        t_measures[77] = 2044;
-        t_measures[78] = 2064;
-        t_measures[79] = 2068;
-        t_measures[80] = 2088;
-        t_measures[81] = 2092;
-        t_measures[82] = 2112;
-        t_measures[83] = 2116;
-        t_measures[84] = 2184;
-        t_measures[85] = 2188;
-        t_measures[86] = 2208;
-        t_measures[87] = 2212;
-        t_measures[88] = 2232;
-        t_measures[89] = 2236;
-        t_measures[90] = 2256;
-        t_measures[91] = 2260;
-        t_measures[92] = 2280;
-        t_measures[93] = 2284;
-        t_measures[94] = 2285;
-        t_measures[95] = 2760;
-        t_measures[96] = 2764;
+        # t_measures[74] = 2016;
+        # t_measures[75] = 2020;
+        # t_measures[76] = 2040;
+        # t_measures[77] = 2044;
+        # t_measures[78] = 2064;
+        # t_measures[79] = 2068;
+        # t_measures[80] = 2088;
+        # t_measures[81] = 2092;
+        # t_measures[82] = 2112;
+        # t_measures[83] = 2116;
+        # t_measures[84] = 2184;
+        # t_measures[85] = 2188;
+        # t_measures[86] = 2208;
+        # t_measures[87] = 2212;
+        # t_measures[88] = 2232;
+        # t_measures[89] = 2236;
+        # t_measures[90] = 2256;
+        # t_measures[91] = 2260;
+        # t_measures[92] = 2280;
+        # t_measures[93] = 2284;
+        # t_measures[94] = 2285;
+        # t_measures[95] = 2760;
+        # t_measures[96] = 2764;
 
     elif mouse in ['236']:
         t_measures = np.zeros(105)
@@ -247,7 +247,7 @@ def get_t_measures(mouse):
         t_measures[26] = 888;
         t_measures[27] = 912;
 
-    elif mouse in ["879","882","884","886"]:
+    elif mouse in ["882","884","886"]:
         t_measures = np.zeros(25)
         t_measures[0] = 0;
         t_measures[1] = 4;
@@ -273,6 +273,24 @@ def get_t_measures(mouse):
         t_measures[21] = 364;
         t_measures[22] = 384;
         t_measures[23] = 388;
+
+    elif mouse in ["879"]:
+        t_measures = np.zeros(15)
+        t_measures[0] = 0;
+        t_measures[1] = 4;
+        t_measures[2] = 24;
+        t_measures[3] = 28;
+        t_measures[4] = 48;
+        t_measures[5] = 52;
+        t_measures[6] = 120;   ## weekend!
+        t_measures[7] = 124;
+        t_measures[8] = 148;
+        t_measures[9] = 168;
+        t_measures[10] = 172;
+        t_measures[11] = 192;
+        t_measures[12] = 196;
+        t_measures[13] = 216;
+        t_measures[14] = 220;
 
     elif mouse in ["839","840","841"]:
         t_measures = np.zeros(25)
@@ -327,79 +345,79 @@ def get_t_measures(mouse):
         t_measures[21] = 340;
 
     elif mouse in ["243"]:
-        t_measures = np.zeros(72)
+        t_measures = np.zeros(71)
 
-        t_measures[1] = 0;
-        t_measures[2] = 20;
-        t_measures[3] = 24;
-        t_measures[4] = 44;
-        t_measures[5] = 68;
-        t_measures[6] = 92;
-        t_measures[7] = 96;
-        t_measures[8] = 116;
-        t_measures[9] = 120;
-        t_measures[10] = 140;
-        t_measures[11] = 144;
-        t_measures[12] = 164;
-        t_measures[13] = 168;
-        t_measures[14] = 236;
-        t_measures[15] = 240;
-        t_measures[16] = 260;
-        t_measures[17] = 264;
-        t_measures[18] = 284;
-        t_measures[19] = 288;
-        t_measures[20] = 308;
-        t_measures[21] = 312;
-        t_measures[22] = 332;
-        t_measures[23] = 336;
-        t_measures[24] = 404;
-        t_measures[25] = 408;
-        t_measures[26] = 428;
-        t_measures[27] = 432;
-        t_measures[28] = 452;
-        t_measures[29] = 456;
-        t_measures[30] = 476;
-        t_measures[31] = 480;
-        t_measures[32] = 500;
-        t_measures[33] = 504;
-        t_measures[34] = 572;
-        t_measures[35] = 576;
-        t_measures[36] = 596;
-        t_measures[37] = 600;
-        t_measures[38] = 620;
-        t_measures[39] = 624;
-        t_measures[40] = 644;
-        t_measures[41] = 980;
-        t_measures[42] = 1004;
-        t_measures[43] = 1008;
-        t_measures[44] = 1076;
-        t_measures[45] = 1080;
-        t_measures[46] = 1100;
-        t_measures[47] = 1104;
-        t_measures[48] = 1124;
-        t_measures[49] = 1148;
-        t_measures[50] = 1152;
-        t_measures[51] = -604;
-        t_measures[52] = -603;
-        t_measures[53] = -602;
-        t_measures[54] = -672;
-        t_measures[55] = -671;
-        t_measures[56] = -670;
-        t_measures[57] = -912;
-        t_measures[58] = -911;
-        t_measures[59] = -910;
-        t_measures[60] = -792;
-        t_measures[61] = -791;
-        t_measures[62] = -790;
-        t_measures[63] = -840;
-        t_measures[64] = -839;
-        t_measures[65] = -838;
-        t_measures[66] = -940;
-        t_measures[67] = -939;
-        t_measures[68] = -938;
-        t_measures[69] = -1008;
-        t_measures[70] = -1007;
-        t_measures[71] = -1006;
+        t_measures[0] = 0;
+        t_measures[1] = 20;
+        t_measures[2] = 24;
+        t_measures[3] = 44;
+        t_measures[4] = 68;
+        t_measures[5] = 92;
+        t_measures[6] = 96;
+        t_measures[7] = 116;
+        t_measures[8] = 120;
+        t_measures[9] = 140;
+        t_measures[10] = 144;
+        t_measures[11] = 164;
+        t_measures[12] = 168;
+        t_measures[13] = 236;
+        t_measures[14] = 240;
+        t_measures[15] = 260;
+        t_measures[16] = 264;
+        t_measures[17] = 284;
+        t_measures[18] = 288;
+        t_measures[19] = 308;
+        t_measures[20] = 312;
+        t_measures[21] = 332;
+        t_measures[22] = 336;
+        t_measures[23] = 404;
+        t_measures[24] = 408;
+        t_measures[25] = 428;
+        t_measures[26] = 432;
+        t_measures[27] = 452;
+        t_measures[28] = 456;
+        t_measures[29] = 476;
+        t_measures[30] = 480;
+        t_measures[31] = 500;
+        t_measures[32] = 504;
+        t_measures[33] = 572;
+        t_measures[34] = 576;
+        t_measures[35] = 596;
+        t_measures[36] = 600;
+        t_measures[37] = 620;
+        t_measures[38] = 624;
+        t_measures[39] = 644;
+        t_measures[40] = 980;
+        t_measures[41] = 1004;
+        t_measures[42] = 1008;
+        t_measures[43] = 1076;
+        t_measures[44] = 1080;
+        t_measures[45] = 1100;
+        t_measures[46] = 1104;
+        t_measures[47] = 1124;
+        t_measures[48] = 1148;
+        t_measures[49] = 1152;
+        t_measures[50] = -604;
+        t_measures[51] = -603;
+        t_measures[52] = -602;
+        t_measures[53] = -672;
+        t_measures[54] = -671;
+        t_measures[55] = -670;
+        t_measures[56] = -912;
+        t_measures[57] = -911;
+        t_measures[58] = -910;
+        t_measures[59] = -792;
+        t_measures[60] = -791;
+        t_measures[61] = -790;
+        t_measures[62] = -840;
+        t_measures[63] = -839;
+        t_measures[64] = -838;
+        t_measures[65] = -940;
+        t_measures[66] = -939;
+        t_measures[67] = -938;
+        t_measures[68] = -1008;
+        t_measures[69] = -1007;
+        t_measures[70] = -1006;
 
     elif mouse in ["244","245","246"]:
         t_measures = np.zeros(73)
@@ -542,7 +560,11 @@ def get_t_measures(mouse):
         t_measures[28] = 1492;
 
     elif mouse in ["756","757","758"]:
-        t_measures = np.zeros(31)
+        if mouse in ["756"]:
+            t_measures = np.zeros(30)
+        else:
+            t_measures = np.zeros(28)
+        t_measures = np.zeros(20)
         t_measures[0] = 0;
         t_measures[1] = 4;
         t_measures[2] = 24;
@@ -563,26 +585,26 @@ def get_t_measures(mouse):
         t_measures[17] = 244;
         t_measures[18] = 264;
         t_measures[19] = 268;
-        if mouse in ["756"]:
-            t_measures[20] = 288;
-            t_measures[21] = 292;
-            t_measures[22] = 1080;
-            t_measures[23] = 1084;
-            t_measures[24] = 1104;
-            t_measures[25] = 1108;
-            t_measures[26] = 1128;
-            t_measures[27] = 1132;
-            t_measures[28] = 1152;
-            t_measures[29] = 1156;
-        elif mouse in ["757","758"]:
-            t_measures[20] = 912;
-            t_measures[21] = 916;
-            t_measures[22] = 936;
-            t_measures[23] = 940;
-            t_measures[24] = 960;
-            t_measures[25] = 964;
-            t_measures[26] = 984;
-            t_measures[27] = 988;
+        # if mouse in ["756"]:
+        #     t_measures[20] = 288;
+        #     t_measures[21] = 292;
+        #     t_measures[22] = 1080;
+        #     t_measures[23] = 1084;
+        #     t_measures[24] = 1104;
+        #     t_measures[25] = 1108;
+        #     t_measures[26] = 1128;
+        #     t_measures[27] = 1132;
+        #     t_measures[28] = 1152;
+        #     t_measures[29] = 1156;
+        # elif mouse in ["757","758"]:
+        #     t_measures[20] = 912;
+        #     t_measures[21] = 916;
+        #     t_measures[22] = 936;
+        #     t_measures[23] = 940;
+        #     t_measures[24] = 960;
+        #     t_measures[25] = 964;
+        #     t_measures[26] = 984;
+        #     t_measures[27] = 988;
 
     elif mouse in ["65","66","72"]:
         t_measures = np.zeros(45)
@@ -635,12 +657,6 @@ def get_t_measures(mouse):
 
         if mouse in '72':
             t_measures = np.delete(t_measures,4)
-        # t_measures[45] = 437;
-
-        ## somewhere in here, m66 has an additional session...
-        #      t_measures[36] = 456;
-        #      t_measures[37] = 460;
-        #      t_measures[38] = 461;
 
 
     elif mouse in ["762"]:

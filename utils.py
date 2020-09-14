@@ -198,29 +198,40 @@ def bootstrap_data(fun,data,N_bs):
   ## fun:     function to be applied to data "f(data)". needs to return calculated parameters in first return statement
   ## N_bs:    number of bootstrap-samples
   N_data = data.shape[0]
-  pars,_ = fun(data)
-  samples = np.random.randint(0,N_data,(N_bs,N_data))
+  single=False
+  try:
+      pars,_ = fun(data)
+      par = np.zeros(np.append(N_bs,np.array(pars).shape))*np.NaN
+  except:
+      pars = fun(data)
+      single = True
+      par = np.zeros((N_bs,1))*np.NaN
 
-  par = np.zeros(np.append(N_bs,np.array(pars).shape))*np.NaN
+  samples = np.random.randint(0,N_data,(N_bs,N_data))
 
   for i in range(N_bs):
     data_bs = data[samples[i,:],...]    ### get bootstrap sample
-    par[i,...],p_cov = fun(data_bs)     ### obtain parameters from function "fun"
+    if single:
+        par[i,...] = fun(data_bs)     ### obtain parameters from function "fun"
+    else:
+        par[i,...],p_cov = fun(data_bs)     ### obtain parameters from function "fun"
 
   return par.mean(0), par.std(0)
 
-def pickleData(dat,path,mode='load'):
+def pickleData(dat,path,mode='load',prnt=True):
 
   if mode=='save':
     f = open(path,'wb')
     pickle.dump(dat,f)
     f.close()
-    print('Data saved in %s'%path)
+    if prnt:
+        print('Data saved in %s'%path)
   else:
     f = open(path,'rb')
     dat = pickle.load(f)
     f.close()
-    print('Data loaded from %s'%path)
+    if prnt:
+        print('Data loaded from %s'%path)
     return dat
 
 
@@ -639,6 +650,9 @@ def corr0(X,Y=None):
 
   Y = X if Y is None else Y
 
+  X -= np.nanpercentile(X,20)
+  Y -= np.nanpercentile(X,20)
+
   c_xy = np.zeros((len(X),len(X)))
   for i,x in enumerate(X):
     for j,y in enumerate(Y):
@@ -806,4 +820,78 @@ def get_firingrate(S,f=15,sd_r=1):
       firing_threshold_adapt = baseline + sd_r*noise
 
       N_spikes = np.floor(S / firing_threshold_adapt).sum()
-      return N_spikes/(S.shape[0]/f),firing_threshold_adapt,S > firing_threshold_adapt#np.floor(S / firing_threshold_adapt)#
+      return N_spikes/(S.shape[0]/f),firing_threshold_adapt,np.floor(S / firing_threshold_adapt)#S > firing_threshold_adapt#
+
+def add_number(fig,ax,order=1,offset=None):
+
+    # offset = [-175,50] if offset is None else offset
+    offset = [-75,25] if offset is None else offset
+    pos = fig.transFigure.transform(plt.get(ax,'position'))
+    x = pos[0,0]+offset[0]
+    y = pos[1,1]+offset[1]
+    ax.text(x=x,y=y,s='%s)'%chr(96+order),ha='center',va='center',transform=None,weight='bold',fontsize=14)
+
+
+def get_status_arr(cluster,SD=1):
+
+    nSes = cluster.meta['nSes']
+    nC = cluster.meta['nC']
+    nbin = cluster.para['nbin']
+    sig_theta = cluster.stability['all']['mean'][0,2]
+
+    status_arr = ['act','code','stable']
+
+    ds_max = nSes
+    status = {}
+    status['stable'] = np.zeros((nC,nSes,nSes),'bool')
+    for c in np.where(cluster.stats['cluster_bool'])[0]:
+        for s in np.where(cluster.sessions['bool'])[0]:
+            if cluster.status[c,s,2]:
+                for f in np.where(cluster.status_fields[c,s,:])[0]:
+
+                    loc_compare = cluster.fields['location'][c,:s,:,0]
+                    loc_compare[~cluster.status_fields[c,:s,:]] = np.NaN
+                    dLoc = np.abs(np.mod(cluster.fields['location'][c,s,f,0] - loc_compare +nbin/2,nbin)-nbin/2)
+
+                    stable_s = np.where(dLoc<(SD*sig_theta))[0]
+                    if len(stable_s)>0:
+                        ds = s - stable_s[-1]
+                        status['stable'][c,s,np.unique(s-stable_s)] = True
+                        # status['stable'][c,s] = ds
+
+    status['act'] = np.pad(cluster.status[...,1][...,np.newaxis],((0,0),(0,0),(0,nSes-1)),mode='edge')
+    status['code'] = np.pad(cluster.status[...,2][...,np.newaxis],((0,0),(0,0),(0,nSes-1)),mode='edge')
+    # status['stable'] = status['stable']
+    # status['stable'] = status['stable']==1
+
+    status_dep = {}
+    status_dep['act'] = np.ones((nC,nSes),'bool')
+    status_dep['act'][:,~cluster.sessions['bool']] = False
+    status_dep['code'] = np.copy(status['act'][...,0])
+    status_dep['stable'] = np.copy(status['code'][...,0])
+
+    return status,status_dep
+
+
+def get_CI(p,X,Y,alpha=0.05):
+    n,k = X.shape
+
+    sigma2 = np.sum((Y-np.dot(X,p))**2) / (n-k)
+    C = sigma2 * np.linalg.inv(np.dot(X.T,X))
+    se = np.sqrt(np.diag(C))
+
+    sT = sstats.distributions.t.ppf(1.0 - alpha/2.0, n-k)
+    CI = sT * se
+    return CI
+
+
+def get_recurr(status,status_dep):
+
+    nC,nSes = status.shape
+    recurr = np.zeros((nSes,nSes))*np.NaN
+    for s in range(nSes):#np.where(cluster.sessions['bool'])[0]:
+        overlap = status[status[:,s],:].sum(0).astype('float')
+        N_ref = status_dep[status[:,s],:].sum(0)
+        recurr[s,1:nSes-s] = (overlap/N_ref)[s+1:]
+
+    return recurr

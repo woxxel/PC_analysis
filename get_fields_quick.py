@@ -25,8 +25,9 @@ import ultranest.stepsampler
 
 from spike_shuffling import shuffling
 
-from utils import pathcat, _hsm, get_nPaths, extend_dict, compute_serial_matrix, corr0, gauss_smooth, get_reliability, get_firingrate, add_number
+from utils import pathcat, _hsm, get_nPaths, extend_dict, compute_serial_matrix, corr0, gauss_smooth, get_reliability, get_firingrate, add_number, pickleData
 from utils_data import set_para
+from utils_analysis import define_active
 
 warnings.filterwarnings("ignore")
 
@@ -34,16 +35,16 @@ warnings.filterwarnings("ignore")
 
 class detect_PC:
 
-  def __init__(self,basePath,mouse,s,nP,nbin=100,plt_bool=False,sv_bool=False):
+  def __init__(self,basePath,mouse,s,nP,nbin=100,plt_bool=False,sv_bool=False,suffix=''):
 
     print('----------- mouse %s --- session %d -------------'%(mouse,s))
 
     ### set global parameters and data for all processes to access
-    self.para = set_para(basePath,mouse,s,nP=nP,nbin=nbin,plt_bool=plt_bool,sv_bool=sv_bool)
+    self.para = set_para(basePath,mouse,s,nP=nP,nbin=nbin,plt_bool=plt_bool,sv_bool=sv_bool,suffix=suffix)
     self.get_behavior()       ## load and process behavior
 
 
-  def run_detection(self,S=None,rerun=False,f_max=2,return_results=False,specific_n=None,artificial=False,dataSet='redetect',mode_info='MI',mode_activity='spikes'):
+  def run_detection(self,S=None,rerun=False,f_max=1,return_results=False,specific_n=None,artificial=False,dataSet='redetect',mode_info='MI',mode_activity='spikes',assignment=None):
 
     global t_start
     t_start = time.time()
@@ -54,16 +55,17 @@ class detect_PC:
     self.tmp = {}   ## dict to store some temporary variables in
 
     if S is None:
-      S, other = load_activity(self.para['pathSession'],dataSet=dataSet)
-      if dataSet == 'redetect':
-        idx_evaluate = other[0]
-        idx_previous = other[1]
-        SNR = other[2]
-        r_values = other[3]
+        S, other = load_activity(self.para['pathSession'],dataSet=dataSet)
+
+        if dataSet == 'redetect':
+            idx_evaluate = other[0]
+            idx_previous = other[1]
+            SNR = other[2]
+            r_values = other[3]
     else:
-      nCells = S.shape[0]
-      SNR = np.zeros(nCells)*np.NaN
-      r_values = np.zeros(nCells)*np.NaN
+        nCells = S.shape[0]
+        SNR = np.zeros(nCells)*np.NaN
+        r_values = np.zeros(nCells)*np.NaN
 
     nCells = S.shape[0]
 
@@ -76,23 +78,26 @@ class detect_PC:
       if artificial:
         #nDat,pathData = get_nPaths(self.para['pathSession'],'artificialData_analyzed_n')
         #for i in range(nDat):
-        print(self.para['svname_art'])
+
         f = open(self.para['svname_art'],'rb')
         PC_processed = pickle.load(f)
         f.close()
-        print(PC_processed.keys())
+
         #PC_processed = extend_dict(PC_processed,ld_tmp['fields']['parameter'].shape[0],ld_tmp)
       else:
         PC_processed = {}
-        PC_processed['status'] = loadmat(self.para['svname_status'],squeeze_me=True)
-        PC_processed['fields'] = loadmat(self.para['svname_fields'],squeeze_me=True)
-        PC_processed['firingstats'] = loadmat(self.para['svname_firingstats'],squeeze_me=True)
+        PC_processed['status'] = loadmat(os.path.join(self.para['pathSession'],os.path.splitext(self.para['svname_status'])[0]+'.pkl'),squeeze_me=True)
+        PC_processed['fields'] = loadmat(os.path.join(self.para['pathSession'],os.path.splitext(self.para['svname_fields'])[0]+'.pkl'),squeeze_me=True)
+        PC_processed['firingstats'] = loadmat(os.path.join(self.para['pathSession'],os.path.splitext(self.para['svname_firingstats'])[0]+'.pkl'),squeeze_me=True)
 
       #self.para['modes']['info'] = False
 
       #idx_process = np.where(np.isnan(PC_processed['status']['Bayes_factor'][:,0]))[0]
       idx_process = np.where(PC_processed['status']['MI_value']<=0.1)[0]
       print(idx_process)
+    elif not (assignment is None):
+        idx_process = assignment
+        print(idx_process)
     else:
       idx_process = np.arange(nCells)
     nCells_process = len(idx_process)
@@ -129,16 +134,19 @@ class detect_PC:
             if key[0] == '_':
               continue
             if rerun:
-              if n in idx_process:
+                if n in idx_process:
+                    n0 = np.where(idx_process==n)[0][0]
+                    results[key_type][key][n,...] = result_tmp[n0][key_type][key]
+                else:
+                    #((~np.isnan(PC_processed['status']['Bayes_factor'][n,0])) | (key in ['MI_value','MI_p_value','MI_z_score','Isec_value','Isec_p_value','Isec_z_score'])):# | (n>=idx_process[10])):
+                    results[key_type][key][n,...] = PC_processed[key_type][key][n,...]
+            elif not (assignment is None):
+                if n<len(idx_process):
+                    n0 = idx_process[n]
+                    results[key_type][key][n0,...] = result_tmp[n][key_type][key]
+            else:
                 n0 = np.where(idx_process==n)[0][0]
                 results[key_type][key][n,...] = result_tmp[n0][key_type][key]
-              else:
-                #((~np.isnan(PC_processed['status']['Bayes_factor'][n,0])) | (key in ['MI_value','MI_p_value','MI_z_score','Isec_value','Isec_p_value','Isec_z_score'])):# | (n>=idx_process[10])):
-                results[key_type][key][n,...] = PC_processed[key_type][key][n,...]
-              #else:
-            else:
-              n0 = np.where(idx_process==n)[0][0]
-              results[key_type][key][n,...] = result_tmp[n0][key_type][key]
 
       #for (r,n) in zip(result_tmp,range(nCells)):
         #for key_type in r.keys():
@@ -151,9 +159,18 @@ class detect_PC:
         return results
       else:
         print('saving results...')
-        savemat(self.para['svname_status'],results['status'])
-        savemat(self.para['svname_fields'],results['fields'])
-        savemat(self.para['svname_firingstats'],results['firingstats'])
+        # savemat(self.para['svname_status'],results['status'])
+        # savemat(self.para['svname_fields'],results['fields'])
+        # savemat(self.para['svname_firingstats'],results['firingstats'])
+        status_path = os.path.join(self.para['pathSession'],os.path.splitext(self.para['svname_status'])[0] + '.pkl')
+        print(status_path)
+        field_path = os.path.join(self.para['pathSession'],os.path.splitext(self.para['svname_fields'])[0] + '.pkl')
+        print(field_path)
+        firingstats_path = os.path.join(self.para['pathSession'],os.path.splitext(self.para['svname_firingstats'])[0] + '.pkl')
+        print(firingstats_path)
+        pickleData(results['status'],status_path,mode='save')
+        pickleData(results['fields'],field_path,mode='save')
+        pickleData(results['firingstats'],firingstats_path,mode='save')
         return
     else:
       print('nothing here to process')
@@ -161,76 +178,38 @@ class detect_PC:
 
   def get_behavior(self,T=None):
 
-    for file in os.listdir(self.para['pathSession']):
-      if file.endswith("aligned.mat"):
-          pathBH = os.path.join(self.para['pathSession'], file)
 
-    f = h5py.File(pathBH,'r')
-    key_array = ['position','time']
+    data = define_active(self.para['pathSession'])
 
-    load_behavior = {}
-    for key in key_array:
-      load_behavior[key] = np.squeeze(f.get('alignedData/resampled/%s'%key).value)
-    f.close()
     if T is None:
-      T = load_behavior['time'].shape[0]
+      T = data['time'].shape[0]
     self.dataBH = {}
-    position = load_behavior['position'][:T].astype('int')
-    position -= position.min()
+    self.dataBH['active'] = data['active']
+    self.dataBH['time'] = data['time']
+    self.dataBH['velocity'] = data['velocity']/self.para['nbin']*self.para['L_track']
 
-    self.dataBH['position'] = position/position.max()*self.para['L_track']
-    self.dataBH['binpos'] = (position*self.para['nbin']/(position.max()+1)).astype('int')
+    self.dataBH['position'] = data['position']/data['position'].max()*self.para['L_track']
+    self.dataBH['binpos'] = data['position'].astype('int')
 
     nbin_coarse = (self.para['nbin']/self.para['coarse_factor'])
-    self.dataBH['binpos_coarse'] = (position*nbin_coarse/(position.max()+1)).astype('int')
+    self.dataBH['binpos_coarse'] = (data['position']*nbin_coarse/(data['position'].max()*1.001)).astype('int')
 
-    velocity = np.diff(np.append(position[0],position))*self.para['f']*self.para['L_track']/position.max()
-    velocity[velocity<0] = 0
-    velocity = sp.ndimage.gaussian_filter(velocity,2)
-    self.dataBH['active'] = sp.ndimage.binary_opening(velocity>0.5,structure=np.ones(int(self.para['f']/2)))
-    self.dataBH['active'] = sp.ndimage.binary_closing(self.dataBH['active'],structure=np.ones(3))#np.ones(int(self.para['f']/2)))
-    self.dataBH['time'] = load_behavior['time'][:T]
-    idx_teleport = np.where(np.diff(self.dataBH['binpos'])<-10)[0]
+    self.dataBH['binpos_active'] = self.dataBH['binpos'][data['active']]
+    self.dataBH['binpos_coarse_active'] = self.dataBH['binpos_coarse'][data['active']]
 
-    if not (self.dataBH['binpos'][0] < 5):
-        self.dataBH['active'][:max(0,idx_teleport[0]+1)] = False
+    self.dataBH['time_active'] = self.dataBH['time'][data['active']]
+    self.dataBH['T'] = np.count_nonzero(data['active'])
 
-    if not (self.dataBH['binpos'][-1] >= 95):
-        self.dataBH['active'][idx_teleport[-1]:] = False
-
-    self.dataBH['binpos_active'] = self.dataBH['binpos'][self.dataBH['active']]
-    self.dataBH['binpos_coarse_active'] = self.dataBH['binpos_coarse'][self.dataBH['active']]
-
-    self.dataBH['time_active'] = self.dataBH['time'][self.dataBH['active']]
-    self.dataBH['T'] = np.count_nonzero(self.dataBH['active'])
-
-
-    #self.dataBH['binpos'] = load_behavior['binpos'][:T].astype('int') - 1 ## correct for different indexing
-    #plt.figure()
-    #plt.plot(self.dataBH['time_active'],self.dataBH['binpos_active'],'r')
-    #plt.plot(self.dataBH['time_active'],self.dataBH['binpos_active'],'b')
-    #plt.show(block=False)
 
     ###### define trials
     self.dataBH['trials'] = {}
     #self.dataBH['trials']['frame_raw'] = np.where(np.diff(self.dataBH['binpos'])<-10)[0]+1
     self.dataBH['trials']['frame'] = np.hstack([0, np.where(np.diff(self.dataBH['binpos_active'])<-10)[0]+1,len(self.dataBH['time_active'])])
-    #self.dataBH['trials']['frame'] = np.hstack([0,np.where(np.diff(self.dataBH['binpos_active'])<-10)[0]+1])
 
     self.dataBH['trials']['t'] = np.hstack([self.dataBH['time_active'][self.dataBH['trials']['frame'][:-1]],self.dataBH['time_active'][self.dataBH['trials']['frame'][-1]-1]])
     #dt = np.diff(self.dataBH['trials']['t'])
-    ct = len(self.dataBH['trials']['frame'])-1
-    #if dt[0] < 2:
-      #self.dataBH['trials']['t'] = np.delete(self.dataBH['trials']['t'],0)
-      #self.dataBH['trials']['frame'] = np.delete(self.dataBH['trials']['frame'],0)
-      #ct -=1
-      #print('cut')
-    #if dt[-1] < 2:
-      #self.dataBH['trials']['t'] = np.delete(self.dataBH['trials']['t'],ct)
-      #self.dataBH['trials']['frame'] = np.delete(self.dataBH['trials']['frame'],ct)
-      #ct -=1
-      #print('cut')
-    self.dataBH['trials']['ct'] = ct
+
+    self.dataBH['trials']['ct'] = len(self.dataBH['trials']['frame'])-1
     self.dataBH['trials']['dwelltime'] = np.zeros((self.dataBH['trials']['ct'],self.para['nbin']))
     self.dataBH['trials']['T'] = np.zeros(self.dataBH['trials']['ct']).astype('int')
 
@@ -249,6 +228,7 @@ class detect_PC:
     t_start = time.time()
     result = self.build_PC_fields()
     S[S<0] = 0
+
     if not (SNR is None):
       result['status']['SNR'] = SNR
       result['status']['r_value'] = r_value
@@ -276,13 +256,14 @@ class detect_PC:
           result['status'][key] = MI_tmp[key]
       #print('time taken (information): %.4f'%(time.time()-t_start))
 
-      result = self.get_correlated_trials(result,smooth=3)
-      #print(result)
+      result = self.get_correlated_trials(result,smooth=2)
+      # print(result['firingstats']['trial_field'])
+      # return
+
       firingstats_tmp = self.get_firingstats_from_trials(result['firingstats']['trial_map'])
       for key in firingstats_tmp.keys():
         result['firingstats'][key] = firingstats_tmp[key]
-
-
+      # return
       if np.any(result['firingstats']['trial_field']) and ((result['status']['SNR']>2) or np.isnan(result['status']['SNR'])):  # and (result['status']['MI_value']>0.1)     ## only do further processing, if enough trials are significantly correlated
         for t in range(5):
             trials = np.where(result['firingstats']['trial_field'][t,:])[0]
@@ -332,7 +313,7 @@ class detect_PC:
 
       #except (KeyboardInterrupt, SystemExit):
         #raise
-    except KeyboardInterrupt: #:# TypeError:#
+    except:# KeyboardInterrupt: #:# TypeError:#
       print('analysis failed: (-)')# p-value (MI): %.2f, \t bayes factor: %.2fg+/-%.2fg'%(result['status']['MI_p_value'],result['status']['Bayes_factor'][0,0],result['status']['Bayes_factor'][0,1]))
       #result['fields']['nModes'] = -1
 
@@ -363,11 +344,10 @@ class detect_PC:
   def get_correlated_trials(self,result,smooth=None):
 
     ## check reliability
-    # corr = corr0(gauss_smooth(result['firingstats']['trial_map'],smooth=(0,smooth*self.para['nbin']/self.para['L_track'])))
-    # print(corr)
-    # print(corr.shape)
+    corr = corr0(gauss_smooth(result['firingstats']['trial_map'],smooth=(0,smooth*self.para['nbin']/self.para['L_track'])))
 
-    corr = np.corrcoef(gauss_smooth(result['firingstats']['trial_map'],smooth=(0,smooth*self.para['nbin']/self.para['L_track'])))
+    # corr = np.corrcoef(gauss_smooth(result['firingstats']['trial_map'],smooth=(0,smooth*self.para['nbin']/self.para['L_track'])))
+    # corr = sstats.spearmanr(gauss_smooth(result['firingstats']['trial_map'],smooth=(0,smooth*self.para['nbin']/self.para['L_track'])),axis=1)[0]
 
     #result['firingstats']['trial_map'] = gauss_smooth(result['firingstats']['trial_map'],(0,2))
     corr[np.isnan(corr)] = 0
@@ -377,20 +357,42 @@ class detect_PC:
     c_trial = np.where((c_counts>self.para['trials_min_count']) & (c_counts>(self.para['trials_min_fraction']*self.dataBH['trials']['ct'])))[0]
 
     for (i,t) in enumerate(c_trial):
-      result['firingstats']['trial_field'][i,:] = (cluster_idx.T==t)
+        fmap = gauss_smooth(np.nanmean(result['firingstats']['trial_map'][cluster_idx.T[0]==t,:],0),2)
+        # baseline = np.percentile(fmap[fmap>0],20)
+        baseline = np.nanpercentile(fmap[fmap>0],30)
+        fmap2 = np.copy(fmap)
+        fmap2 -= baseline
+        fmap2 *= -1*(fmap2 <= 0)
+
+        Ns_baseline = (fmap2>0).sum()
+        noise = np.sqrt((fmap2**2).sum()/(Ns_baseline*(1-2/np.pi)))
+        if (fmap>(baseline+4*noise)).sum()>5:
+            result['firingstats']['trial_field'][i,:] = (cluster_idx.T==t)
 
     testing = False
     if testing and self.para['plt_bool']:
       plt.figure()
+      plt.subplot(121)
+      plt.pcolormesh(corr[res_order,:][:,res_order],cmap='jet')
+      plt.clim([0,1])
+      plt.colorbar()
+      plt.subplot(122)
+      corr = sstats.spearmanr(gauss_smooth(result['firingstats']['trial_map'],smooth=(0,smooth*self.para['nbin']/self.para['L_track'])),axis=1)[0]
+      # print(corr)
+      ordered_corr,res_order,res_linkage = compute_serial_matrix(-(corr-1),'average')
+      # Z = sp.cluster.hierarchy.linkage(-(corr-1),method='average')
+      # print(Z)
       plt.pcolormesh(corr[res_order,:][:,res_order],cmap='jet')
       plt.clim([0,1])
       plt.colorbar()
       plt.show(block=False)
       plt.figure()
+      color_t = plt.cm.rainbow(np.linspace(0,1,self.dataBH['trials']['ct']))
       for i,r in enumerate(res_order):
         if i<25:
+            col = color_t[int(res_linkage[i,3]-2)]
             plt.subplot(5,5,i+1)
-            plt.plot(np.linspace(0,self.para['L_track'],self.para['nbin']),gauss_smooth(result['firingstats']['trial_map'][r,:],2))
+            plt.plot(np.linspace(0,self.para['L_track'],self.para['nbin']),gauss_smooth(result['firingstats']['trial_map'][r,:],smooth*self.para['nbin']/self.para['L_track']),color=col)
             plt.ylim([0,20])
             plt.title('trial # %d'%r)
       plt.show(block=False)
@@ -1376,9 +1378,9 @@ class detect_PC:
     # if ~hasattr(self,'results'):
     self.results = {}
     if results is None:
-        self.results['status'] = loadmat(self.para['svname_status'])
-        self.results['fields'] = loadmat(self.para['svname_fields'])
-        self.results['firingstats'] = loadmat(self.para['svname_firingstats'])
+        self.results['status'] = loadmat(os.path.join(self.para['pathSession'],os.path.splitext(self.para['svname_status'])[0]+'.pkl'))
+        self.results['fields'] = loadmat(os.path.join(self.para['pathSession'],os.path.splitext(self.para['svname_fields'])[0]+'.pkl'))
+        self.results['firingstats'] = loadmat(os.path.join(self.para['pathSession'],os.path.splitext(self.para['svname_firingstats'])[0]+'.pkl'))
     else:
         self.results['status'] = results['status']
         self.results['fields'] = results['fields']
@@ -1589,7 +1591,7 @@ class detect_PC:
     else:
       ax_loc.scatter(t_active,pos_active,s=(S_active/S.max())**2*10+0.1,color='r',zorder=10)
       ax_loc.scatter(t_inactive,pos_inactive,s=(S_inactive/S.max())**2*10+0.1,color='k',zorder=10)
-    ax_loc.bar(t_stop,np.ones(len(t_stop))*self.para['L_track'],color=[0.9,0.9,0.9],zorder=0)
+    ax_loc.bar(t_stop,np.ones(len(t_stop))*self.para['L_track'],width=1/15,color=[0.9,0.9,0.9],zorder=0)
     ax_loc.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[self.para['L_track'],self.para['L_track']],color=[0,0,1,0.2],zorder=1)
 
     ax_loc.set_ylim([0,self.para['L_track']])

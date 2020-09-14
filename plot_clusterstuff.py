@@ -66,43 +66,43 @@ class clusterplots:
         scalarMap = plt.cm.ScalarMappable(norm=cNorm,cmap=cmap)
 
         fig = plt.figure(figsize=(7,5),dpi=300)
-        ax = plt.axes([0.1,0.1,0.5,0.85])
+        # ax = plt.axes([0.1,0.1,0.5,0.85])
 
-        x_grid, y_grid = np.meshgrid(np.arange(0., self.cluster.meta['dims'][0]).astype(np.float32), np.arange(0., self.cluster.meta['dims'][1]).astype(np.float32))
-
-        set_ref = True
-        for s in tqdm(np.where(self.cluster.sessions['bool'])[0]):#range(11)):#
-            n_arr = self.cluster.IDs['neuronID'][c_arr,s,1]
-            if np.any(~np.isnan(n_arr)):
-                pathLoad = pathcat([self.cluster.meta['pathMouse'],'Session%02d/results_redetect.mat'%(s+1)])
-                ld = loadmat(pathLoad,variable_names='A')
-
-                x_remap = (x_grid - \
-                            self.cluster.sessions['shift'][s,0] + self.cluster.sessions['shift'][0,0] + \
-                            self.cluster.sessions['flow_field'][s,:,:,0] - self.cluster.sessions['flow_field'][0,:,:,0]).astype('float32')
-                y_remap = (y_grid - \
-                            self.cluster.sessions['shift'][s,1] + self.cluster.sessions['shift'][0,1] + \
-                            self.cluster.sessions['flow_field'][s,:,:,1] - self.cluster.sessions['flow_field'][0,:,:,1]).astype('float32')
-
-                for i,(n,c) in enumerate(zip(n_arr,c_arr)):
-                    if ~np.isnan(n):
-                        a_tmp = ld['A'][:,n].reshape(self.cluster.meta['dims']).toarray()
-                        a = cv2.remap(a_tmp, x_remap,y_remap, cv2.INTER_CUBIC)
-                        # a = ld['A'][:,n]
-                        if set_ref:
-                            # print(a.reshape(-1,1).shape)
-                            a_com = com(a.reshape(-1,1),512,512)
-                            # print(a_com)
-                            (x_ref,y_ref) = a_com[0]# print(x_ref,y_ref)
-                            x_lims = [x_ref-margin,x_ref+margin]
-                            y_lims = [y_ref-margin,y_ref+margin]
-                            set_ref = False
-                        # print(c,n)
-                        # print(com(a,512,512))
-                        colVal = scalarMap.to_rgba(s)
-                        ax.contour(a/a.max(), levels=[0.3], colors=[colVal], linewidths=[w_arr[i]], linestyles=['solid'])
-        ax.set_xlim(x_lims)
-        ax.set_ylim(y_lims)
+        # x_grid, y_grid = np.meshgrid(np.arange(0., self.cluster.meta['dims'][0]).astype(np.float32), np.arange(0., self.cluster.meta['dims'][1]).astype(np.float32))
+        #
+        # set_ref = True
+        # for s in tqdm(np.where(self.cluster.sessions['bool'])[0]):#range(11)):#
+        #     n_arr = self.cluster.IDs['neuronID'][c_arr,s,1]
+        #     if np.any(~np.isnan(n_arr)):
+        #         pathLoad = pathcat([self.cluster.meta['pathMouse'],'Session%02d/results_redetect.mat'%(s+1)])
+        #         ld = loadmat(pathLoad,variable_names='A')
+        #
+        #         x_remap = (x_grid - \
+        #                     self.cluster.sessions['shift'][s,0] + self.cluster.sessions['shift'][0,0] + \
+        #                     self.cluster.sessions['flow_field'][s,:,:,0] - self.cluster.sessions['flow_field'][0,:,:,0]).astype('float32')
+        #         y_remap = (y_grid - \
+        #                     self.cluster.sessions['shift'][s,1] + self.cluster.sessions['shift'][0,1] + \
+        #                     self.cluster.sessions['flow_field'][s,:,:,1] - self.cluster.sessions['flow_field'][0,:,:,1]).astype('float32')
+        #
+        #         for i,(n,c) in enumerate(zip(n_arr,c_arr)):
+        #             if ~np.isnan(n):
+        #                 a_tmp = ld['A'][:,n].reshape(self.cluster.meta['dims']).toarray()
+        #                 a = cv2.remap(a_tmp, x_remap,y_remap, cv2.INTER_CUBIC)
+        #                 # a = ld['A'][:,n]
+        #                 if set_ref:
+        #                     # print(a.reshape(-1,1).shape)
+        #                     a_com = com(a.reshape(-1,1),512,512)
+        #                     # print(a_com)
+        #                     (x_ref,y_ref) = a_com[0]# print(x_ref,y_ref)
+        #                     x_lims = [x_ref-margin,x_ref+margin]
+        #                     y_lims = [y_ref-margin,y_ref+margin]
+        #                     set_ref = False
+        #                 # print(c,n)
+        #                 # print(com(a,512,512))
+        #                 colVal = scalarMap.to_rgba(s)
+        #                 ax.contour(a/a.max(), levels=[0.3], colors=[colVal], linewidths=[w_arr[i]], linestyles=['solid'])
+        # ax.set_xlim(x_lims)
+        # ax.set_ylim(y_lims)
 
         cbaxes = plt.axes([0.625,0.75,0.01,0.225])
         cb = fig.colorbar(scalarMap,cax = cbaxes,orientation='vertical')

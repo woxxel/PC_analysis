@@ -7,7 +7,7 @@ import numpy as np
 from utils import pathcat
 from get_t_measures import *
 
-def set_para(basePath,mouse,s,nP=0,nbin=100,plt_bool=False,sv_bool=False):
+def set_para(basePath,mouse,s,nP=0,nbin=100,plt_bool=False,sv_bool=False,suffix='2'):
 
   ## set paths:
   pathMouse = pathcat([basePath,mouse])
@@ -31,7 +31,7 @@ def set_para(basePath,mouse,s,nP=0,nbin=100,plt_bool=False,sv_bool=False):
     zone_idx['reward'] = [75,95]
     have_gt = True;
   elif any(mouse==m for m in nogate_mice):    ## no gate
-    zone_idx['reward'] = [55,75]#[50,66]#
+    zone_idx['reward'] = [50,70]#[50,66]#
     zone_idx['gate'] = [np.NaN,np.NaN]
     have_gt = False;
 
@@ -46,6 +46,7 @@ def set_para(basePath,mouse,s,nP=0,nbin=100,plt_bool=False,sv_bool=False):
     zone_mask['gate'][zone_idx['gate'][0]:zone_idx['gate'][-1]] = True
     zone_mask['others'][zone_mask['gate']] = False
 
+  # zone_mask['others'][40:50] = False  ## remove central wall pattern change?!
   zone_mask['active'] = nbin+1
   zone_mask['silent'] = nbin+2
 
@@ -64,6 +65,8 @@ def set_para(basePath,mouse,s,nP=0,nbin=100,plt_bool=False,sv_bool=False):
 
           'trials_min_count':3,
           'trials_min_fraction':0.2,
+
+          'Ca_thr':0,
 
           't_measures': get_t_measures(mouse),
 
@@ -86,9 +89,9 @@ def set_para(basePath,mouse,s,nP=0,nbin=100,plt_bool=False,sv_bool=False):
           'pathFigs':'/home/wollex/Data/Science/PhD/Thesis/pics/Methods',#'/home/wollex/Data/Documents/Uni/2016-XXXX_PhD/Japan/Work/Results/pics/Methods',
 
           ### provide names for figures
-          'svname_status':pathcat([pathSession,'PC_fields_status.mat']),
-          'svname_fields':pathcat([pathSession,'PC_fields_para.mat']),
-          'svname_firingstats':pathcat([pathSession,'PC_fields_firingstats.mat']),
+          'svname_status':          'PC_fields%s_status.mat'%suffix,
+          'svname_fields':          'PC_fields%s_para.mat'%suffix,
+          'svname_firingstats':     'PC_fields%s_firingstats.mat'%suffix,
 
           ### modes, how to perform PC detection
           'modes':{'activity':'calcium',#'spikes',#          ## data provided: 'calcium' or 'spikes'
