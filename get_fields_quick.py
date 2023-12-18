@@ -10,7 +10,7 @@ import scipy.io as sio
 from scipy.io import savemat, loadmat
 
 import matplotlib.pyplot as plt
-from matplotlib import rc
+from matplotlib import colors,rc
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 
@@ -200,6 +200,9 @@ class detect_PC:
     self.dataBH['time_active'] = self.dataBH['time'][data['active']]
     self.dataBH['T'] = np.count_nonzero(data['active'])
 
+    self.dataBH['trials_frame'] = data['trials']['frame']
+    self.dataBH['trials_ct'] = data['trials']['ct']
+
 
     ###### define trials
     self.dataBH['trials'] = {}
@@ -263,7 +266,7 @@ class detect_PC:
       firingstats_tmp = self.get_firingstats_from_trials(result['firingstats']['trial_map'])
       for key in firingstats_tmp.keys():
         result['firingstats'][key] = firingstats_tmp[key]
-      # return
+      return
       if np.any(result['firingstats']['trial_field']) and ((result['status']['SNR']>2) or np.isnan(result['status']['SNR'])):  # and (result['status']['MI_value']>0.1)     ## only do further processing, if enough trials are significantly correlated
         for t in range(5):
             trials = np.where(result['firingstats']['trial_field'][t,:])[0]
@@ -313,7 +316,7 @@ class detect_PC:
 
       #except (KeyboardInterrupt, SystemExit):
         #raise
-    except:# KeyboardInterrupt: #:# TypeError:#
+    except KeyboardInterrupt: #:# TypeError:#
       print('analysis failed: (-)')# p-value (MI): %.2f, \t bayes factor: %.2fg+/-%.2fg'%(result['status']['MI_p_value'],result['status']['Bayes_factor'][0,0],result['status']['Bayes_factor'][0,1]))
       #result['fields']['nModes'] = -1
 
@@ -372,14 +375,14 @@ class detect_PC:
     testing = False
     if testing and self.para['plt_bool']:
       plt.figure()
-      plt.subplot(121)
+      # plt.subplot(121)
       plt.pcolormesh(corr[res_order,:][:,res_order],cmap='jet')
       plt.clim([0,1])
       plt.colorbar()
-      plt.subplot(122)
-      corr = sstats.spearmanr(gauss_smooth(result['firingstats']['trial_map'],smooth=(0,smooth*self.para['nbin']/self.para['L_track'])),axis=1)[0]
+      # plt.subplot(122)
+      # corr = sstats.spearmanr(gauss_smooth(result['firingstats']['trial_map'],smooth=(0,smooth*self.para['nbin']/self.para['L_track'])),axis=1)[0]
       # print(corr)
-      ordered_corr,res_order,res_linkage = compute_serial_matrix(-(corr-1),'average')
+      # ordered_corr,res_order,res_linkage = compute_serial_matrix(-(corr-1),'average')
       # Z = sp.cluster.hierarchy.linkage(-(corr-1),method='average')
       # print(Z)
       plt.pcolormesh(corr[res_order,:][:,res_order],cmap='jet')
@@ -1326,7 +1329,6 @@ class detect_PC:
     label_str = '(mode #%d)'%(t+1)
     #else:
       #label_str = '$log(Z)=%4.1f\\pm%4.1f$ (coding)'%(result['status']['Z'][1,0],result['status']['Z'][1,1])
-
     para = result['fields']['parameter'][t,...]
 
     para[2,:] *= self.para['nbin']/self.para['L_track']
@@ -1398,9 +1400,9 @@ class detect_PC:
         ax1 = plt.axes([0.7,0.1,0.25,0.5])
     else:
         ax_Ca = plt.axes([0.125,0.75,0.7,0.225])
-        ax_trial_act = plt.axes([0.125,0.65,0.7,0.1])
-        ax_loc = plt.axes([0.125,0.15,0.7,0.5])
-        ax1 = plt.axes([0.825,0.15,0.15,0.5])
+        ax_trial_act = plt.axes([0.125,0.7,0.7,0.05])
+        ax_loc = plt.axes([0.125,0.15,0.7,0.55])
+        ax1 = plt.axes([0.825,0.15,0.15,0.55])
     #ax2 = plt.axes([0.6,0.275,0.35,0.175])
     #ax3 = plt.axes([0.1,0.08,0.4,0.25])
     #ax4 = plt.axes([0.6,0.08,0.35,0.175])
@@ -1408,7 +1410,7 @@ class detect_PC:
     idx_longrun = self.dataBH['active']
     t_longrun = self.dataBH['time'][idx_longrun]
     t_stop = self.dataBH['time'][~idx_longrun]
-    ax_Ca.bar(t_stop,np.ones(len(t_stop))*1.2*S.max(),color=[0.9,0.9,0.9],zorder=0)
+    ax_Ca.bar(t_stop,np.ones(len(t_stop))*1.2*S.max(),width=1/self.para['f'],color=[0.9,0.9,0.9],zorder=0)
 
     ax_Ca.plot(self.dataBH['time'],C,'k',linewidth=0.2)
     ax_Ca.plot(self.dataBH['time'],S_raw,'r',linewidth=0.3)
@@ -1418,26 +1420,35 @@ class detect_PC:
     ax_Ca.set_xticks([])
     ax_Ca.set_ylabel('Ca$^{2+}$')
     ax_Ca.set_yticks([])
+    ax_Ca.spines['right'].set_visible(False)
+    ax_Ca.spines['top'].set_visible(False)
 
+    trials_frame = self.dataBH['trials_frame']
     if not (ground_truth is None):
-        trials_frame = np.where(np.diff(self.dataBH['binpos'])<-10)[0]+1
+        # trials_frame = np.where(np.diff(self.dataBH['binpos'])<-10)[0]+1
         trial_act = np.zeros(self.dataBH['binpos'].shape+(2,))
         f = np.where(~np.isnan(self.results['fields']['parameter'][n,:,3,0]))[0][0]
         ff = np.where(np.abs(self.results['fields']['parameter'][n,f,3,0]-ground_truth['theta'][n,...])<5)[0]
         rel,_,trial_field = get_reliability(self.results['firingstats']['trial_map'][n,...],self.results['firingstats']['map'][n,:],self.results['fields']['parameter'][n,...],f)
         for i in range(len(trials_frame)-1):
             trial_act[trials_frame[i]:trials_frame[i+1],0] = ground_truth['activation'][n,ff,i]
-            trial_act[trials_frame[i]:trials_frame[i+1],1] = trial_field[i]#self.results['firingstats']['trial_field'][n,f,i]
+            trial_act[trials_frame[i]:trials_frame[i+1],1] = trial_field[i] #self.results['firingstats']['trial_field'][n,f,i]
 
-        ax_trial_act.bar(self.dataBH['time'],trial_act[:,0],facecolor=[0,1,0],bottom=1)
-        ax_trial_act.bar(self.dataBH['time'],trial_act[:,1],facecolor=[0.4,1,0.4],bottom=0)
-        ax_trial_act.plot([t_start,t_end],[1,1],color=[0.5,0.5,0.5],lw=0.3)
-        ax_trial_act.text(t_end-75,0.15,'detected',fontsize=8)
-        ax_trial_act.text(t_end-100,1.15,'ground truth',fontsize=8)
-        ax_trial_act.set_ylim([0,2])
+            if ground_truth['activation'][n,ff,i]:
+                ax_loc.fill_between([self.dataBH['time'][trials_frame[i]],self.dataBH['time'][trials_frame[i+1]]],0,100,color=[0,1,0,0.2],zorder=2)
+            if trial_field[i]:
+                ax_trial_act.fill_between([self.dataBH['time'][trials_frame[i]],self.dataBH['time'][trials_frame[i+1]]],0,100,color=[0,1,0,0.5],zorder=2)
+        # ax_trial_act.bar(self.dataBH['time'],trial_act[:,0],facecolor=[0,1,0],bottom=1)
+
+        # ax_trial_act.plot([t_start,t_end],[1,1],color=[0.5,0.5,0.5],lw=0.3)
+        ax_trial_act.text(t_end-85,0.2,'detected',fontsize=8)
+        # ax_trial_act.text(t_end-100,1.15,'ground truth',fontsize=8)
+        ax_trial_act.set_ylim([0,1])
         ax_trial_act.set_xlim([t_start,t_end])
         ax_trial_act.set_xticks([])
         ax_trial_act.set_yticks([])
+        ax_trial_act.spines['right'].set_visible(False)
+        ax_trial_act.spines['left'].set_visible(False)
 
     ax_loc.plot(self.dataBH['time'],self.dataBH['position'],'.',color=[0.6,0.6,0.6],zorder=5,markeredgewidth=0,markersize=1)
     idx_active = (S>0) & self.dataBH['active']
@@ -1455,10 +1466,11 @@ class detect_PC:
         ax_loc.scatter(t_inactive,pos_inactive,s=S_inactive,c='k',zorder=10)
     else:
         ax_loc.scatter(t_active,pos_active,s=(S_active/S.max())**2*10+0.1,color='r',zorder=10)
-        ax_loc.scatter(t_inactive,pos_inactive,s=(S_inactive/S.max())**2*10+0.1,color='k',zorder=10)
-    ax_loc.bar(t_stop,np.ones(len(t_stop))*self.para['L_track'],color=[0.9,0.9,0.9],zorder=0)
+        # ax_loc.scatter(t_inactive,pos_inactive,s=(S_inactive/S.max())**2*10+0.1,color='k',zorder=10)
+        ax_loc.scatter(t_inactive,pos_inactive,s=2,color='k',zorder=10,edgecolor='none')
+    ax_loc.bar(t_stop,np.ones(len(t_stop))*self.para['L_track'],width=1/self.para['f'],color=[0.9,0.9,0.9],zorder=1)
     if highlight_trial:
-        ax_loc.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[self.para['L_track'],self.para['L_track']],color=[0,0,1,0.2],zorder=1)
+        ax_loc.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[self.para['L_track'],self.para['L_track']],color=[0,0,1,0.2],zorder=0)
         ax_Ca.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[1.2*S_raw.max(),1.2*S_raw.max()],color=[0,0,1,0.2],zorder=1)
     ax_loc.set_ylim([0,self.para['L_track']])
     ax_loc.set_xlim([t_start,t_end])
@@ -1474,15 +1486,14 @@ class detect_PC:
 
     # fmap = self.results['firingstats']['map'][n,:]
     # fmap_norm = np.nansum(self.results['firingstats']['map'][n,:])
-    ax1.barh(bin_array,self.results['firingstats']['map'][n,:],height=self.para['L_track']/self.para['nbin'],facecolor='r',alpha=0.5,label='(all)')
 
-    trials_frame = np.where(np.diff(self.dataBH['binpos'])<-10)[0]+1
     active = np.copy(self.dataBH['active'])
     rel,_,trial_field = get_reliability(self.results['firingstats']['trial_map'][n,...],self.results['firingstats']['map'][n,:],self.results['fields']['parameter'][n,...],f)
     for i in range(len(trials_frame)-1):
         active[trials_frame[i]:trials_frame[i+1]] &= trial_field[i]#self.results['firingstats']['trial_field'][n,f,i]
     fmap = self.get_firingmap(S[active],self.dataBH['binpos'][active])
-    ax1.barh(bin_array,fmap,facecolor='b',alpha=0.5,height=self.para['L_track']/self.para['nbin'],label='(active)')
+    ax1.barh(bin_array,self.results['firingstats']['map'][n,:]/self.results['firingstats']['map'][n,:].sum(),height=self.para['L_track']/self.para['nbin'],facecolor='tab:red',alpha=0.5,label='(all)')
+    # ax1.barh(bin_array,fmap/fmap.sum(),facecolor='tab:blue',alpha=0.5,height=self.para['L_track']/self.para['nbin'],label='(active)')
     # ax1.legend(fontsize=10,bbox_to_anchor=[0.1,1.1],loc='lower left')
     ax1.set_xlabel('$\\bar{\\nu}$')
     #ax1.barh(self.para['bin_array'][i],fr_mu[i],facecolor='b',height=1)
@@ -1493,8 +1504,22 @@ class detect_PC:
     ax1.set_yticks([])#np.linspace(0,100,6))
     ##ax1.set_yticklabels(np.linspace(0,100,6).astype('int'))
     ax1.set_ylim([0,self.para['L_track']])
-    ax1.set_xlim([0,np.nanmax(self.results['firingstats']['map'][n,:])*1.2])
+    ax1.set_xlim([0,np.nanmax(gauss_smooth(fmap/fmap.sum(),1))*1.3])
     ax1.set_xticks([])
+
+    hbm = HierarchicalBayesModel(fmap,self.para['bin_array'],[0,1],1)
+
+
+    A = ground_truth['A'][n,0]
+    A_0 = ground_truth['A_0'][n,0]
+    sigma = ground_truth['sigma'][n,0]
+    theta = ground_truth['theta'][n,0]
+    TC = hbm.TC(np.array([A_0,A,sigma,theta]))
+    ax1.plot(TC/TC.sum(),np.linspace(0,100,100),'k',linewidth=0.75)
+
+    TC = hbm.TC(results['fields']['parameter'][n,0,:,0])
+    ax1.plot(TC/TC.sum(),np.linspace(0,100,100),'k--',linewidth=0.75)
+
     ##ax1.set_xlabel('Ca$^{2+}$-event rate $\\nu$')
     ax1.spines['right'].set_visible(False)
     ax1.spines['top'].set_visible(False)
@@ -1521,9 +1546,6 @@ class detect_PC:
     fr_CI = firingstats['CI']
     fr_std = firingstats['std']
 
-    #print(fr_mu)
-    #print()
-
     fig = plt.figure(figsize=(7,5),dpi=150)
 
     ## get data
@@ -1535,32 +1557,41 @@ class detect_PC:
     #S_raw = self.S
     S_raw = ld['S'][self.para['n'],:]
     _,S_thr,_ = get_firingrate(S_raw[self.dataBH['active']],f=self.para['f'],sd_r=self.para['Ca_thr'])
+    print(self.para['Ca_thr'])
+    print(S_thr)
     if self.para['modes']['activity'] == 'spikes':
-      S = S_raw>S_thr
+        S = S_raw/S_thr
     else:
-      S = S_raw
+        S = S_raw
+
+    active,firingstats['rate'] = self.get_active_Ca(S)
+    # active['S'] = S[self.dataBH['active']]
+    trials_S, firingstats['trial_map'] = self.get_trials_activity(active)
 
     t_start = 200#0#
     t_end = 470# 600#
     n_trial = 12
 
-    ax_Ca = plt.axes([0.1,0.75,0.5,0.175])
-    add_number(fig,ax_Ca,order=1)
-    ax_loc = plt.axes([0.1,0.5,0.5,0.25])
-    ax1 = plt.axes([0.6,0.5,0.35,0.25])
-    ax2 = plt.axes([0.6,0.26,0.35,0.125])
-    add_number(fig,ax2,order=4,offset=[-75,10])
-    ax3 = plt.axes([0.1,0.08,0.35,0.225])
-    add_number(fig,ax3,order=3)
-    ax4 = plt.axes([0.6,0.08,0.35,0.125])
-    add_number(fig,ax4,order=5,offset=[-75,10])
-    ax_acorr = plt.axes([0.7,0.85,0.2,0.1])
+    ax_Ca = plt.axes([0.1,0.775,0.5,0.15])
+    add_number(fig,ax_Ca,order=1,offset=[-75,10])
+    ax_loc = plt.axes([0.1,0.525,0.5,0.25])
+    ax1 = plt.axes([0.6,0.525,0.25,0.25])
+    ax2 = plt.axes([0.725,0.26,0.225,0.125])
+    add_number(fig,ax2,order=5,offset=[-75,10])
+    ax3 = plt.axes([0.44,0.08,0.15,0.25])
+    add_number(fig,ax3,order=4,offset=[-25,40])
+    ax4 = plt.axes([0.725,0.08,0.225,0.125])
+    add_number(fig,ax4,order=6,offset=[-75,10])
+    ax_acorr = plt.axes([0.725,0.825,0.2,0.125])
     add_number(fig,ax_acorr,order=2,offset=[-50,10])
 
+    ax_trialcorr = plt.axes([0.1,0.08,0.2,0.3])
+    add_number(fig,ax_trialcorr,order=3,offset=[-50,25])
+    ax_trialcorr_cb = plt.axes([0.31,0.255,0.01,0.125])
     idx_longrun = self.dataBH['active']
     t_longrun = self.dataBH['time'][idx_longrun]
     t_stop = self.dataBH['time'][~idx_longrun]
-    ax_Ca.bar(t_stop,np.ones(len(t_stop))*1.2*S_raw.max(),color=[0.9,0.9,0.9],zorder=0)
+    ax_Ca.bar(t_stop,np.ones(len(t_stop))*1.2*S_raw.max(),width=1/15,color=[0.9,0.9,0.9],zorder=0)
 
     ax_Ca.fill_between([self.dataBH['trials']['t'][n_trial],self.dataBH['trials']['t'][n_trial+1]],[0,0],[1.2*S_raw.max(),1.2*S_raw.max()],color=[0,0,1,0.2],zorder=1)
 
@@ -1572,6 +1603,39 @@ class detect_PC:
     ax_Ca.set_xticks([])
     ax_Ca.set_ylabel('Ca$^{2+}$')
     ax_Ca.set_yticks([])
+    ax_Ca.spines['right'].set_visible(False)
+    ax_Ca.spines['top'].set_visible(False)
+
+    corr = np.corrcoef(gauss_smooth(firingstats['trial_map'],smooth=(0,2)))
+
+    #result['firingstats']['trial_map'] = gauss_smooth(result['firingstats']['trial_map'],(0,2))
+    corr[np.isnan(corr)] = 0
+    ordered_corr,res_order,res_linkage = compute_serial_matrix(-(corr-1),'average')
+    cluster_idx = sp.cluster.hierarchy.cut_tree(res_linkage,height=0.5)
+    _, c_counts = np.unique(cluster_idx,return_counts=True)
+    c_trial = np.where((c_counts>self.para['trials_min_count']) & (c_counts>(self.para['trials_min_fraction']*self.dataBH['trials']['ct'])))[0]
+
+    for (i,t) in enumerate(c_trial):
+      firingstats['trial_field'][i,:] = (cluster_idx.T==t)
+
+    # testing = False
+    # if testing and self.para['plt_bool']:
+    # plt.figure()
+    ax_trialcorr.pcolormesh(corr[res_order,:][:,res_order],cmap='jet',clim=[0,1])
+    ax_trialcorr.set_xticks([])
+    ax_trialcorr.set_yticks([])
+
+    ax_trialcorr.set_xlabel('ordered trials')
+    ax_trialcorr.set_ylabel('ordered trials')
+    # ax_trialcorr.clim([0,1])
+    cm_jet = plt.get_cmap('jet')
+    cNorm = colors.Normalize(vmin=0,vmax=1)
+    scalarMap = plt.cm.ScalarMappable(norm=cNorm,cmap=cm_jet)
+    fig.colorbar(scalarMap,cax=ax_trialcorr_cb)
+    ax_trialcorr_cb.set_ylabel('corr.',fontsize=8)
+    # plt.show(block=False)
+
+
 
 
     ax_loc.plot(self.dataBH['time'],self.dataBH['position'],'.',color='k',zorder=5,markeredgewidth=0,markersize=1.5)
@@ -1614,12 +1678,13 @@ class detect_PC:
     for T in self.dataBH['trials']['T']:
         ax_acorr.annotate(xy=(T/self.para['f'],0.5),xytext=(T/self.para['f'],0.9),s='',arrowprops=dict(arrowstyle='->',color='k'))
     ax_acorr.set_xlabel('$\Delta t$ [s]')
+    # ax_acorr.xaxis.set_label_coords(1.15,0.05)
     ax_acorr.set_ylabel('corr.')
     ax_acorr.spines['right'].set_visible(False)
     ax_acorr.spines['top'].set_visible(False)
 
     # i = random.randint(0,self.para['nbin']-1)
-    i=72
+    i=20
     #ax1 = plt.subplot(211)
     #for i in range(3):
       #trials = np.where(self.result['firingstats']['trial_field'][i,:])[0]
@@ -1647,7 +1712,7 @@ class detect_PC:
     ax1.spines['right'].set_visible(False)
     ax1.spines['top'].set_visible(False)
     #ax1.set_ylabel('Position on track')
-    ax1.legend(title='# trials = %d'%self.dataBH['trials']['ct'],loc='lower left',bbox_to_anchor=[0.55,0.025],fontsize=8)#[h_bp['boxes'][0]],['trial data'],
+    ax1.legend(title='# trials = %d'%self.dataBH['trials']['ct'],loc='lower left',bbox_to_anchor=[0.9,0.025],fontsize=8)#[h_bp['boxes'][0]],['trial data'],
 
     #ax2 = plt.subplot(426)
     ax2.plot(np.linspace(0,5,101),firingstats['parNoise'][1]+firingstats['parNoise'][0]*np.linspace(0,5,101),'--',color=[0.5,0.5,0.5],label='lq-fit')
@@ -1686,12 +1751,13 @@ class detect_PC:
     ax3.set_ylabel('$p_{bs}(\\nu)$')
     ax3.spines['right'].set_visible(False)
     ax3.spines['top'].set_visible(False)
+    ax3.set_yticks([])
 
 
     ax2.legend(fontsize=8)
     #ax2.set_title("estimating noise")
 
-    ax3.legend(fontsize=8)
+    ax3.legend(fontsize=8,handlelength=1,loc='upper left',bbox_to_anchor=[0.2,1.2])
 
     D_KL_gamma = np.zeros(self.para['nbin'])
     D_KL_gauss = np.zeros(self.para['nbin'])

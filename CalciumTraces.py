@@ -145,8 +145,8 @@ class CalciumTraces:
     T = self.T
     plt.figure()
     plt.subplot(221)
-    plt.hist(self.N_spikes_C[idxes]/(T/self.f),np.linspace(0,2,101),facecolor='g',alpha=0.5)
-    plt.hist(self.N_spikes_C[~idxes]/(T/self.f),np.linspace(0,2,101),facecolor='r',alpha=0.5)
+    plt.hist(self.N_spikes_C[idxes]/(T/self.f),np.linspace(0,5,101),facecolor='g',alpha=0.5)
+    plt.hist(self.N_spikes_C[~idxes]/(T/self.f),np.linspace(0,5,101),facecolor='r',alpha=0.5)
     plt.xlabel('firing rate (C)')
     #plt.subplot(223)
     #plt.hist(self.N_spikes_S/(T/self.f),np.linspace(0,10,101),facecolor='r',alpha=0.5)
@@ -157,13 +157,13 @@ class CalciumTraces:
     #plt.ylim([0,10])
 
     plt.subplot(223)
-    plt.scatter(self.data['r_values'][idxes],self.N_spikes_S[idxes]/(T/self.f),c='g')
-    plt.scatter(self.data['r_values'][~idxes],self.N_spikes_S[~idxes]/(T/self.f),c='r')
+    plt.plot(self.data['r_values'][idxes],self.N_spikes_S[idxes]/(T/self.f),'g.',markersize=1)
+    plt.plot(self.data['r_values'][~idxes],self.N_spikes_S[~idxes]/(T/self.f),'r.',markersize=1)
     #plt.ylim([0,10])
 
     plt.subplot(224)
-    plt.hist(self.N_spikes_S[idxes]/(T/self.f),np.linspace(0,2,101),facecolor='g',alpha=0.5)
-    plt.hist(self.N_spikes_S[~idxes]/(T/self.f),np.linspace(0,2,101),facecolor='r',alpha=0.5)
+    plt.hist(self.N_spikes_S[idxes]/(T/self.f),np.linspace(0,3,101),facecolor='g',alpha=0.5)
+    plt.hist(self.N_spikes_S[~idxes]/(T/self.f),np.linspace(0,3,101),facecolor='r',alpha=0.5)
     plt.xlabel('firing rate (S)')
 
     plt.show(block=False)
@@ -175,7 +175,7 @@ class CalciumTraces:
     #plt.ylim([0,40])
     #plt.show(block=False)
 
-  def plot_thesis(self,n,sig=[2,3,4],SNR_thr=2,r_thr=0):
+  def plot_thesis(self,n,sig=[0,1,2],SNR_thr=2,r_thr=0):
 
     print('plotting for neurons %d and %d'%(n[0],n[1]))
 
@@ -188,18 +188,18 @@ class CalciumTraces:
     plt.rcParams['font.size'] = 12
     idxes = (self.data['SNR']>SNR_thr) & (self.data['r_values']>r_thr)
 
-    zlen=500
-    zstart=1500
+    # zlen=500
+    # zstart=1500
+    zlen=20*self.f
+    zstart=145*self.f
     zrange=range(zstart,(zstart+zlen))
-    fig = plt.figure(figsize=(7,5),dpi=150)
+    fig = plt.figure(figsize=(7,3.5),dpi=300)
     col = np.array([1,0,0])
-    ax_C_zoom = plt.axes([0.075,0.7,0.2,0.25])
-    add_number(fig,ax_C_zoom,order=1,offset=[-50,0])
 
-    ax_C_zoom = plt.axes([0.075+0.29,0.7,0.2,0.25])
-    add_number(fig,ax_C_zoom,order=2,offset=[-50,0])
+    ls_arr = ['--','--','-']
+
     for i in range(2):
-      ax_C_zoom = plt.axes([0.075+(0.29*i),0.7,0.2,0.25])
+      ax_C_zoom = plt.axes([0.075+(0.29*i),0.65,0.2,0.3])
       ax_C_zoom.plot(t_arr[zrange],self.data['C'][n[i],zrange],'k',linewidth=0.5)
       ax_C_zoom.set_ylim([0,10*self.baseline_C[n[i]]])
       ax_C_zoom.set_xlim([t_arr[zstart],t_arr[zstart+zlen]])
@@ -207,10 +207,11 @@ class CalciumTraces:
       ax_C_zoom.set_yticks([])
       ax_C_zoom.spines['top'].set_visible(False)
       ax_C_zoom.spines['right'].set_visible(False)
+      add_number(fig,ax_C_zoom,order=i+1,offset=[-50,0])
       if i==0:
-        ax_C_zoom.set_ylabel('C (a.u.)')
+          ax_C_zoom.set_ylabel('C (a.u.)')
 
-      ax_C = plt.axes([0.1+(0.29*i),0.85,0.125,0.1])
+      ax_C = plt.axes([0.1+(0.29*i),0.825,0.125,0.125])
       ax_C.plot(t_arr,self.data['C'][n[i],:],'k',linewidth=0.5)
       ax_C.set_yticks([])
       ax_C.set_xlim([0,self.T/self.f])
@@ -219,7 +220,7 @@ class CalciumTraces:
 
         #print(self.T)
 
-      ax_S_zoom = plt.axes([0.075+(0.29*i),0.425,0.2,0.275])
+      ax_S_zoom = plt.axes([0.075+(0.29*i),0.15,0.2,0.425])
       y_arr = np.linspace(0,self.baseline_S[n[i]]+4*self.noise_S[n[i]],100)
       x1 = norm.pdf(y_arr,loc=self.baseline_S[n[i]],scale=self.noise_S[n[i]])
       x1 = x1/x1.max()*5+t_arr[zrange[-1]]-5
@@ -231,7 +232,7 @@ class CalciumTraces:
       #ax_S_zoom.bar(t_arr,self.data['S'][n[i],:],width=1/self.f,facecolor='r')
       ax_S_zoom.plot(t_arr[zrange],np.ones(zlen)*self.baseline_S[n[i]],'r-',linewidth=0.8)
       for j,s in enumerate(np.flipud(sig)):
-        ax_S_zoom.plot(t_arr[zrange],np.ones(zlen)*self.baseline_S[n[i]]+s*self.noise_S[n[i]],color=np.array([1,0.3*(2-j),0.3*(2-j)]),linestyle='--',label='$\\theta_S = %d$'%s,linewidth=0.8)
+        ax_S_zoom.plot(t_arr[zrange],np.ones(zlen)*self.baseline_S[n[i]]+s*self.noise_S[n[i]],color=np.array([1,0.3*(2-j),0.3*(2-j)]),linestyle=ls_arr[j],label='$\\theta_S = %d$'%s,linewidth=0.8)
 
       ax_S_zoom.set_ylim([0,10*self.baseline_S[n[i]]])
       ax_S_zoom.set_xlabel('time in s')
@@ -242,38 +243,40 @@ class CalciumTraces:
       ax_S_zoom.spines['right'].set_visible(False)
 
       if i==0:
-        ax_S_zoom.set_ylabel('S (a.u.)')
-
-        ax_S = plt.axes([0.1+(0.29*i),0.575,0.125,0.1])
-        ax_S.vlines(t_arr,np.zeros(T),self.data['S'][n[i],:],colors='k',linewidth=0.5)
-        ax_S.set_yticks([])
-        ax_S.set_xlim([0,self.T/self.f])
-        ax_S.spines['top'].set_visible(False)
-        ax_S.spines['right'].set_visible(False)
+          ax_S_zoom.set_ylabel('S (a.u.)')
+          ax_S = plt.axes([0.1+(0.29*i),0.425,0.125,0.125])
+          ax_S.vlines(t_arr,np.zeros(T),self.data['S'][n[i],:],colors='k',linewidth=0.5)
+          ax_S.set_yticks([])
+          ax_S.set_xlim([0,self.T/self.f])
+          ax_S.spines['top'].set_visible(False)
+          ax_S.spines['right'].set_visible(False)
       else:
-        ax_S_zoom.legend(loc='upper right',bbox_to_anchor=[1,1],fontsize=8)
+          ax_S_zoom.legend(loc='upper right',bbox_to_anchor=[1,1],fontsize=8)
 
 
-    xlim_arr = [2,1,0.5]
-    ax_fr = plt.axes([0.075,0.125,0.175,0.15])
-    add_number(fig,ax_fr,order=3,offset=[-50,10])
+    xlim_arr = [9,2.5,1]
+    # ax_fr = plt.axes([0.075,0.125,0.175,0.15])
     for j,s in enumerate(sig):
       self.N_spikes_S = np.floor(self.data['S'] / (self.baseline_S[:,np.newaxis] + s*self.noise_S[:,np.newaxis])).sum(1)
 
-      ax_fr = plt.axes([0.075+0.22*j,0.125,0.175,0.15])
+      # ax_fr = plt.axes([0.075+0.22*j,0.125,0.175,0.15])
+      ax_fr = plt.axes([0.7,0.75-j*0.3,0.225,0.175])
       ax_fr.hist(self.N_spikes_S[idxes]/(T/self.f),np.linspace(0,xlim_arr[j],51),facecolor='tab:blue',alpha=0.5,label='SNR$\geq$%d'%SNR_thr)
       ax_fr.hist(self.N_spikes_S[~idxes]/(T/self.f),np.linspace(0,xlim_arr[j],51),facecolor='tab:red',alpha=0.5,label='SNR<%d'%SNR_thr)
       #ax_fr.bar(0,0,color=np.array([1,0.3*j,0.3*j]),label='$\\theta_S = %d$'%s)
       ax_fr.set_xlim([0,xlim_arr[j]])
       ax_fr.set_yticks([])
+      _,xmax = ax_fr.get_xlim()
       _,ymax = ax_fr.get_ylim()
-      if j>0:
-          ax_fr.text(xlim_arr[j]*0.5,ymax*0.8,'$\\theta_S = %d$'%s,fontsize=10)
+      ax_fr.text(xmax*0.8,ymax*0.2,'$\\theta_S = %d$'%s,fontsize=10)
+      # if j>0:
+          # ax_fr.text(xlim_arr[j]*0.5,ymax*0.8,'$\\theta_S = %d$'%s,fontsize=10)
 
       if j==0:
-          ax_fr.text(0.2,ymax*0.8,'$\\theta_S = %d$'%s,fontsize=10)
+          add_number(fig,ax_fr,order=3,offset=[-50,10])
+      if j==1:
           ax_fr.set_ylabel('count')
-      elif j==1:
+      elif j==2:
           ax_fr.set_xlabel('$\\bar{\\nu}$ [Hz]')
 
       ax_fr.spines['top'].set_visible(False)
@@ -284,15 +287,16 @@ class CalciumTraces:
     s_adapt = norm.ppf((1-0.01)**(1/Ns))
     self.N_spikes_S = np.floor(self.data['S'] / (self.baseline_S[:,np.newaxis] + s_adapt[:,np.newaxis]*self.noise_S[:,np.newaxis])).sum(1)
 
-    ax_fr = plt.axes([0.75,0.125,0.175,0.15])
-    ax_fr.hist(self.N_spikes_S[idxes]/(T/self.f),np.linspace(0,(0.5)**j,51),facecolor='tab:blue',alpha=0.5,label='SNR$\geq$%d'%SNR_thr)
-    ax_fr.hist(self.N_spikes_S[~idxes]/(T/self.f),np.linspace(0,(0.5)**j,51),facecolor='tab:red',alpha=0.5,label='SNR<%d'%SNR_thr)
-    #ax_fr.bar(0,0,color=np.array([1,0.3*j,0.3*j]),label='$\\theta_S = %d$'%s)
-    ax_fr.set_xlim([0,0.5**j])
-    ax_fr.set_xlabel('$\\bar{\\nu}$ [Hz]')
-    ax_fr.set_yticks([])
-    if j==0:
-      ax_fr.set_ylabel('count')
+
+    # ax_fr = plt.axes([0.75,0.125,0.175,0.15])
+    # ax_fr.hist(self.N_spikes_S[idxes]/(T/self.f),np.linspace(0,(0.5)**j,51),facecolor='tab:blue',alpha=0.5,label='SNR$\geq$%d'%SNR_thr)
+    # ax_fr.hist(self.N_spikes_S[~idxes]/(T/self.f),np.linspace(0,(0.5)**j,51),facecolor='tab:red',alpha=0.5,label='SNR<%d'%SNR_thr)
+    # #ax_fr.bar(0,0,color=np.array([1,0.3*j,0.3*j]),label='$\\theta_S = %d$'%s)
+    # # ax_fr.set_xlim([0,0.5**j])
+    # ax_fr.set_xlabel('$\\bar{\\nu}$ [Hz]')
+    # ax_fr.set_yticks([])
+    # if j==0:
+    #   ax_fr.set_ylabel('count')
     ax_fr.legend(loc='lower right',bbox_to_anchor=[1.2,0.4],fontsize=10)
     ax_fr.spines['top'].set_visible(False)
     ax_fr.spines['right'].set_visible(False)
@@ -300,32 +304,32 @@ class CalciumTraces:
     #ax_fr.text(0.5**j*0.5,ymax*0.8,'$\\theta_S$ adapti'%s,fontsize=10)
     #ax_fr.text(0.2**j,ymax*0.9,'$\\theta_S = %d$'%s,fontsize=10)
 
-    ax_theory = plt.axes([0.725,0.75,0.25,0.2])
-    add_number(fig,ax_theory,order=4,offset=[-50,10])
-    x_arr = np.linspace(1,10,101)
-    for j,t in enumerate([500,2000,10000]):
-      ax_theory.plot(x_arr,1-np.exp(t*np.log(norm.cdf(x_arr))),color=np.array([0.3*j,0.3*j,0.3*j]),label='T=%d'%t)
-    for j,s in enumerate(sig):
-      ax_theory.plot(s,1.1,'v',color=np.array([1,0.3*j,0.3*j]))
+    # ax_theory = plt.axes([0.725,0.75,0.25,0.2])
+    # add_number(fig,ax_theory,order=4,offset=[-50,10])
+    # x_arr = np.linspace(1,10,101)
+    # for j,t in enumerate([500,2000,10000]):
+    #   ax_theory.plot(x_arr,1-np.exp(t*np.log(norm.cdf(x_arr))),color=np.array([0.3*j,0.3*j,0.3*j]),label='T=%d'%t)
+    # for j,s in enumerate(sig):
+    #   ax_theory.plot(s,1.1,'v',color=np.array([1,0.3*j,0.3*j]))
+    #
+    # ax_theory.legend(fontsize=10,loc='upper right',bbox_to_anchor=[1.1,1.1])
+    # ax_theory.set_xlabel('x')
+    # ax_theory.set_ylabel('$p(M_T > x$)')
+    # ax_theory.spines['top'].set_visible(False)
+    # ax_theory.spines['right'].set_visible(False)
+    #
+    # ax_theory2 = plt.axes([0.725,0.425,0.25,0.2])
+    # add_number(fig,ax_theory2,order=5,offset=[-50,10])
+    # T_arr = np.linspace(0,10000,1000)
+    # plt.plot(T_arr,norm.ppf((1-0.1)**(1/T_arr)),'k')
+    # plt.xlabel('$T$')
+    # plt.ylabel('$\\theta_S$')
 
-    ax_theory.legend(fontsize=10,loc='upper right',bbox_to_anchor=[1.1,1.1])
-    ax_theory.set_xlabel('x')
-    ax_theory.set_ylabel('$p(M_T > x$)')
-    ax_theory.spines['top'].set_visible(False)
-    ax_theory.spines['right'].set_visible(False)
-
-    ax_theory2 = plt.axes([0.725,0.425,0.25,0.2])
-    add_number(fig,ax_theory2,order=5,offset=[-50,10])
-    T_arr = np.linspace(0,10000,1000)
-    plt.plot(T_arr,norm.ppf((1-0.1)**(1/T_arr)),'k')
-    plt.xlabel('$T$')
-    plt.ylabel('$\\theta_S$')
-
-    plt.tight_layout()
+    # plt.tight_layout()
     plt.show(block=False)
 
     svPath = pathcat([self.pathSession,'get_firingrates.png'])
-    plt.savefig(svPath,format='png',dpi=150)
+    plt.savefig(svPath,format='png',dpi=300)
 
 def add_number(fig,ax,order=1,offset=None):
 

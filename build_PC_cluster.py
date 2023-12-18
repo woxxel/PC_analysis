@@ -1,20 +1,16 @@
 from multiprocessing import get_context
 #set_start_method("spawn")
 
-import os, time, cv2, warnings, h5py, itertools
+import os, time, warnings, h5py, itertools
 import numpy as np
 import scipy as sp
 import scipy.io as sio
-import scipy.stats as sstats
 from tqdm import *
-from time import sleep
 import itertools
 from itertools import chain
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 import multiprocessing as mp
 
-from utils import get_nPaths, pathcat, extend_dict, clean_dict, pickleData, fdr_control, periodic_distr_distance, fit_plane, z_from_point_normal_plane, get_shift_and_flow, com, calculate_img_correlation, gauss_smooth, get_reliability, get_firingrate, get_status_arr, get_average
+from utils import get_nPaths, pathcat, extend_dict, pickleData, fdr_control, periodic_distr_distance, get_shift_and_flow, calculate_img_correlation, get_reliability, get_firingrate, get_status_arr, get_average
 from utils_data import set_para
 from utils_analysis import get_performance, define_active
 from plot_PC_analysis import plot_PC_analysis
@@ -26,7 +22,7 @@ warnings.filterwarnings("ignore")
 
 class cluster:
 
-    def __init__(self,basePath,mouse,nSes,dataSet='redetect',session_order=None,s_corr_min=0.3,suffix='2'):
+    def __init__(self,basePath,mouse,nSes,dataSet='redetect',session_order=None,s_corr_min=0.3,suffix=''):
 
         t_start = time.time()
 
@@ -117,21 +113,26 @@ class cluster:
     def process_sessions(self,sessions=None,n_processes=0,reprocess=False):
         if reprocess | (not os.path.exists(self.meta['svSessions'])):
 
-            self.sessions = {'shift':np.zeros((self.nSes,2)),
-                           'borders':np.zeros((2,2))*np.NaN,
-                           'corr':np.zeros((self.nSes,2))*np.NaN,
-                           'transpose':np.zeros(self.nSes,'bool'),
-                           'flow_field':np.zeros(((self.nSes,)+self.meta['dims']+(2,))),
-                           'N_original':np.zeros(self.nSes)*np.NaN,
-                           #'rotation_anchor':np.zeros((self.nSes,3))*np.NaN,     ## point on plane
-                           #'rotation_normal':np.zeros((self.nSes,3))*np.NaN,     ## normal describing plane}
-                           'bool':np.zeros(self.meta['nSes']).astype('bool'),
-                           'trial_ct':np.zeros(self.meta['nSes'],'int'),
-                           'time_active':np.zeros(self.meta['nSes']),
-                           'speed':np.zeros(self.meta['nSes'])}
+            self.sessions = {
+                'shift':np.zeros((self.nSes,2)),
+                'borders':np.zeros((2,2))*np.NaN,
+                'corr':np.zeros((self.nSes,2))*np.NaN,
+                'transpose':np.zeros(self.nSes,'bool'),
+                'flow_field':np.zeros(((self.nSes,)+self.meta['dims']+(2,))),
+                'N_original':np.zeros(self.nSes)*np.NaN,
+                #'rotation_anchor':np.zeros((self.nSes,3))*np.NaN,     ## point on plane
+                #'rotation_normal':np.zeros((self.nSes,3))*np.NaN,     ## normal describing plane}
+                'bool':np.zeros(self.meta['nSes']).astype('bool'),
+                'trial_ct':np.zeros(self.meta['nSes'],'int'),
+                'time_active':np.zeros(self.meta['nSes']),
+                'speed':np.zeros(self.meta['nSes'])
+            }
 
             self.get_reference_frame()
-            self.get_behavior()
+            try:
+                self.get_behavior()
+            except:
+                print('could not get behavior')
             self.session_classification(sessions=sessions)
             #self.save([False,True,False,False,False])
 
@@ -358,8 +359,8 @@ class cluster:
                     pathFiring = os.path.join(pathSession,os.path.splitext(self.para['svname_firingstats'])[0] + '.pkl')
                     firingstats_tmp = pickleData([],pathFiring,prnt=False)
                 except:
-                    print('new detection not found')
                     pathFiring = os.path.join(pathSession,self.para['svname_firingstats'])
+                    print('new detection not found, loading %s'%pathFiring)
                     firingstats_tmp = sio.loadmat(pathFiring,squeeze_me=True)
                 # print(idx_c.shape,n_arr.shape)
                 self.stats['firingrate'][idx_c,s] = firingstats_tmp['rate'][n_arr]
@@ -369,8 +370,8 @@ class cluster:
                     pathStatus = os.path.join(pathSession,os.path.splitext(self.para['svname_status'])[0] + '.pkl')
                     status = pickleData([],pathStatus,prnt=False)
                 except:
-                    print('new detection not found')
                     pathStatus = os.path.join(pathSession,self.para['svname_status'])
+                    print('new detection not found, loading %s'%pathStatus)
                     status = sio.loadmat(pathStatus,squeeze_me=True)
                 try:
                 # print('loading MI')
@@ -422,7 +423,7 @@ class cluster:
 
         t_start = time.time()
         for (s,s0) in tqdm(enumerate(self.session_order),total=self.meta['nSes'],leave=False):
-
+        # for (s,s0) in enumerate(self.session_order):
             pathSession = pathcat([self.meta['pathMouse'],'Session%02d'%s0])
             pathFields = os.path.join(pathSession,self.para['svname_fields'])
             if os.path.exists(pathFields):
@@ -435,8 +436,8 @@ class cluster:
                     pathFiring = os.path.join(pathSession,os.path.splitext(self.para['svname_firingstats'])[0] + '.pkl')
                     firingstats_tmp = pickleData([],pathFiring,prnt=False)
                 except:
-                    print('new detection not found')
                     pathFiring = os.path.join(pathSession,self.para['svname_firingstats'])
+                    print('new detection not found, loading %s'%pathFiring)
                     firingstats_tmp = sio.loadmat(pathFiring,squeeze_me=True)
 
                 ### hand over all other values
@@ -444,15 +445,13 @@ class cluster:
                     pathFields = os.path.join(pathSession,os.path.splitext(self.para['svname_fields'])[0] + '.pkl')
                     fields = pickleData([],pathFields,prnt=False)
                 except:
-                    print('new detection not found')
                     pathFields = os.path.join(pathSession,self.para['svname_fields'])
+                    print('new detection not found, loading %s'%pathFields)
                     fields = sio.loadmat(pathFields,squeeze_me=True);
                 self.fields['nModes'][idx_c,s] = np.minimum(2,(np.isfinite(fields['parameter'][n_arr,:,3,0]).sum(1)).astype('int'))
                 # print(firingstats_tmp['trial_field'].shape)
                 # return
                 for (c,n) in zip(idx_c,n_arr):
-
-                    # self.stats['trial_map'][c,s,:] = firingstats_tmp['trial_map'][n,...]
 
                     if self.fields['nModes'][c,s] > 0:   ## cell is PC
 
@@ -467,13 +466,13 @@ class cluster:
                         self.fields['Bayes_factor'][c,s,...] = fields['Bayes_factor'][n,:self.meta['field_count_max'],0]
 
                         for f in np.where(~np.isnan(fields['parameter'][n,:,3,0]))[0]:
-                            # if firingstats_tmp['trial_map'].shape[1]==self.sessions['trial_ct'][s]:
-                            self.fields['reliability'][c,s,f], self.fields['max_rate'][c,s,f], self.fields['trial_act'][c,s,f,:self.sessions['trial_ct'][s]] = get_reliability(firingstats_tmp['trial_map'][n,...],firingstats_tmp['map'][n,...],fields['parameter'][n,...],f)
-                            # else:
-                                # self.fields['reliability'][c,s,f], self.fields['max_rate'][c,s,f], trial_act = get_reliability(firingstats_tmp['trial_map'][n,1:,...],firingstats_tmp['map'][n,...],fields['parameter'][n,...],f)
+                            if firingstats_tmp['trial_map'].shape[1]==self.sessions['trial_ct'][s]:
+                                self.fields['reliability'][c,s,f], self.fields['max_rate'][c,s,f], self.fields['trial_act'][c,s,f,:self.sessions['trial_ct'][s]] = get_reliability(firingstats_tmp['trial_map'][n,...],firingstats_tmp['map'][n,...],fields['parameter'][n,...],f)
+                            else:
+                                self.fields['reliability'][c,s,f], self.fields['max_rate'][c,s,f], trial_act = get_reliability(firingstats_tmp['trial_map'][n,1:,...],firingstats_tmp['map'][n,...],fields['parameter'][n,...],f)
                                 # self.fields['reliability'][c,s,f] = rel
                                 # self.fields['max_rate'][c,s,f] = max_rate
-                                # self.fields['trial_act'][c,s,f,:len(trial_act)] = trial_act
+                                self.fields['trial_act'][c,s,f,:len(trial_act)] = trial_act
 
                             # self.fields['trial_act'][c,s,f,:self.sessions['trial_ct'][s]] = firingstats_tmp['trial_field'][n,f,:]
                         # print(self.fields['trial_act'][c,s,:,:self.sessions['trial_ct'][s]])
@@ -612,14 +611,19 @@ class cluster:
 
             self.status_fields = idx_fields
 
-            print(self.status_fields.sum(axis=(0,2)))
+            # print(self.status_fields.sum(axis=(0,2)))
+            # print(idx_fields.sum(axis=(0,2)))
 
             ### place cell: defined by: Bayes factor, MI(val,p_val,z_score)
             self.stats['MI_p_value'][self.stats['MI_p_value']==0.001] = 10**(-10)    ## need this - can't get any lower than 0.001 with 1000 shuffles...
             idx_PC = np.ones((self.meta['nC'],self.meta['nSes']),'bool')
             for s in np.where(self.sessions['bool'])[0]:
+                # print('session: %d'%s)
+                # MI = self.stats['MI_p_value'][:,s]
+                # MI[~self.status[:,s,2]] = np.NaN
                 idx_PC[:,s] = fdr_control(self.stats['MI_p_value'][:,s],self.thr['alpha'])
-
+                # idx_PC[:,s] = fdr_control(MI,self.thr['alpha'])
+            # print(idx_PC.sum(0))
             # print(np.any(idx_fields,-1).sum(0))
             idx_PC = idx_PC & np.any(idx_fields,-1) & (self.stats['MI_value']>self.thr['MI'])
 
@@ -634,6 +638,8 @@ class cluster:
                       #(self.fields['location'][...,0]>=self.para['zone_idx']['reward'][0])
             #self.fields['status'][idx_reward] = 4
             #self.fields['status'][~self.status[...,2],:] = False
+
+            self.session_data = get_session_specifics(self.para['mouse'],self.meta['nSes'])
 
             nbin = self.para['nbin']
             ct_field_remove = 0
@@ -846,6 +852,11 @@ class cluster:
 
                 for s in np.where(self.sessions['bool'])[0][:-ds]:
                     if self.sessions['bool'][s+ds]:
+
+                        # loc = self.fields['location'][self.stats['cluster_bool'],s,:,0]
+                        # idx_gt = (loc>GT_pos[0]) & (loc<GT_pos[1])
+                        # idx_rw = (loc>RW_pos[0]) & (loc<RW_pos[1])
+
                         for key in status_arr:
                             for key2 in status_arr:
                                 # if key i
@@ -1094,7 +1105,8 @@ class multi_cluster:
     def set_sessions(self,start_ses=None):
         self.sessions = {'34':   {'total':22,
                              'order':range(1,23),
-                             'analyze':[3,15]},
+                             'analyze':[3,15],
+                             'steady':  [3,15]},
                     '35':   {'total':22,
                              'order':range(1,23),
                              'analyze':[3,15],
@@ -1137,7 +1149,8 @@ class multi_cluster:
                              'steady':  [3,20]},
                     '839':  {'total':24,    ## cpp injections starting at 20
                              'order':range(1,25),
-                             'analyze':[3,20]},
+                             'analyze':[3,20],
+                             'steady':[3,20]},
                     '840':  {'total':25,    ## cpp injections starting at 20
                              'order':range(1,25),
                              'analyze':[1,18],
@@ -1154,36 +1167,43 @@ class multi_cluster:
                              'analyze':[np.NaN,np.NaN]},
                     '884':  {'total':24,    ## cpp injections starting at 20
                              'order':range(1,25),
-                             'analyze':[3,16]},
+                             'analyze':[3,16],
+                             'steady':[3,16]},
                     '886':  {'total':24,    ## saline injections starting at 22
                              'order':range(1,25),
                              'analyze':[3,19]}, ## dont know yet
                     '549':  {'total':29,    ## super huge gap between 20 & 21, kainate acid @ s21
                              'order':range(1,30),
-                             'analyze':[3,20]}, #bad matching?!
+                             'analyze':[3,20],
+                             'steady':  [3,20]}, #bad matching?!
                     '551':  {'total':28,    ## super huge gap between 20 & 21, kainate acid @ s21
                              'order':range(1,29),
-                             'analyze':[3,20]},
+                             'analyze':[3,20],
+                             'steady':  [3,20]},
                     '918shKO':  {'total':28,    # RW change at s16
                                  'order':range(1,29),
-                             'analyze':[3,15]},
+                             'analyze':[3,15],
+                             'steady':  [3,15]},
                     '931wt':    {'total':28,    # RW change at s16
                                  'order':range(1,29),
-                             'analyze':[3,15]},
+                             'analyze':[3,15],
+                             'steady':  [3,15]},
                     '943shKO':  {'total':28,    # RW change at s16
                                  'order':range(1,29),
-                             'analyze':[3,15]},
+                             'analyze':[3,15],
+                             'steady':  [3,15]},
                     '231':  {'total':   87,
                              'order':   range(1,88),   ## RW change at s11, s21, s31
                              'analyze': [1,87],
-                             'steady':  [32,87]},
+                             'steady':  [33,87]},
                     '232':  {'total':   74,
                              'order':   range(1,75),   ## RW change at s73, s83, s93,s94,s95
-                             'analyze': [15,72],
-                             'steady':  [15,72]},
+                             'analyze': [18,72],
+                             'steady':  [18,72]},
                     '236':  {'total':28,
                              'order':range(1,29),
-                             'analyze':[3,28]},
+                             'analyze':[3,28],
+                             'steady':  [3,28]},
                     '762':  {'total':   112,
                              'order':   range(1,113),
                              'analyze': [1,112],
@@ -1195,7 +1215,7 @@ class multi_cluster:
 
 
 
-    def load_mice(self,mice,load=False,reload=False,session_start=None,suffix='2'):
+    def load_mice(self,mice,load=False,reload=False,session_start=None,suffix=''):
 
         for mouse in mice:
             if (not (mouse in self.cMice.keys())) | reload:
@@ -1220,7 +1240,7 @@ class multi_cluster:
         # if load:
             # self.update_all(which=['sessions','status','compare'],session_start=session_start)
 
-    def update_all(self,mice=None,which=None,SNR_thr=2,rval_thr=0,Bayes_thr=10,rel_thr=0.1,A_thr=3,A0_thr=1,Arate_thr=2,pm_thr=0.3,nCluster_thr=2,session_start=None,session_end=None,sd_r=-1,steady=False):
+    def update_all(self,mice=None,which=None,SNR_thr=2,rval_thr=0,Bayes_thr=10,rel_thr=0.1,A_thr=3,A0_thr=1,Arate_thr=2,pm_thr=0.3,alpha=1,nCluster_thr=2,session_start=None,session_end=None,sd_r=-1,steady=False):
 
         if mice is None:
             mice = self.cMice.keys()
@@ -1254,7 +1274,7 @@ class multi_cluster:
                 _,_ = self.cMice[mouse].recalc_firingrate(sd_r)
 
             if 'status' in which:
-                self.cMice[mouse].update_status(SNR_thr=SNR_thr,rval_thr=rval_thr,Bayes_thr=Bayes_thr,reliability_thr=rel_thr,A_thr=A_thr,A0_thr=A0_thr,Arate_thr=Arate_thr,MI_thr=0,pm_thr=pm_thr,nCluster_thr=nCluster_thr)
+                self.cMice[mouse].update_status(SNR_thr=SNR_thr,rval_thr=rval_thr,Bayes_thr=Bayes_thr,reliability_thr=rel_thr,A_thr=A_thr,A0_thr=A0_thr,Arate_thr=Arate_thr,MI_thr=0,pm_thr=pm_thr,alpha=alpha,nCluster_thr=nCluster_thr)
             if 'compare' in which:
                 self.cMice[mouse].compareSessions(reprocess=True,n_processes=10)
             if 'transition' in which:

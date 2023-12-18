@@ -7,7 +7,7 @@
 
 '''
 
-import os, pickle, cmath, time, cv2, h5py
+import pickle, cmath, time, cv2, h5py
 import scipy as sp
 import scipy.stats as sstats
 from scipy import signal, cluster
@@ -15,23 +15,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from fastcluster import linkage
 from scipy.spatial.distance import squareform
-
-
-def get_nPaths(path,pathStr):
-
-  paths = []
-  nF = 0
-  for file in os.listdir(path):
-    if file.startswith(pathStr):
-      paths.append(pathcat([path,file]))
-      nF+=1
-
-  return nF, paths
-
-
-def pathcat(strings):
-  return '/'.join(strings)
-
 
 def find_modes(data,axis=None,sort_it=True):
 
@@ -250,45 +233,11 @@ def get_average(x,p,periodic=False,bounds=None):
   return avg
 
 
-
-def extend_dict(D,n,D2=None,dim=0,exclude=[]):
-  if not bool(D):
-    return D2
-  for key in D.keys():
-    if not (key in exclude):
-      if type(D[key]) is dict:
-        if not (D2 is None):
-          extend_dict(D[key],n,D2[key],dim)
-        else:
-          extend_dict(D[key],n,None,dim)
-      else:
-        dims = np.array(D[key].shape[:])
-        dims[dim] = n
-        if D[key].dtype == 'float':
-          D[key] = np.append(D[key],np.zeros(dims)*np.NaN,dim)
-        else:
-          D[key] = np.append(D[key],np.zeros(dims).astype(D[key].dtype),dim)
-        if not (D2 is None):
-          D[key][-n:,...] = D2[key]
-  return D
-
-
-def clean_dict(D,idx,dim=0):
-  assert dim==0, 'Only works for dimension 0 for now'
-  print('cleaning dictionary of %d entries'%np.count_nonzero(~idx))
-  for key in D.keys():
-    if not (key=='session_shift'):
-      if type(D[key]) is dict:
-        clean_dict(D[key],idx,dim)
-      else:
-        D[key] = D[key][idx,...]
-
-
 def fdr_control(x,alpha):
 
   if alpha < 1:
     x[x==0.001] = 10**(-10)
-    x_mask = ~np.isnan(x)
+    x_mask = np.isfinite(x)
     N = x_mask.sum()
     FDR_thr = range(1,N+1)/N*alpha
     x_masked = x[x_mask]
@@ -403,7 +352,6 @@ def KS_test(dat1,dat2):
 def occupation_measure(data,x_ext,y_ext,nA=[10,10]):
 
   ## nA:      number zones per row / column (2 entries)
-
   N = data.shape[0]
   NA_exp = N/(nA[0]*nA[1])
   print(NA_exp)
@@ -825,7 +773,8 @@ def get_firingrate(S,f=15,sd_r=1):
 def add_number(fig,ax,order=1,offset=None):
 
     # offset = [-175,50] if offset is None else offset
-    offset = [-75,25] if offset is None else offset
+    offset = [-150,50] if offset is None else offset
+
     pos = fig.transFigure.transform(plt.get(ax,'position'))
     x = pos[0,0]+offset[0]
     y = pos[1,1]+offset[1]
@@ -895,3 +844,10 @@ def get_recurr(status,status_dep):
         recurr[s,1:nSes-s] = (overlap/N_ref)[s+1:]
 
     return recurr
+
+def get_mean_SD(SDs):
+
+    mask = np.isfinite(SDs)
+    n = mask.sum()
+    vars = SDs[mask]**2
+    return np.sqrt(1/n**2 * np.sum(vars))

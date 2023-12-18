@@ -30,10 +30,14 @@ def run_detection(basePath,mouse,nP,s_start=1,s_end=None,nSession=None,session_o
     # try:
     IDs = cMouse.IDs['neuronID'][cMouse.status[:,s-1,1],s-1,1].astype('int')
     s_range = np.unique(cMouse.IDs['neuronID'][:,s-1,2])
-    s0 = int(np.unique(cMouse.IDs['neuronID'][:,s-1,2])[0])
-    print('Now processing session %d'%s0)
-    dPC = detect_PC(basePath,mouse,s0,nP,nbin=100,plt_bool=False,sv_bool=False,suffix='')
-    dPC.run_detection(f_max=1,rerun=rerun,dataSet='redetect',assignment=IDs)
+    s0 = np.unique(cMouse.IDs['neuronID'][:,s-1,2])[0]
+    if np.isfinite(s0):
+        s0 = int(s0)
+        print('Now processing session %d'%s0)
+        dPC = detect_PC(basePath,mouse,s0,nP,nbin=100,plt_bool=False,sv_bool=False,suffix='')
+        dPC.run_detection(f_max=1,rerun=rerun,dataSet='redetect',assignment=IDs)
+    else:
+        print('Session not matched')
     # except:
         # print('File not found')
         # raise('Interrupted')
@@ -41,7 +45,7 @@ def run_detection(basePath,mouse,nP,s_start=1,s_end=None,nSession=None,session_o
       #print('###--- something went wrong in session %d of mouse %s! ---###'%(s,mouse))
 
 
-nP = 12
+nP = 10
 # run_detection('/media/wollex/Analyze_AS3/Data','756',nP,1,20)
 # run_detection('/media/wollex/Analyze_AS3/Data','757',nP,1,20)
 # run_detection('/media/wollex/Analyze_AS3/Data','758',nP,1,20)
@@ -67,10 +71,18 @@ nP = 12
 # run_detection('/media/wollex/Analyze_AS3/Data','34',nP)
 # run_detection('/media/wollex/Analyze_AS3/Data','35',nP)
 
-run_detection('/media/wollex/Analyze_AS1/linstop','231',nP,nSession=87)
-run_detection('/media/wollex/Analyze_AS3/Data','65',nP,21)
-run_detection('/media/wollex/Analyze_AS3/Data','66',nP,21)
-run_detection('/media/wollex/Analyze_AS3/Data','72',nP,21)
+# run_detection('/media/wollex/Analyze_AS1/linstop','231',nP,nSession=87,s_start=33)
+# run_detection('/media/wollex/Analyze_AS1/others','549',nP,21)
+
+# run_detection('/media/wollex/Analyze_AS1/Shank','918shKO',nP,22)
+# run_detection('/media/wollex/Analyze_AS1/Shank','931wt',nP)
+# run_detection('/media/wollex/Analyze_AS1/Shank','943shKO',nP,23)
+
+# run_detection('/media/wollex/Analyze_AS3/Data','65',nP,21)
+# run_detection('/media/wollex/Analyze_AS3/Data','66',nP,21)
+# run_detection('/media/wollex/Analyze_AS3/Data','72',nP,21)
+
+run_detection('/media/wollex/Analyze_AS1/others','551',nP,2)
 
 
 #

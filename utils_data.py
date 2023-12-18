@@ -66,7 +66,7 @@ def set_para(basePath,mouse,s,nP=0,nbin=100,plt_bool=False,sv_bool=False,suffix=
           'trials_min_count':3,
           'trials_min_fraction':0.2,
 
-          'Ca_thr':0,
+          'Ca_thr':1,
 
           't_measures': get_t_measures(mouse),
 

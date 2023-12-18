@@ -19,8 +19,8 @@ from scipy.spatial.distance import squareform
 from utils import gauss_smooth
 
 
-def get_performance(pathMouse,s_arr,rw_pos=[50,70],rw_delay=0,f=15,plot_bool=False):
-    
+def get_performance(pathMouse,s_arr,rw_pos=[50,70],rw_delay=0,f=15,plot_bool=False,plot_ax=None):
+
     nSes = len(s_arr)
     L = 120         ## length of track in cm
     nbin = 100
@@ -57,7 +57,7 @@ def get_performance(pathMouse,s_arr,rw_pos=[50,70],rw_delay=0,f=15,plot_bool=Fal
         dataStore[i] = {}
         dataStore[i]['trials'] = {}
         dataStore[i]['trials']['RW_reception'] = np.zeros(dataBH['trials']['ct'],'bool')
-        dataStore[i]['trials']['RW_frame'] = np.zeros(dataBH['trials']['ct'],'int')
+        dataStore[i]['trials']['RW_frame'] = np.zeros(dataBH['trials']['ct'],'int')-100
         dataStore[i]['trials']['slowDown'] = np.zeros(dataBH['trials']['ct'],'bool')
         dataStore[i]['trials']['frame_slowDown'] = np.zeros(dataBH['trials']['ct'],'int')
         dataStore[i]['trials']['pos_slowDown'] = np.zeros(dataBH['trials']['ct'])*np.NaN
@@ -103,6 +103,14 @@ def get_performance(pathMouse,s_arr,rw_pos=[50,70],rw_delay=0,f=15,plot_bool=Fal
             dataBH['RW_approach_time'][t,:ra*f+np.minimum(0,len(dataBH['velocity'])-(idx_enterRW+f*range_approach[1]))] = dataBH['velocity'][idx_enterRW+f*range_approach[0]:idx_enterRW+f*range_approach[1]]
 
         # plot_fig = False
+        if not (plot_ax is None):
+
+            plot_ax.plot(np.linspace(0,nbin-1,nbin),gauss_smooth(dataBH['RW_approach_space'],(0,1)).T,color=[0.5,0.5,0.5],alpha=0.5,linewidth=0.3)
+            plot_ax.plot(np.linspace(0,nbin-1,nbin),np.nanmean(dataBH['RW_approach_space'],0),color='k')
+            # plot_ax.plot(dataStore[i]['trials']['pos_slowDown'][dataStore[i]['trials']['slowDown']],dataBH['velocity'][dataStore[i]['trials']['frame_slowDown'][dataStore[i]['trials']['slowDown'][:]]],'rx')
+            plot_ax.plot([0,nbin],[vel_thr,vel_thr],'k--',linewidth=0.5)
+
+
         if plot_bool:
             plt.figure()
             plt.subplot(221)
@@ -167,9 +175,11 @@ def define_active(pathSession,f=15,plot_bool=False):
     data['trials']['frame'] = frames_active[idx_trial_start]
     data['trials']['ct'] = len(data['trials']['frame'])-1
 
+    plot_bool=False
     if plot_bool:
         plt.figure(dpi=300)
         plt.plot(data['time'],data['position'],'r.',markersize=1,markeredgecolor='none')
         plt.plot(data['time'][data['active']],data['position'][data['active']],'k.',markersize=2,markeredgecolor='none')
         plt.show(block=False)
+        # print(data['active'].sum())
     return data
