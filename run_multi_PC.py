@@ -12,7 +12,7 @@ def run_detection(basePath,mouse,nP,s_start=1,s_end=None,nSession=None,session_o
 
   pathMouse = pathcat([basePath,mouse])
   if nSession is None:
-      nSession,tmp = get_nPaths(pathMouse,'Session')
+      nSession,_ = get_nPaths(pathMouse,'Session')
 
   cMouse = cluster(basePath,mouse,nSession,dataSet='redetect',session_order=session_order,suffix='')
   cMouse.process_sessions(n_processes=nP,reprocess=True)
@@ -46,51 +46,6 @@ def run_detection(basePath,mouse,nP,s_start=1,s_end=None,nSession=None,session_o
 
 
 nP = 10
-# run_detection('/media/wollex/Analyze_AS3/Data','756',nP,1,20)
-# run_detection('/media/wollex/Analyze_AS3/Data','757',nP,1,20)
-# run_detection('/media/wollex/Analyze_AS3/Data','758',nP,1,20)
-
-# run_detection('/media/wollex/Analyze_AS1/linstop','762',nP,69,87)
-# run_detection('/media/wollex/Analyze_AS1/linstop','762',nP,68,87)
-
-# run_detection('/media/wollex/Analyze_AS3/Data','879',nP)
-# run_detection('/media/wollex/Analyze_AS3/Data','840',nP)
-
-# run_detection('/media/wollex/Analyze_AS3/Data','65',nP,1,20)
-# run_detection('/media/wollex/Analyze_AS3/Data','66',nP,1,20)
-# run_detection('/media/wollex/Analyze_AS3/Data','72',nP,1,20)
-
-# run_detection('/media/wollex/Analyze_AS1/linstop','762',nP,88)
-# run_detection('/media/wollex/Analyze_AS1/linstop','246',nP,session_order=[range(1,32),range(32,43),range(46,49),range(61,64),range(58,61),range(55,58),range(49,55),range(43,46)])
-# run_detection('/media/wollex/Analyze_AS1/linstop','246',nP,session_order=[range(1,32),range(32,43),range(46,49),range(61,64),range(58,61),range(55,58),range(49,55),range(43,46)],s_start=42)
-# run_detection('/media/wollex/Analyze_AS3/Data','243',nP,session_order=[range(69,72),range(66,69),range(57,60),range(63,66),range(60,63),range(54,57),range(51,54),range(1,51)])
-# run_detection('/media/wollex/Analyze_AS1/linstop','245',nP,session_order=[range(68,74),range(65,68),range(62,65),range(1,53),range(56,62),range(53,56)])
-
-# run_detection('/media/wollex/Analyze_AS1/linstop','232',nP)
-
-# run_detection('/media/wollex/Analyze_AS3/Data','34',nP)
-# run_detection('/media/wollex/Analyze_AS3/Data','35',nP)
-
-# run_detection('/media/wollex/Analyze_AS1/linstop','231',nP,nSession=87,s_start=33)
-# run_detection('/media/wollex/Analyze_AS1/others','549',nP,21)
-
-# run_detection('/media/wollex/Analyze_AS1/Shank','918shKO',nP,22)
-# run_detection('/media/wollex/Analyze_AS1/Shank','931wt',nP)
-# run_detection('/media/wollex/Analyze_AS1/Shank','943shKO',nP,23)
-
-# run_detection('/media/wollex/Analyze_AS3/Data','65',nP,21)
-# run_detection('/media/wollex/Analyze_AS3/Data','66',nP,21)
-# run_detection('/media/wollex/Analyze_AS3/Data','72',nP,21)
-
 run_detection('/media/wollex/Analyze_AS1/others','551',nP,2)
-
-
-#
-#
-# run_detection('/media/wollex/Analyze_AS3/Data','65',nP)
-# run_detection('/media/wollex/Analyze_AS3/Data','66',nP)
-# run_detection('/media/wollex/Analyze_AS3/Data','72',nP)
-#
-# run_detection('/media/wollex/Analyze_AS3/Data','884',nP)
 
 #run_detection_folders('/media/wollex/Analyze_AS3/Data',nP)

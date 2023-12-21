@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from fastcluster import linkage
 from scipy.spatial.distance import squareform
 
-from utils import gauss_smooth
+from .utils import gauss_smooth
 
 
 def get_performance(pathMouse,s_arr,rw_pos=[50,70],rw_delay=0,f=15,plot_bool=False,plot_ax=None):
@@ -131,55 +131,3 @@ def get_performance(pathMouse,s_arr,rw_pos=[50,70],rw_delay=0,f=15,plot_bool=Fal
             plt.show(block=False)
 
     return dataStore
-
-def define_active(pathSession,f=15,plot_bool=False):
-
-    data = {}
-    pathBH = None
-    for file in os.listdir(pathSession):
-      if file.endswith("aligned.mat"):
-          pathBH = os.path.join(pathSession, file)
-    if pathBH is None:
-        return
-    fLoad = h5py.File(pathBH,'r')
-
-    position = np.squeeze(fLoad.get('alignedData/resampled/position').value)
-    data['time'] = np.squeeze(fLoad.get('alignedData/resampled/time').value)
-    fLoad.close()
-    position -= position.min()
-    position /= position.max()*1.001    ## avoid maximum value being in too high bin
-    position *= 100
-    data['position'] = position
-
-    velocity = np.diff(np.append(data['position'][0],data['position']))*f
-    velocity[velocity<0] = 0
-    data['velocity'] = sp.ndimage.gaussian_filter(velocity,2)
-
-    ## get time spent running / active
-    data['active'] = sp.ndimage.binary_closing(velocity>0.5,structure=np.ones(int(f/2)),border_value=True)
-    data['active'] = sp.ndimage.binary_opening(data['active'],structure=np.ones(int(f/2)))
-    # data['active'][position<1] = False
-    # data['active'][position>98] = False
-
-    idx_teleport = np.where(np.diff(data['position'])<-10)[0]+1
-    if not (data['position'][0] < 5):
-        data['active'][:max(0,idx_teleport[0]+1)] = False
-
-    if not (data['position'][-1] >= 95):
-        data['active'][idx_teleport[-1]:] = False
-
-    data['trials'] = {}
-    idx_trial_start = np.hstack([0,np.where(np.diff(data['position'][data['active']])<-10)[0]+1,data['active'].sum()-1])
-    frames = np.arange(len(data['time']))
-    frames_active = frames[data['active']]
-    data['trials']['frame'] = frames_active[idx_trial_start]
-    data['trials']['ct'] = len(data['trials']['frame'])-1
-
-    plot_bool=False
-    if plot_bool:
-        plt.figure(dpi=300)
-        plt.plot(data['time'],data['position'],'r.',markersize=1,markeredgecolor='none')
-        plt.plot(data['time'][data['active']],data['position'][data['active']],'k.',markersize=2,markeredgecolor='none')
-        plt.show(block=False)
-        # print(data['active'].sum())
-    return data
