@@ -10,11 +10,11 @@ import itertools
 # from itertools import chain
 import multiprocessing as mp
 
-from .utils.utils import pickleData, fdr_control, periodic_distr_distance, get_reliability, get_firingrate, get_status_arr, get_average
-from .utils.utils_data import cluster_parameters
-# from .utils.utils_analysis import get_performance
+from .utils import pickleData, fdr_control, periodic_distr_distance, get_reliability, get_firingrate, get_status_arr, get_average
+from .utils import cluster_parameters
+from .utils import get_performance, prepare_behavior
 # from plot_PC_analysis import plot_PC_analysis
-# from get_session_specifics import get_session_specifics
+from .mouse_data_scripts.get_session_specifics import *
 
 
 warnings.filterwarnings("ignore")
@@ -133,20 +133,16 @@ class cluster:
         
         for s,path in enumerate(self.paths['sessions']):
             
-            ldData = pickleData([],os.path.join(path,self.paths['fileNameBehavior']),'load')
-            print(ldData)
-            print(ldData.keys())
-            print(ldData['trials'])
-
+            ldData = prepare_behavior(os.path.join(path,self.paths['fileNameBehavior']))
             self.sessions['trial_ct'][s] = ldData['trials']['ct']
-            self.sessions['trial_frames'][s] = ldData['trials']['frame']
+            self.sessions['trial_frames'][s] = ldData['trials']['nFrames']
 
-            self.sessions['speed'][s] = ldData['velocity'][ldData['active']].mean()
+            self.sessions['speed'][s] = np.nanmean(ldData['velocity'])
             self.sessions['time_active'][s] = ldData['active'].sum()/self.params['f']
 
 
-        # self.session_data = get_session_specifics(self.params['mouse'],self.params['nSes'])
-        # self.performance = get_performance(self.params['pathMouse'],self.session_order,rw_pos=self.session_data['RW_pos'],rw_delay=self.session_data['delay'])
+        self.session_data = get_session_specifics(self.params['mouse'],self.params['nSes'])
+        self.performance = get_performance(self.params['pathMouse'],self.session_order,rw_pos=self.session_data['RW_pos'],rw_delay=self.session_data['delay'])
 
 
     def get_trial_fr(self,n_processes):
@@ -209,10 +205,8 @@ class cluster:
         
         ## finally, check if data can be loaded properly
         for s in np.where(self.sessions['bool'])[0]:
-            print(os.path.join(self.paths['sessions'][s],self.paths['fileNameCNMF']))
             if not os.path.exists(os.path.join(self.paths['sessions'][s],self.paths['fileNameCNMF'])):
                 self.sessions['bool'][s] = False
-                print('he')
 
         ## potentially put in some additional checks
         # if self.params['mouse'] == '762':
