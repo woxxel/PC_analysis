@@ -7,8 +7,8 @@ def get_session_specifics(mouse,nSes):
     t_measures = np.NaN
     session_data = {'RW_pos':   np.NaN,
                     'GT_pos':   np.NaN,
-                    'delay':    np.NaN,     ## necessary dwelltime at reward location
-                    'p_RW':     np.ones(nSes)}          ## probability to receive reward
+                    'delay':    0,               ## required dwelltime at reward location
+                    'p_RW':     np.ones(nSes)}   ## probability to receive reward
 
     rw1 = [50,70]
     rw2 = [75,95]

@@ -7,13 +7,13 @@
 
 '''
 
-import pickle, cmath, time, cv2, h5py
+import pickle, cmath, cv2
 import scipy as sp
 import scipy.stats as sstats
-from scipy import signal, cluster
+from scipy import signal#, cluster
 import numpy as np
 import matplotlib.pyplot as plt
-from fastcluster import linkage
+# from fastcluster import linkage
 from scipy.spatial.distance import squareform
 
 def find_modes(data,axis=None,sort_it=True):

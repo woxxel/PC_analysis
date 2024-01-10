@@ -3,22 +3,17 @@
   set_para
 
 '''
-import os
+import os, pickle
+import numpy as np
 
 class cluster_parameters:
 
 	# params = {}
 	# paths = {}
 
-    def __init__(self,nbin,mouse,s_corr_min):
+    def __init__(self,mouse,s_corr_min):
         self.params = {
-            'nbin': nbin,
-            'f': 15,
-
-            'mouse':mouse,
-
-            'nC': None,
-            # 'nSes': self.nSes,
+            
             'f': 15,   ## measurement frequency
             'dims': (512,512),#np.zeros(2)*np.NaN,
 
@@ -47,18 +42,30 @@ class cluster_parameters:
             'Arate_thr':                  0,
             'sigma_thr':                  2,
             'pmass_thr':                  0.5,
-            'CI_thr':                     nbin,
+            'CI_thr':                     100,### was nbin before - what does it do?
 
             'nCluster':                   2
             # 'pathMouse':pathMouse,
             # 'zone_idx':zone_idx,
             # 'zone_mask':zone_mask
         }
-	
-    def set_paths(self,paths,pathAssignments,pathResults,suffix=''):
-        
-        self.params['nSes'] = len(paths)
 
+        self.data = {
+            'mouse':mouse,
+            'nSes': None,
+            'nC': None,
+            'nbin': None,
+        }
+	
+    def set_paths(self,pathAssignments,pathResults,suffix=''):
+        
+        ## load stored filenames in order in which they were matched
+        with open(pathAssignments,'rb') as f_open:
+            ld = pickle.load(f_open)
+        paths = [os.path.split(session['filePath'])[0] for key,session in ld['data'].items() if isinstance(key,int)]
+        
+        self.data['nC'],self.data['nSes'] = ld['results']['assignments'].shape
+        
         self.paths = {
             'sessions':               paths,
             # 'data':                   pathData,
@@ -66,16 +73,68 @@ class cluster_parameters:
             'figures':                os.path.join(pathResults,'figures'),#'/home/wollex/Data/Science/PhD/Thesis/pics/Methods',
             
             ### provide names for distinct result files (needed?)
-            'fileNamePCFields':       os.path.join(pathResults,'PC_fields%s.pkl'%suffix),
+            'fileNamePCFields':       'PC_fields%s.pkl'%suffix,
             'fileNameCNMF':           'OnACID_results.hdf5',
             'fileNameBehavior':       'aligned_behavior.pkl',
 
+            'pathResults':            pathResults,
             'svSessions':             os.path.join(pathResults,'clusterSessions_%s.pkl'%suffix),
             'svIDs':                  os.path.join(pathResults,'clusterIDs_%s.pkl'%suffix),
             'svStats':                os.path.join(pathResults,'clusterStats_%s.pkl'%suffix),
             'svPCs':                  os.path.join(pathResults,'clusterPCs_%s.pkl'%suffix),
             'svCompare':              os.path.join(pathResults,'clusterCompare_%s.pkl'%suffix)
         }
+
+        ## get nbins
+        pathPCFields = os.path.join(paths[0],self.paths['fileNamePCFields'])
+        with open(pathPCFields,'rb') as f_open:
+            PCFields = pickle.load(f_open)
+        self.data['nbin'] = PCFields['fields']['p_x'].shape[-1]
+
+        
+        
+        
+
+
+
+
+def extend_dict(D,n,D2=None,dim=0,exclude=[]):
+
+  '''
+    Extends all entries of dictionary D along axis dim to contain n entries
+    filled with either placeholder values, or values provided by D2. Can exclude
+    keys by providing a list to 'exclude'
+  '''
+  if not bool(D):
+    return D2
+  for key in D.keys():
+    if not (key in exclude):
+      if type(D[key]) is dict:
+        if not (D2 is None):
+          extend_dict(D[key],n,D2[key],dim)
+        else:
+          extend_dict(D[key],n,None,dim)
+      else:
+        dims = np.array(D[key].shape[:])
+        dims[dim] = n
+        if D[key].dtype == 'float':
+          D[key] = np.append(D[key],np.full(dims,np.NaN),dim)
+        else:
+          D[key] = np.append(D[key],np.zeros(dims).astype(D[key].dtype),dim)
+        if not (D2 is None):
+          D[key][-n:,...] = D2[key]
+  return D
+
+
+# def clean_dict(D,idx,dim=0):
+#   assert dim==0, 'Only works for dimension 0 for now'
+#   print('cleaning dictionary of %d entries'%np.count_nonzero(~idx))
+#   for key in D.keys():
+#     if not (key=='session_shift'):
+#       if type(D[key]) is dict:
+#         clean_dict(D[key],idx,dim)
+#       else:
+#         D[key] = D[key][idx,...]
 
 
 

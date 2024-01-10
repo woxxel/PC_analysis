@@ -1,0 +1,6 @@
+[submodule "neuron_matching"]
+	path = neuron_matching
+	url = https://github.com/woxxel/neuron_matching.git
+[submodule "PC_detection"]
+	path = PC_detection
+	url = https://github.com/woxxel/PC_detection.git
