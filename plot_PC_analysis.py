@@ -25,6 +25,8 @@ import os, time, cv2, itertools, sys
 # import multiprocessing as mp
 import warnings
 
+from caiman.utils.utils import load_dict_from_hdf5
+
 from .utils import periodic_distr_distance, bootstrap_data, gauss_smooth, get_reliability, com, get_firingrate, compute_serial_matrix, get_status_arr, get_CI, add_number
 from .utils import pickleData
 # from .utils_analysis import get_performance, define_active
@@ -274,7 +276,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         for s in np.where(s_bool)[0]:
             idx_field = np.where(cluster.status_fields[:,s,:])
             for c,f in zip(idx_field[0],idx_field[1]):
-                roll = round((-cluster.fields['location'][c,s,f,0]+nbin/2)/L_track*nbin).astype('int')
+                roll = round((-cluster.fields['location'][c,s,f,0]+nbin/2)/L_track*nbin)
                 p_shift += np.roll(cluster.fields['p_x'][c,s,f,:],roll)
         p_shift /= p_shift.sum()
 
@@ -312,8 +314,8 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
         # session_bool = np.pad(cluster.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(cluster.status['sessions'][:],(0,0),constant_values=False)
 
-        # mode = 'act'
-        mode = 'PC'
+        mode = 'act'
+        # mode = 'PC'
 
         s_bool = np.zeros(nSes,'bool')
         s_bool[17:87] = True
@@ -392,7 +394,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             pathLoad = os.path.join(cluster.paths['sessions'][10],cluster.paths['fileNameCNMF'])
             ld = pickleData([],pathLoad,'load')
             # ld = loadmat(pathLoad,variable_names=['A'])
-            A1 = ld['A']#.toarray().reshape(cluster.meta['dims'][0],cluster.meta['dims'][1],-1)
+            A1 = ld['A']#.toarray().reshape(cluster.params['dims'][0],cluster.params['dims'][1],-1)
             Cn = A1.sum(1).reshape(cluster.params['dims'])
             Cn -= Cn.min()
             Cn /= Cn.max()
@@ -403,7 +405,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             A2 = ld['A']
 
             # adjust to same reference frame
-            x_grid, y_grid = np.meshgrid(np.arange(0., cluster.meta['dims'][0]).astype(np.float32), np.arange(0., cluster.meta['dims'][1]).astype(np.float32))
+            x_grid, y_grid = np.meshgrid(np.arange(0., cluster.params['dims'][0]).astype(np.float32), np.arange(0., cluster.params['dims'][1]).astype(np.float32))
             x_remap = (x_grid - \
             cluster.alignment['shift'][s+1,0] + cluster.alignment['shift'][s,0] + \
             cluster.alignment['flow'][s+1,0,:,:] - cluster.alignment['flow'][s,0,:,:]).astype('float32')
@@ -436,7 +438,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             n_s2 = cluster.matching['IDs'][idx_s2,s+1].astype('int')
             n_s12 = cluster.matching['IDs'][idx_s12,s].astype('int')
 
-            A_tmp = sp.sparse.hstack([sp.sparse.csc_matrix(cv2.remap(img.reshape(cluster.meta['dims']), x_remap,y_remap, cv2.INTER_CUBIC).reshape(-1,1)) for img in A2[:,n_s2].toarray().T])
+            A_tmp = sp.sparse.hstack([sp.sparse.csc_matrix(cv2.remap(img.reshape(cluster.params['dims']), x_remap,y_remap, cv2.INTER_CUBIC).reshape(-1,1)) for img in A2[:,n_s2].toarray().T])
 
             if mode=='act':
                 [ax_ROI.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='w', linewidths=[0.3], linestyles=['dashed']) for a in A1[:,n_s1].T]
@@ -1061,7 +1063,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         #active_time = np.zeros(nSes)
         #for s in range(nSes):
           #if cluster.status['sessions'][s]:
-            #pathSession = pathcat([cluster.meta['pathMouse'],'Session%02d'%(s+1)]);
+            #pathSession = pathcat([cluster.params['pathMouse'],'Session%02d'%(s+1)]);
 
             #for file in os.listdir(pathSession):
               #if file.endswith("aligned.mat"):
@@ -1132,7 +1134,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         if n_processes>1:
             pool = get_context("spawn").Pool(n_processes)
             res = pool.starmap(get_overlap,zip(range(nSes),itertools.repeat((cluster.status['activity'],N,L))))
-
+        # print(res)
         for (s,r) in enumerate(res):
             for pop in r.keys():
                 for key in r[pop].keys():
@@ -1150,7 +1152,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         #start_recurr = np.zeros(nSes)*np.NaN
         #for s in range(nSes-1):
           #if cluster.status['sessions'][s] and cluster.status['sessions'][s+1]:
-            #start_recurr[s] = cluster.status[cluster.status['activity'][:,s,2],s+1,2].sum()/cluster.status['activity'][:,s,2].sum()
+            #start_recurr[s] = cluster.status['activity'][cluster.status['activity'][:,s,2],s+1,2].sum()/cluster.status['activity'][:,s,2].sum()
 
         #plt.figure()
         #plt.plot(pl_dat.n_edges,start_recurr)#recurrence['active']['all'][:,1])
@@ -1434,15 +1436,17 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             s = 70
         else:
             s = 10
-        pathLoad = pathcat([cluster.meta['pathMouse'],'Session%02d/results_redetect.mat'%(s+1)])
-        ld = loadmat(pathLoad)
-        A = ld['A']#.toarray().reshape(cluster.meta['dims'][0],cluster.meta['dims'][1],-1)
-        Cn = A.sum(1).reshape(cluster.meta['dims'])
+        pathLoad = os.path.join(cluster.paths['sessions'][s+1],cluster.paths['fileNameCNMF'])
+        # ld = loadmat(pathLoad)
+        
+        ld = load_dict_from_hdf5(pathLoad)
+        A = ld['A']#.toarray().reshape(cluster.params['dims'][0],cluster.params['dims'][1],-1)
+        Cn = A.sum(1).reshape(cluster.params['dims'])
         Cn -= Cn.min()
         Cn /= Cn.max()
 
         # adjust to same reference frame
-        # x_grid, y_grid = np.meshgrid(np.arange(0., cluster.meta['dims'][0]).astype(np.float32), np.arange(0., cluster.meta['dims'][1]).astype(np.float32))
+        # x_grid, y_grid = np.meshgrid(np.arange(0., cluster.params['dims'][0]).astype(np.float32), np.arange(0., cluster.params['dims'][1]).astype(np.float32))
         # x_remap = (x_grid - \
         #             cluster.alignment['shift'][s+1,0] + cluster.alignment['shift'][s,0] + \
         #             cluster.alignment['flow'][s+1,:,:,0] - cluster.alignment['flow'][s,:,:,0]).astype('float32')
@@ -1560,10 +1564,12 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             np.fill_diagonal(D_ROIs,np.NaN)
 
             idx_PC = cluster.status['activity'][:,s,2]
-            if idx_PC.sum()>0:
+            # print(idx_PC.sum())
+            if idx_PC.sum()>1:
                 mat_PC = idx_PC[:,np.newaxis] & idx_PC[:,np.newaxis].T
                 D_PCs = D_ROIs[idx_PC,:]
                 D_PCs = D_PCs[:,idx_PC]
+                print(D_PCs)
                 NN = np.nanargmin(D_PCs,1)
 
             C = np.corrcoef(cluster.stats['firingmap'][:,s,:])
@@ -1730,10 +1736,11 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         ax = plt.axes([0.75,0.05,0.225,0.275])
         pic_path = '/home/wollex/Data/Science/PhD/Thesis/pics/others/status_sketch.png'
         ax.axis('off')
-        im = mpimg.imread(pic_path)
-        ax.imshow(im)
-        ax.set_xlim([0,im.shape[1]])
-        pl_dat.add_number(fig,ax,order=4,offset=[-75,50])
+        if os.path.exists(pic_path):
+            im = mpimg.imread(pic_path)
+            ax.imshow(im)
+            ax.set_xlim([0,im.shape[1]])
+            pl_dat.add_number(fig,ax,order=4,offset=[-75,50])
 
 
         ax = plt.axes([0.1,0.525,width,0.4])
@@ -1767,11 +1774,11 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
             ax.set_title(title_str)
 
-            # ax.plot([cluster.para['zone_idx']['reward'][0],cluster.para['zone_idx']['reward'][0]],[1,nID],color='g',linestyle=':',linewidth=3)
-            # ax.plot([cluster.para['zone_idx']['reward'][1],cluster.para['zone_idx']['reward'][1]],[1,nID],color='g',linestyle=':',linewidth=3)
+            # ax.plot([cluster.params['zone_idx']['reward'][0],cluster.params['zone_idx']['reward'][0]],[1,nID],color='g',linestyle=':',linewidth=3)
+            # ax.plot([cluster.params['zone_idx']['reward'][1],cluster.params['zone_idx']['reward'][1]],[1,nID],color='g',linestyle=':',linewidth=3)
             if i == 0:
-                #ax.plot([cluster.para['zone_idx']['gate'][0],cluster.para['zone_idx']['gate'][0]],[1,nID],color='r',linestyle=':',linewidth=3)
-                #ax.plot([cluster.para['zone_idx']['gate'][1],cluster.para['zone_idx']['gate'][1]],[1,nID],color='r',linestyle=':',linewidth=3)
+                #ax.plot([cluster.params['zone_idx']['gate'][0],cluster.params['zone_idx']['gate'][0]],[1,nID],color='r',linestyle=':',linewidth=3)
+                #ax.plot([cluster.params['zone_idx']['gate'][1],cluster.params['zone_idx']['gate'][1]],[1,nID],color='r',linestyle=':',linewidth=3)
                 #ax.set_xticks(np.linspace(0,nbin,3))
                 #ax.set_xticklabels(np.linspace(0,nbin,3))
                 ax.set_ylabel('Neuron ID')
@@ -1810,15 +1817,15 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
         ax = plt.axes([0.825,0.5,0.125,0.45])
         pl_dat.add_number(fig,ax,order=3,offset=[-125,30])
-        idx_strong_PC = np.where((cluster.status['activity'][...,2].sum(1)>20) & (cluster.status['activity'][...,1].sum(1)<70))[0]
-        idx_PC = 2093#np.random.choice(idx_strong_PC)    ## 28,1081
+        idx_strong_PC = np.where((cluster.status['activity'][...,2].sum(1)>10) & (cluster.status['activity'][...,1].sum(1)<70))[0]
+        idx_PC = np.random.choice(idx_strong_PC)    ## 28,1081
         print(idx_PC)
         firingmap = cluster.stats['firingmap'][idx_PC,...]
         firingmap = gauss_smooth(firingmap,[0,3])
         firingmap = firingmap - np.nanmin(firingmap,1)[:,np.newaxis]
         # firingmap = firingmap / np.nanmax(firingmap,1)[:,np.newaxis]
         ax.imshow(firingmap,aspect='auto',origin='upper',cmap='jet',clim=[0,5])
-        ax.barh(range(nSes),-(cluster.status[idx_PC,:,2]*10.),left=-5,facecolor='r')
+        ax.barh(range(nSes),-(cluster.status['activity'][idx_PC,:,2]*10.),left=-5,facecolor='r')
         # idx_coding = np.where(cluster.status[idx_PC,:,2])[0]
         # ax.plot(-np.ones_like(idx_coding)*10,idx_coding,'ro')
         ax.set_xlim([-10,nbin])
@@ -1851,8 +1858,8 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
 
         SD = 1.96
-        s_bool = np.zeros(nSes,'bool')
-        s_bool[17:87] = True
+        s_bool = np.ones(nSes,'bool')
+        # s_bool[17:87] = True
         # s_bool[:] = True
         s_bool[~cluster.status['sessions']] = False
 
@@ -2372,7 +2379,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         #val_arr = np.linspace(-1,3,nSteps)
         #val_arr = np.append(np.linspace(0,0.2,nSteps-1),1)
         val_arr = [0.99,0.95,0.9,0.8,0.7,0.5,0.3,0.2,0.1,0.05]#[0.05,0.2,0.5,0.9,95]
-        print(val_arr)
+        # print(val_arr)
         SNR_thr = 2
         rval_thr = 0
         pm_thr = 0.05
@@ -2398,18 +2405,18 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             for (i,pm_thr) in enumerate(val_arr):
                 #print(pm_thr)
                 cluster.update_status(SNR_thr=SNR_thr,rval_thr=rval_thr,pm_thr=pm_thr,alpha=alpha,CI_thr=CI_thr,Bayes_thr=Bayes_thr)
-                cluster.compareSessions(n_processes=n_processes,reprocess=True)
+                cluster.compareSessions(n_processes=n_processes)
 
-                s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.meta['field_count_max'],cluster.meta['field_count_max']))
+                s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.params['field_count_max'],cluster.params['field_count_max']))
                 c_shifts = cluster.compare['pointer'].row
 
                 celltype = 'all'
                 if celltype == 'all':
-                    idx_celltype = cluster.status[c_shifts,s1_shifts,2]
+                    idx_celltype = cluster.status['activity'][c_shifts,s1_shifts,2]
                 if celltype == 'gate':
-                    idx_celltype = cluster.status[c_shifts,s1_shifts,3]
+                    idx_celltype = cluster.status['activity'][c_shifts,s1_shifts,3]
                 if celltype == 'reward':
-                    idx_celltype = cluster.status[c_shifts,s1_shifts,4]
+                    idx_celltype = cluster.status['activity'][c_shifts,s1_shifts,4]
 
                 if n_processes>1:
                     pool = get_context("spawn").Pool(n_processes)
@@ -2422,8 +2429,11 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
                 for (ds,r) in enumerate(res):
                     for pop in r.keys():
-                        for key in r[pop].keys():
-                            p[pop][key][i,ds,:] = r[pop][key]
+                        try:
+                            for key in r[pop].keys():
+                                p[pop][key][i,ds,:] = r[pop][key]
+                        except:
+                            pass
             cluster.stability = p
             t_end = time.time()
             print('done - time: %5.3g'%(t_end-t_start))
@@ -2507,22 +2517,22 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
         #D = 1-np.sqrt(np.sum((rA-1)**2))/nA**2
 
-        #KS_dist = np.zeros(cluster.meta['nSes'])
+        #KS_dist = np.zeros(cluster.data['nSes'])
 
-        dims = cluster.meta['dims']
-        #A_length = [cluster.meta['dims'][0]/nA,cluster.meta['dims'][1]/nA]
-        p_vals = np.zeros((cluster.meta['nSes'],4))
+        dims = cluster.params['dims']
+        #A_length = [cluster.params['dims'][0]/nA,cluster.params['dims'][1]/nA]
+        p_vals = np.zeros((cluster.data['nSes'],4))
 
         fig = plt.figure(figsize=(7,5),dpi=300)
-        for s0 in tqdm(range(cluster.meta['nSes'])):
+        for s0 in tqdm(range(cluster.data['nSes'])):
             #print(s)
             s = s0
-            com_silent = com_mean[cluster.status[cluster.status['clusters'],s,0],:]
-            com_active = com_mean[cluster.status[cluster.status['clusters'],s,1],:]
-            com_PCs = com_mean[np.any(cluster.status[cluster.status['clusters'],s,2:],-1),:]
+            com_silent = com_mean[cluster.status['activity'][cluster.status['clusters'],s,0],:]
+            com_active = com_mean[cluster.status['activity'][cluster.status['clusters'],s,1],:]
+            com_PCs = com_mean[np.any(cluster.status['activity'][cluster.status['clusters'],s,2:],-1),:]
 
-            n = cluster.sessions['rotation_normal'][s,:]
-            p = cluster.sessions['rotation_anchor'][s,:]
+            n = cluster.alignment['rotation_normal'][s,:]
+            p = cluster.alignment['rotation_anchor'][s,:]
 
             intercept = n.dot(p)/n[1]
             slope = -n[0]/n[1]
@@ -2607,7 +2617,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         #plt.plot(KS_dist)
 
         ax_p = plt.subplot(224)
-        ax_p.plot([0,cluster.meta['nSes']],[0.1,0.1],'k--')
+        ax_p.plot([0,cluster.data['nSes']],[0.1,0.1],'k--')
         ax_p.plot(np.where(cluster.status['sessions'])[0],p_vals[cluster.status['sessions'],0],'r')
         ax_p.plot(np.where(cluster.status['sessions'])[0],p_vals[cluster.status['sessions'],1],'b')
         #ax_p.plot(np.where(cluster.status['sessions'])[0],p_vals[cluster.status['sessions'],2],'--',color=[0.6,0.6,0.6])
@@ -2642,9 +2652,10 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         print('### plot dynamics of whole network ###')
 
         plt.figure()
-        for i,s in enumerate(range(20,30)):
-            pathLoad = os.path.join(cluster.meta['pathMouse'],'Session%02d/results_redetect.mat'%(s+1))
-            ld = loadmat(pathLoad,variable_names=['S'])
+        for i,s in enumerate(range(0,10)):
+            pathLoad = os.path.join(cluster.paths['sessions'][s],cluster.paths['fileNameCNMF'])
+            # ld = loadmat(pathLoad,variable_names=['S'])
+            ld = load_dict_from_hdf5(pathLoad)
 
             n_arr = cluster.matching['IDs'][cluster.status['activity'][:,s,1],s].astype('int')
             print(n_arr)
@@ -2734,7 +2745,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         maxSes = 10
         sig_theta = cluster.stability['all']['mean'][0,2]
 
-        trials = np.cumsum(cluster.sessions['trial_ct'])
+        trials = np.cumsum(cluster.behavior['trial_ct'])
         diff = {'t':        (cluster.para['t_measures'][np.newaxis,:]-cluster.para['t_measures'][:,np.newaxis]).astype('int'),
                 'nights':   ((cluster.para['t_measures'][np.newaxis,:]-cluster.para['t_measures'][:,np.newaxis]).astype('int')+10)//24,
                 's':        (np.arange(nSes)[np.newaxis,:] - np.arange(nSes)[:,np.newaxis]).astype('int'),
@@ -2747,10 +2758,10 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         s_bool[~cluster.status['sessions']] = False
 
         t_start = time.time()
-        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.meta['field_count_max'],cluster.meta['field_count_max']))
+        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.params['field_count_max'],cluster.params['field_count_max']))
         c_shifts = cluster.compare['pointer'].row
 
-        dT_shifts = cluster.para['t_measures'][s2_shifts]-cluster.para['t_measures'][s1_shifts]
+        dT_shifts = cluster.params['t_measures'][s2_shifts]-cluster.params['t_measures'][s1_shifts]
         nights_shifts = (dT_shifts+10)//24
 
         # print(diff)
@@ -2773,7 +2784,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
                     'PC':   np.zeros(len(key1_arr))*np.NaN,
                     'PF':   np.zeros(len(key1_arr))*np.NaN}
 
-            s1_shifts,s2_shifts,f1,f2 = np.unravel_index(compare['pointer'].col,(nSes,nSes,cluster.meta['field_count_max'],cluster.meta['field_count_max']))
+            s1_shifts,s2_shifts,f1,f2 = np.unravel_index(compare['pointer'].col,(nSes,nSes,cluster.params['field_count_max'],cluster.params['field_count_max']))
             c_shifts = compare['pointer'].row
             Ds = s2_shifts-s1_shifts
 
@@ -2797,12 +2808,12 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
                     for s1,s2 in zip(s1_arr,s2_arr):
                         if s_bool[s1] & s_bool[s2] & (s1!=s2):
-                            overlap = cluster.status[cluster.status['activity'][:,s1,1],s2,1].sum(0).astype('float')
+                            overlap = cluster.status['activity'][cluster.status['activity'][:,s1,1],s2,1].sum(0).astype('float')
                             N_ref['act'] = cluster.status['activity'][:,s1,1].sum(0)
                             tmp['act'].append(overlap/N_ref['act'])
 
-                            overlap_PC = cluster.status[cluster.status['activity'][:,s1,2],s2,2].sum(0).astype('float')
-                            N_ref['PC'] = cluster.status[cluster.status['activity'][:,s1,2],s2,1].sum(0)
+                            overlap_PC = cluster.status['activity'][cluster.status['activity'][:,s1,2],s2,2].sum(0).astype('float')
+                            N_ref['PC'] = cluster.status['activity'][cluster.status['activity'][:,s1,2],s2,1].sum(0)
                             tmp['PC'].append(overlap_PC/N_ref['PC'])
 
                             idx = np.where((s1_shifts==s1) & (s2_shifts==s2))[0]
@@ -2978,12 +2989,12 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         for ds in range(1,nSes):#min(nSes,30)):
             session_bool = np.where(np.pad(cluster.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(cluster.status['sessions'][:],(0,0),constant_values=False))[0]
             for s1 in session_bool:
-                overlap = cluster.status[cluster.status['activity'][:,s1,1],s1+ds,1].sum(0).astype('float')
+                overlap = cluster.status['activity'][cluster.status['activity'][:,s1,1],s1+ds,1].sum(0).astype('float')
                 N_ref = cluster.status['activity'][:,s1,1].sum(0)
                 p_rec['act'][ds,s1] = (overlap/N_ref)
 
-                overlap = cluster.status[cluster.status['activity'][:,s1,2],s1+ds,2].sum(0).astype('float')
-                N_ref = cluster.status[cluster.status['activity'][:,s1,2],s1+ds,1].sum(0)
+                overlap = cluster.status['activity'][cluster.status['activity'][:,s1,2],s1+ds,2].sum(0).astype('float')
+                N_ref = cluster.status['activity'][cluster.status['activity'][:,s1,2],s1+ds,1].sum(0)
                 p_rec['PC'][ds,s1] = (overlap/N_ref)
 
                 Ds = s2_shifts-s1_shifts
@@ -3184,8 +3195,8 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
 
         ### get place field max firing rate
-        #for c in range(cluster.meta['nC']):
-          #for s in range(cluster.meta['nSes']):
+        #for c in range(cluster.params['nC']):
+          #for s in range(cluster.data['nSes']):
 
         print('test field width as well')
         print('test peak firing rate as well')
@@ -3193,7 +3204,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         # s_bool[17:87] = True
         s_bool[0:15] = True
 
-        s1,s2,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(cluster.meta['nSes'],cluster.meta['nSes'],cluster.meta['field_count_max'],cluster.meta['field_count_max']))
+        s1,s2,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(cluster.data['nSes'],cluster.data['nSes'],cluster.params['field_count_max'],cluster.params['field_count_max']))
         idx_ds1 = np.where((s2-s1 == 1) & s_bool[s1] & s_bool[s2])[0]
 
         c_ds1 = cluster.compare['pointer'].row[idx_ds1]
@@ -3265,7 +3276,8 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         ax.legend(fontsize=10,loc='lower right')
 
         ax = plt.subplot(144)
-        key = 'oof_firingrate_adapt'
+        # key = 'oof_firingrate_adapt'
+        key = 'firingrate'
         nu_nPC = cluster.stats[key][idx_nPC]
         nu_stable = cluster.stats[key][c_stable,s1_stable]
         nu_instable = cluster.stats[key][idx_loosePC]
@@ -3377,7 +3389,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
                 remapping = np.zeros((nbin,nbin))
 
             for c in np.where(cluster.status['clusters'])[0]:
-                if cluster.status[c,s,2] & cluster.status[c,s+ds,2]:
+                if cluster.status['activity'][c,s,2] & cluster.status['activity'][c,s+ds,2]:
                     for f in np.where(cluster.fields['status'][c,s,:])[0]:
                         for ff in np.where(cluster.fields['status'][c,s+ds,:])[0]:
                             remapping[int(cluster.fields['location'][c,s,f,0]),:] += cluster.fields['p_x'][c,s+ds,ff,:]
@@ -3415,28 +3427,28 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             inCode = False
             for s in np.where(cluster.status['sessions'])[0]:
                 if inAct:
-                    if ~cluster.status[c,s,1]:
+                    if ~cluster.status['activity'][c,s,1]:
                         La = cluster.status['sessions'][s0_act:s].sum()
                         status_La[c,s0_act:s,0] = La
-                        status_La[c,s0_act:s,1] = cluster.status[c,s0_act:s,2].sum()
-                        if (cluster.status[c,s0_act:s,2].sum() / La)>highCode_thr:
+                        status_La[c,s0_act:s,1] = cluster.status['activity'][c,s0_act:s,2].sum()
+                        if (cluster.status['activity'][c,s0_act:s,2].sum() / La)>highCode_thr:
                             La_highCode[La] += 1
                         IPI_La[La] += 1
                         inAct=False
                 else:
-                    if cluster.status[c,s,1]:
+                    if cluster.status['activity'][c,s,1]:
                         s0_act = s
                         inAct = True
                         IPI_La_start[c,s] = True
 
                 if inCode:
-                    if ~cluster.status[c,s,2]:
+                    if ~cluster.status['activity'][c,s,2]:
                         Lb = cluster.status['sessions'][s0_code:s].sum()
                         status_Lb[c,s0_code:s] = Lb
                         IPI_Lb[Lb] += 1
                         inCode=False
                 else:
-                    if cluster.status[c,s,2]:
+                    if cluster.status['activity'][c,s,2]:
                         s0_code = s
                         inCode = True
                         IPI_Lb_start[c,s] = True
@@ -3444,8 +3456,8 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             if inAct:
                 La = cluster.status['sessions'][s0_act:s+1].sum()
                 status_La[c,s0_act:s+1,0] = La
-                status_La[c,s0_act:s+1,1] = cluster.status[c,s0_act:s+1,2].sum()
-                if (cluster.status[c,s0_act:s,2].sum() / La)>highCode_thr:
+                status_La[c,s0_act:s+1,1] = cluster.status['activity'][c,s0_act:s+1,2].sum()
+                if (cluster.status['activity'][c,s0_act:s,2].sum() / La)>highCode_thr:
                     La_highCode[La] += 1
                 IPI_La[La] += 1
             if inCode:
@@ -3480,7 +3492,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         status_stable = np.zeros_like(cluster.status['activity'][...,2],'int')
         for c in range(nC):
             for s in np.where(cluster.status['sessions'])[0]:
-                if cluster.status[c,s,2]:
+                if cluster.status['activity'][c,s,2]:
                     ds_ref = np.inf
                     idxes = (idx_fields[0]==c) & (idx_fields[1]<s)
                     idx_s = idx_fields[1][idxes]
@@ -3536,12 +3548,12 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         c_pb = cluster.status['activity'][...,2].sum(1)/cluster.status['activity'][...,1].sum(1)
 
         # print(c_pb[cluster.status['clusters']])
-        y0,res,rank,tmp = np.linalg.lstsq(cluster.status[cluster.status['clusters'],:,1],c_pb[cluster.status['clusters']])
+        y0,res,rank,tmp = np.linalg.lstsq(cluster.status['activity'][cluster.status['clusters'],:,1],c_pb[cluster.status['clusters']])
         # print(y0)
 
         # ax.plot(c_pb[cluster.status['clusters']])
         # ax.plot(cluster.status['activity'][...,1].sum(1)+0.5*np.random.rand(nC),c_pb+0.01*np.random.rand(nC),'r.',markersize=1.5,markeredgecolor='none')
-        pb = np.nanmean(cluster.status[cluster.status['clusters'],:,2].sum(0)/cluster.status[cluster.status['clusters'],:,1].sum(0))
+        pb = np.nanmean(cluster.status['activity'][cluster.status['clusters'],:,2].sum(0)/cluster.status['activity'][cluster.status['clusters'],:,1].sum(0))
 
 
         ax.plot([0,80],[pb,pb],'k--')
@@ -3937,13 +3949,13 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         # idx_other_certain = (cluster.stats['r_values'] > 0) & idx_pm
 
         border_bool = np.ones((nC),'bool')
-        thr_high = cluster.meta['dims'] + cluster.alignment['shift'][cluster.status['sessions'],:].min(0)
+        thr_high = cluster.params['dims'] + cluster.alignment['shift'][cluster.status['sessions'],:].min(0)
         thr_low = cluster.alignment['shift'][cluster.status['sessions'],:].max(0)
         for i in range(2):
-            idx_remove_low = cluster.matching['com'][:,cluster.status['sessions'],i] < (thr_low[i]+cluster.meta['border_margin'])
+            idx_remove_low = cluster.matching['com'][:,cluster.status['sessions'],i] < (thr_low[i]+cluster.params['border_margin'])
             border_bool[np.any(idx_remove_low,1)] = False
 
-            idx_remove_high = cluster.matching['com'][:,cluster.status['sessions'],i] > (thr_high[i]-cluster.meta['border_margin'])
+            idx_remove_high = cluster.matching['com'][:,cluster.status['sessions'],i] > (thr_high[i]-cluster.params['border_margin'])
             border_bool[np.any(idx_remove_high,1)] = False
 
         r_thr = 0.5
@@ -4173,12 +4185,14 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             t_arr = np.linspace(0,8989/15,8989)
 
             s = 1
-            pathLoad = pathcat([cluster.meta['pathMouse'],'Session%02d/results_redetect.mat'%(s+1)])
-            ld = loadmat(pathLoad,variable_names=['C','A','SNR','CNN'],squeeze_me=True)
+            pathLoad = os.path.join(cluster.paths['sessions'][s+1],cluster.paths['fileNameCNMF'])
+            ld = load_dict_from_hdf5(pathLoad)
+            # ld = loadmat(pathLoad,variable_names=['C','A','SNR','CNN'],squeeze_me=True)
+            
             offset = 0
             for i in tqdm(range(nSteps-1)):
                 # idx_SNR = np.where((cluster.stats['SNR'][:,s] >= SNR_arr[i]) & (cluster.stats['SNR'][:,s] < SNR_arr[i+1]))
-                idx_SNR = np.where((ld['SNR'] >= SNR_arr[i]) & (ld['SNR'] < SNR_arr[i+1]))
+                idx_SNR = np.where((ld['SNR_comp'] >= SNR_arr[i]) & (ld['SNR_comp'] < SNR_arr[i+1]))
                 n_idx = len(idx_SNR[0])
                 if n_idx > 0:
                     for j in np.random.choice(n_idx,min(n_idx,3),replace=False):
@@ -4191,7 +4205,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
                         offset += 1#= (nSteps-i)
 
                 offset += 1
-            ax.set_yticks(np.linspace(1,offset-3,nSteps-1))
+            ax.set_yticks(np.linspace(1,offset-3,nSteps))
             ax.set_yticklabels(['$\\approx %d$'%i for i in SNR_arr])
             ax.set_ylabel('SNR',rotation='horizontal',labelpad=-20,y=1.)
             ax.set_xlabel('time [s]')
@@ -4204,7 +4218,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             acom = com(ld['A'],512,512)
             for i in tqdm(range(nSteps-1)):
                 # idx_CNN = np.where((cluster.stats['CNN'][:,s] >= CNN_arr[i]) & (cluster.stats['CNN'][:,s] < CNN_arr[i+1]))
-                idx_CNN = np.where((ld['CNN'] >= CNN_arr[i]) & (ld['CNN'] < CNN_arr[i+1]) & ((ld['A']>0).sum(0)>50) & np.all(acom>10,1) & np.all(acom<500,1))
+                idx_CNN = np.where((ld['cnn_preds'] >= CNN_arr[i]) & (ld['cnn_preds'] < CNN_arr[i+1]) & ((ld['A']>0).sum(0)>50) & np.all(acom>10,1) & np.all(acom<500,1))
                 n_idx = len(idx_CNN[0])
                 # print(idx_CNN)
                 if n_idx > 0:
@@ -4231,7 +4245,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
                         ax.set_xlim(x_lims)
                         ax.set_ylim(y_lims)
                         # ax.text(x_ref,y_ref+5,'$CNN = %.3f$'%cluster.stats['CNN'][c,s],fontsize=8)
-                        ax.text(x_ref+2,y_ref+12,'$%.3f$'%ld['CNN'][n],fontsize=8)
+                        ax.text(x_ref+2,y_ref+12,'$%.3f$'%ld['cnn_preds'][n],fontsize=8)
                         pl_dat.remove_frame(ax)
                         ax.set_xticks([])
                         ax.set_yticks([])
@@ -4241,16 +4255,22 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             if sv:
                 pl_dat.save_fig('neuron_stat_examples')
 
-        if False:
+        if True:
             s = 1
             margin = 20
             nSteps = 9
-            pathLoad = pathcat([cluster.meta['pathMouse'],'Session%02d/results_redetect.mat'%(s)])
-            ld1 = loadmat(pathLoad,variable_names=['A'])
-            pathLoad = pathcat([cluster.meta['pathMouse'],'Session%02d/results_redetect.mat'%(s+1)])
-            ld2 = loadmat(pathLoad,variable_names=['A'])
+            pathLoad = os.path.join(cluster.paths['sessions'][s],cluster.paths['fileNameCNMF'])
+            ld1 = load_dict_from_hdf5(pathLoad)
+            
+            pathLoad = os.path.join(cluster.paths['sessions'][s+1],cluster.paths['fileNameCNMF'])
+            ld2 = load_dict_from_hdf5(pathLoad)
+            
+            # pathLoad = pathcat([cluster.params['pathMouse'],'Session%02d/results_redetect.mat'%(s)])
+            # ld1 = loadmat(pathLoad,variable_names=['A'])
+            # pathLoad = pathcat([cluster.params['pathMouse'],'Session%02d/results_redetect.mat'%(s+1)])
+            # ld2 = loadmat(pathLoad,variable_names=['A'])
 
-            x_grid, y_grid = np.meshgrid(np.arange(0., cluster.meta['dims'][0]).astype(np.float32), np.arange(0., cluster.meta['dims'][1]).astype(np.float32))
+            x_grid, y_grid = np.meshgrid(np.arange(0., cluster.params['dims'][0]).astype(np.float32), np.arange(0., cluster.params['dims'][1]).astype(np.float32))
             x_remap = (x_grid - \
                         cluster.alignment['shift'][s-1,0] + cluster.alignment['shift'][s,0] + \
                         cluster.alignment['flow'][s-1,0,:,:] - cluster.alignment['flow'][s,0,:,:]).astype('float32')
@@ -4333,7 +4353,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             ### assign bin-specific remapping to rows, active nPC (nbins+1) & silent (nbins+2)
             for c in np.where(cluster.status['activity'][:,s,2])[0]:
                 ## find belonging fields
-                if cluster.status[c,s+ds,2]:
+                if cluster.status['activity'][c,s+ds,2]:
                     d = np.abs(np.mod(cluster.fields['location'][c,s,:,0][:,np.newaxis] - cluster.fields['location'][c,s+ds,:,0]+nbin/2,nbin)-nbin/2)
                     d[np.isnan(d)] = nbin
                     f1,f2 = sp.optimize.linear_sum_assignment(d)
@@ -4347,23 +4367,23 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
         p_rec_loc = np.zeros((n_int,nbin,nSes))*np.NaN
 
-        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.meta['field_count_max'],cluster.meta['field_count_max']))
+        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.params['field_count_max'],cluster.params['field_count_max']))
         c_shifts = cluster.compare['pointer'].row
         sig_theta = cluster.stability['all']['mean'][0,2]
         print(sig_theta)
         di = 3
-
+        SD = 2
         for ds in range(1,min(nSes,21)):
             # session_bool = np.where(np.pad(cluster.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(cluster.status['sessions'][:],(0,0),constant_values=False))[0]
 
             ### somehow condition this on the location
             # for s1 in session_bool:
-            #     overlap = cluster.status[cluster.status['activity'][:,s1,1],s1+ds,1].sum(0).astype('float')
+            #     overlap = cluster.status['activity'][cluster.status['activity'][:,s1,1],s1+ds,1].sum(0).astype('float')
             #     N_ref = cluster.status['activity'][:,s1,1].sum(0)
             #     p_rec['act'][ds,s1] = (overlap/N_ref)
             #
-            #     overlap = cluster.status[cluster.status['activity'][:,s1,2],s1+ds,2].sum(0).astype('float')
-            #     N_ref = cluster.status[cluster.status['activity'][:,s1,2],s1+ds,1].sum(0)
+            #     overlap = cluster.status['activity'][cluster.status['activity'][:,s1,2],s1+ds,2].sum(0).astype('float')
+            #     N_ref = cluster.status['activity'][cluster.status['activity'][:,s1,2],s1+ds,1].sum(0)
             #     p_rec['PC'][ds,s1] = (overlap/N_ref)
 
             Ds = s2_shifts-s1_shifts
@@ -4390,44 +4410,44 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
         plt.figure(figsize=(7,5),dpi=pl_dat.sv_opt['dpi'])
 
-        gate = np.any(cluster.para['zone_mask']['gate'])
+        gate = np.any(cluster.params['zone_mask']['gate'])
         if gate:
             ax_GT = plt.axes([0.4,0.8,0.25,0.175])
-            ax_GT.bar(range(nbin),1000.*cluster.para['zone_mask']['gate'],width=1,facecolor='tab:green',alpha=0.3)
+            ax_GT.bar(range(nbin),1000.*cluster.params['zone_mask']['gate'],width=1,facecolor='tab:green',alpha=0.3)
             ax_GT.set_ylim([0,0.1])
             pl_dat.remove_frame(ax_GT,['top','right'])
 
         ax_RW = plt.axes([0.1,0.8,0.25,0.175])
-        ax_RW.bar(range(nbin),1000.*cluster.para['zone_mask']['reward'],width=1,facecolor='tab:red',alpha=0.3)
+        ax_RW.bar(range(nbin),1000.*cluster.params['zone_mask']['reward'],width=1,facecolor='tab:red',alpha=0.3)
         ax_RW.set_ylim([0,0.1])
         pl_dat.remove_frame(ax_RW,['top','right'])
         ax_RW.set_xlabel('position [bins]')
 
         ax_nRnG = plt.axes([0.7,0.8,0.25,0.175])
-        ax_nRnG.bar(range(nbin),1000.*cluster.para['zone_mask']['others'],width=1,facecolor='tab:blue',alpha=0.3)
+        ax_nRnG.bar(range(nbin),1000.*cluster.params['zone_mask']['others'],width=1,facecolor='tab:blue',alpha=0.3)
         ax_nRnG.set_ylim([0,0.1])
         pl_dat.remove_frame(ax_nRnG,['top','right'])
         ax_nRnG.set_xlabel('position [bins]')
 
         for j in range(n_int):
             col = [1,0.2*j,0.2*j]
-            occ = loc_stab_p[s_arr[j]:s_arr[j+1],cluster.para['zone_mask']['reward'],:].sum(0).sum(0)
+            occ = loc_stab_p[s_arr[j]:s_arr[j+1],cluster.params['zone_mask']['reward'],:].sum(0).sum(0)
             occ /= occ.sum()
             ax_RW.plot(range(nbin),occ,'-',color=col,label='Sessions %d-%d'%(s_arr[j]+1,s_arr[j+1]))
-            # ax.bar(range(nbin),loc_stab[:20,cluster.para['zone_mask']['reward'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
+            # ax.bar(range(nbin),loc_stab[:20,cluster.params['zone_mask']['reward'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
 
             col = [0.2*j,0.2*j,1]
-            occ = loc_stab_p[s_arr[j]:s_arr[j+1],cluster.para['zone_mask']['others'],:].sum(0).sum(0)
+            occ = loc_stab_p[s_arr[j]:s_arr[j+1],cluster.params['zone_mask']['others'],:].sum(0).sum(0)
             occ /= occ.sum()
             ax_nRnG.plot(range(nbin),occ,'-',color=col)
-            # ax.bar(range(nbin),loc_stab[:20,cluster.para['zone_mask']['others'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
+            # ax.bar(range(nbin),loc_stab[:20,cluster.params['zone_mask']['others'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
 
             if gate:
                 col = [0.2*j,0.8,0.2*j]
-                occ = loc_stab_p[s_arr[j]:s_arr[j+1],cluster.para['zone_mask']['gate'],:].sum(0).sum(0)
+                occ = loc_stab_p[s_arr[j]:s_arr[j+1],cluster.params['zone_mask']['gate'],:].sum(0).sum(0)
                 occ /= occ.sum()
                 ax_GT.plot(range(nbin),occ,'-',color=col)
-                # ax.bar(range(nbin),loc_stab[:20,cluster.para['zone_mask']['others'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
+                # ax.bar(range(nbin),loc_stab[:20,cluster.params['zone_mask']['others'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
         ax_RW.legend(fontsize=6,loc='upper left',bbox_to_anchor=[0.05,1.1])
         props = dict(boxstyle='round', facecolor='w', alpha=0.8)
 
@@ -4466,8 +4486,8 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         ds_max = 1
 
         # need session average, not cluster average
-        # fields = np.any(cluster.status_fields[cluster.status['clusters'],...] & (cluster.fields['location'][cluster.status['clusters'],...,0]>cluster.para['zone_idx']['reward'][0]) & (cluster.fields['location'][cluster.status['clusters'],...,0]<cluster.para['zone_idx']['reward'][1]),2)
-        fields = np.any(cluster.status_fields[cluster.status['clusters'],...] & (cluster.fields['location'][cluster.status['clusters'],...,0]<cluster.para['zone_idx']['reward'][0]) | (cluster.fields['location'][cluster.status['clusters'],...,0]>cluster.para['zone_idx']['reward'][1]),2)
+        # fields = np.any(cluster.status_fields[cluster.status['clusters'],...] & (cluster.fields['location'][cluster.status['clusters'],...,0]>cluster.params['zone_idx']['reward'][0]) & (cluster.fields['location'][cluster.status['clusters'],...,0]<cluster.params['zone_idx']['reward'][1]),2)
+        fields = np.any(cluster.status_fields[cluster.status['clusters'],...] & (cluster.fields['location'][cluster.status['clusters'],...,0]<cluster.params['zone_idx']['reward'][0]) | (cluster.fields['location'][cluster.status['clusters'],...,0]>cluster.params['zone_idx']['reward'][1]),2)
 
         ax = plt.axes([0.7,0.1,0.25,0.1])
         ax.plot(gauss_smooth(cluster.stats['p_post_s']['act']['act'][:,1,0],1),'k')
@@ -4486,7 +4506,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         ds = 1
         session_bool = np.where(np.pad(cluster.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(cluster.status['sessions'][:],(0,0),constant_values=False))[0]
 
-        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.meta['field_count_max'],cluster.meta['field_count_max']))
+        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.params['field_count_max'],cluster.params['field_count_max']))
         c_shifts = cluster.compare['pointer'].row
         sig = 6
         di = 3
@@ -4514,9 +4534,9 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
         plt.subplot(212)
         ## find location specific stabilization
-        RW_stab = np.nanmean(p_rec_loc[:,cluster.para['zone_mask']['reward']],1)
+        RW_stab = np.nanmean(p_rec_loc[:,cluster.params['zone_mask']['reward']],1)
         plt.plot(gauss_smooth(RW_stab,1),color='tab:red')
-        non_start = np.copy(cluster.para['zone_mask']['others'])
+        non_start = np.copy(cluster.params['zone_mask']['others'])
         non_start[:13] = False
         nRnG_stab = np.nanmean(p_rec_loc[:,non_start],1)
         plt.plot(gauss_smooth(nRnG_stab,1),color='tab:blue')
@@ -4644,7 +4664,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         p_rec_loc = np.zeros((n_int,nbin,ds_max))*np.NaN
         N_rec_loc = np.zeros((n_int,nbin,ds_max))
 
-        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.meta['field_count_max'],cluster.meta['field_count_max']))
+        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.params['field_count_max'],cluster.params['field_count_max']))
         c_shifts = cluster.compare['pointer'].row
 
         sig_theta = cluster.stability['all']['mean'][0,2]
@@ -4790,7 +4810,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
                         idx = np.zeros(nbin,'bool')
                         idx[max(0,i-di):min(nbin+1,i+di)] = True
 
-                        idx_cells = cluster.status[cluster.status['clusters'],s,2]
+                        idx_cells = cluster.status['activity'][cluster.status['clusters'],s,2]
                         corr[i] = np.ma.corrcoef(fmap[idx_cells,s,:][:,idx].mean(-1),fmap[idx_cells,s+ds,:][:,idx].mean(-1))[0,1]
 
 
@@ -4810,7 +4830,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
             fmap = gauss_smooth(cluster.stats['firingmap'],(0,0,2))
             corr = np.zeros((nC,nSes,nSes))*np.NaN
-            for ds in tqdm(range(1,80)):
+            for ds in tqdm(range(1,30)):
                 session_bool = np.where(np.pad(cluster.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(cluster.status['sessions'][:],(0,0),constant_values=False))[0]
                 for s in np.where(session_bool)[0]:
                     for n in np.where(cluster.status['activity'][:,s,2] & cluster.status['activity'][:,s+ds,2])[0]:
@@ -4885,7 +4905,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         # s_arr += np.where(cluster.status['sessions'])[0][0]
         for i in range(len(s_arr)):
             col = [0.7-0.35*i,0.7-0.35*i,0.7-0.35*i]
-            ax_im.annotate(s='',xy=(s_arr[i],100),xytext=(s_arr[i],110),fontsize=6,annotation_clip=False,arrowprops=dict(arrowstyle='->',color=col))
+            ax_im.annotate(text='',xy=(s_arr[i],100),xytext=(s_arr[i],110),fontsize=6,annotation_clip=False,arrowprops=dict(arrowstyle='->',color=col))
             # ax_im.annotate(s='',xy=(s_arr[i+1]-1,100),xytext=(s_arr[i+1]-1,110),fontsize=6,annotation_clip=False,arrowprops=dict(arrowstyle='->',color=col))
 
         ax.plot(np.nanmean(fields[:,1:15]/fields[:,1:15].max(0),1),color='k')
@@ -4968,7 +4988,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         # plt.tight_layout()
 
         # ax = plt.axes([0.6,0.1,0.35,0.2])
-        # s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.meta['field_count_max'],cluster.meta['field_count_max']))
+        # s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.params['field_count_max'],cluster.params['field_count_max']))
         # c_shifts = cluster.compare['pointer'].row
         #
         # Ds = s2_shifts-s1_shifts
@@ -5032,7 +5052,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         ax = plt.subplot(111)
         pl_dat.add_number(fig,ax,order=1)
         # print(fields.sum(0))
-        # print(fields[cluster.para['zone_mask']['reward'],:],0)
+        # print(fields[cluster.params['zone_mask']['reward'],:],0)
         ax.plot(gauss_smooth(density['reward'],1),color='tab:red')
         ax.plot(gauss_smooth(density['gate'],1),color='tab:green')
         ax.plot(gauss_smooth(density['others'],1),color='tab:blue')
@@ -5115,9 +5135,9 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
             idx_loc = np.where(cluster.status_fields[c,s,:])[0]
 
-            corr[c,s] = np.corrcoef(cluster.fields['trial_act'][c,s,idx_loc[0],:cluster.sessions['trial_ct'][s]],cluster.fields['trial_act'][c,s,idx_loc[1],:cluster.sessions['trial_ct'][s]])[0,1]
+            corr[c,s] = np.corrcoef(cluster.fields['trial_act'][c,s,idx_loc[0],:cluster.behavior['trial_ct'][s]],cluster.fields['trial_act'][c,s,idx_loc[1],:cluster.behavior['trial_ct'][s]])[0,1]
 
-            overlap[c,s] = (cluster.fields['trial_act'][c,s,idx_loc[0],:cluster.sessions['trial_ct'][s]] & cluster.fields['trial_act'][c,s,idx_loc[1],:cluster.sessions['trial_ct'][s]]).sum()
+            overlap[c,s] = (cluster.fields['trial_act'][c,s,idx_loc[0],:cluster.behavior['trial_ct'][s]] & cluster.fields['trial_act'][c,s,idx_loc[1],:cluster.behavior['trial_ct'][s]]).sum()
 
         fig = plt.figure(figsize=(7,5),dpi=pl_dat.sv_opt['dpi'])
         ax = plt.axes([0.1,0.75,0.35,0.175])
@@ -5159,7 +5179,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         ax3.set_yticks([])
 
         ### plot "proper" 2-field
-        idx = np.where(dLoc>30)
+        idx = np.where(dLoc>10)
         i = np.random.randint(len(idx[0]))
         c = idx[0][i]
         s = idx[1][i]
@@ -5168,7 +5188,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
         ax_fmap = plt.axes([0.1,0.4,0.35,0.15])
         pl_dat.add_number(fig,ax_fmap,order=3)
-        ax_fmap.bar(np.linspace(1,100,100),gauss_smooth(cluster.stats['firingmap'][c,s,:],1),width=1,facecolor='k')
+        ax_fmap.bar(np.linspace(1,cluster.data['nbin'],cluster.data['nbin']),gauss_smooth(cluster.stats['firingmap'][c,s,:],1),width=1,facecolor='k')
         ax_fmap.set_ylabel('$\\bar{\\nu}$')
 
         loc = cluster.fields['location'][c,s,cluster.status_fields[c,s,:],0]
@@ -5179,7 +5199,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         col_arr = ['tab:green','tab:blue']
         for i,f in enumerate(idx_loc):
             ax_fmap.plot(loc[i],1,'v',color=col_arr[i],markersize=5)
-            ax_trial.bar(range(cluster.sessions['trial_ct'][s]),cluster.fields['trial_act'][c,s,f,:cluster.sessions['trial_ct'][s]],bottom=i,color=col_arr[i],alpha=0.5)
+            ax_trial.bar(range(cluster.behavior['trial_ct'][s]),cluster.fields['trial_act'][c,s,f,:cluster.behavior['trial_ct'][s]],bottom=i,color=col_arr[i],alpha=0.5)
 
         ax_fmap.arrow(x=loc.min(),y=ax_fmap.get_ylim()[1]*0.95,dx=loc.max()-loc.min(),dy=0,shape='full',color='tab:orange',width=0.02,head_width=0.4,head_length=2,length_includes_head=True)#"$\Delta \\theta$",
         ax_fmap.arrow(x=loc.max(),y=ax_fmap.get_ylim()[1]*0.95,dx=loc.min()-loc.max(),dy=0,shape='full',color='tab:orange',width=0.02,head_width=0.4,head_length=2,length_includes_head=True)#"$\Delta \\theta$",
@@ -5193,7 +5213,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         ax_trial.text(-10,1.2,s='$c_a=%.2f$'%corr[c,s],fontsize=6)
 
         ### plot "improper" 2-field
-        idx = np.where(dLoc<20)
+        idx = np.where(dLoc<10)
         i = np.random.randint(len(idx[0]))
         c = idx[0][i]
         s = idx[1][i]
@@ -5202,7 +5222,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
         ax_fmap = plt.axes([0.1,0.1,0.35,0.15])
         pl_dat.add_number(fig,ax_fmap,order=4)
-        ax_fmap.bar(np.linspace(1,100,100),gauss_smooth(cluster.stats['firingmap'][c,s,:],1),width=1,facecolor='k')
+        ax_fmap.bar(np.linspace(1,cluster.data['nbin'],cluster.data['nbin']),gauss_smooth(cluster.stats['firingmap'][c,s,:],1),width=1,facecolor='k')
         pl_dat.remove_frame(ax_fmap,['top','right'])
         ax_fmap.set_ylabel('$\\bar{\\nu}$')
         ax_fmap.set_xlabel('position [bins]')
@@ -5213,7 +5233,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         for i,f in enumerate(idx_loc):
 
             ax_fmap.plot(loc[i],1,'v',color=col_arr[i],markersize=5)
-            ax_trial.bar(range(cluster.sessions['trial_ct'][s]),cluster.fields['trial_act'][c,s,f,:cluster.sessions['trial_ct'][s]],bottom=i,color=col_arr[i],alpha=0.5)
+            ax_trial.bar(range(cluster.behavior['trial_ct'][s]),cluster.fields['trial_act'][c,s,f,:cluster.behavior['trial_ct'][s]],bottom=i,color=col_arr[i],alpha=0.5)
 
         ax_fmap.arrow(x=loc.min(),y=ax_fmap.get_ylim()[1]*0.95,dx=loc.max()-loc.min(),dy=0,shape='full',color='tab:orange',width=0.015,head_width=0.2,head_length=2,length_includes_head=True)#"$\Delta \\theta$",
         ax_fmap.arrow(x=loc.max(),y=ax_fmap.get_ylim()[1]*0.95,dx=loc.min()-loc.max(),dy=0,shape='full',color='tab:orange',width=0.015,head_width=0.2,head_length=2,length_includes_head=True)#"$\Delta \\theta$",
@@ -5273,7 +5293,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         # s_arr += np.where(cluster.status['sessions'])[0][0]
         for i in range(len(s_arr)):
             col = [0.8-0.2*i,0.8-0.2*i,0.8-0.2*i]
-            ax_im.annotate(s='',xy=(s_arr[i],100),xytext=(s_arr[i],110),fontsize=6,annotation_clip=False,arrowprops=dict(arrowstyle='->',color=col))
+            ax_im.annotate(text='',xy=(s_arr[i],100),xytext=(s_arr[i],110),fontsize=6,annotation_clip=False,arrowprops=dict(arrowstyle='->',color=col))
             # ax_im.annotate(s='',xy=(s_arr[i+1]-1,100),xytext=(s_arr[i+1]-1,110),fontsize=6,annotation_clip=False,arrowprops=dict(arrowstyle='->',color=col))
 
             ax.plot(np.nanmean(fields[:,s_arr2[i]:s_arr2[i+1]],1),color=col)
@@ -5324,26 +5344,28 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         oof_fr = np.zeros((nSes,2,3))*np.NaN
         rel = np.zeros((nSes,3))*np.NaN
         for i,s in enumerate(np.where(cluster.status['sessions'])[0]):
-            RW_rec[s] = cluster.performance[s]['trials']['RW_reception'].mean()
-            slowing[s] = cluster.performance[s]['trials']['slowDown'].mean()
-            idx_fields = np.where(cluster.status_fields[:,s,:])
-
+            try:
+                RW_rec[s] = cluster.behavior['performance'][s]['RW_reception'].mean()
+                slowing[s] = cluster.behavior['performance'][s]['slowDown'].mean()
+                idx_fields = np.where(cluster.status_fields[:,s,:])
+            except:
+                pass
             sig[s,0] = cluster.fields['width'][idx_fields[0],s,idx_fields[1]].mean()
             sig[s,1:] = np.percentile(cluster.fields['width'][idx_fields[0],s,idx_fields[1]],[5,95])
 
-            if_fr[s,0] = cluster.stats['if_firingrate_adapt'][idx_fields[0],s,idx_fields[1]].mean()
-            if_fr[s,1:] = np.percentile(cluster.stats['if_firingrate_adapt'][idx_fields[0],s,idx_fields[1]],[5,95])
+            # if_fr[s,0] = cluster.stats['if_firingrate_adapt'][idx_fields[0],s,idx_fields[1]].mean()
+            # if_fr[s,1:] = np.percentile(cluster.stats['if_firingrate_adapt'][idx_fields[0],s,idx_fields[1]],[5,95])
 
             rel[s,0] = cluster.fields['reliability'][idx_fields[0],s,idx_fields[1]].mean()
             rel[s,1:] = np.percentile(cluster.fields['reliability'][idx_fields[0],s,idx_fields[1]],[5,95])
 
-            oof_fr[s,0,0] = cluster.stats['oof_firingrate_adapt'][cluster.status['activity'][:,s,1]&(~cluster.status['activity'][:,s,2]),s].mean()
-            oof_fr[s,0,1:] = np.percentile(cluster.stats['oof_firingrate_adapt'][cluster.status['activity'][:,s,1]&(~cluster.status['activity'][:,s,2]),s],[5,95])
-            oof_fr[s,1,0] = cluster.stats['oof_firingrate_adapt'][cluster.status['activity'][:,s,2],s].mean()
-            oof_fr[s,1,1:] = np.percentile(cluster.stats['oof_firingrate_adapt'][cluster.status['activity'][:,s,2],s],[5,95])
+            # oof_fr[s,0,0] = cluster.stats['oof_firingrate_adapt'][cluster.status['activity'][:,s,1]&(~cluster.status['activity'][:,s,2]),s].mean()
+            # oof_fr[s,0,1:] = np.percentile(cluster.stats['oof_firingrate_adapt'][cluster.status['activity'][:,s,1]&(~cluster.status['activity'][:,s,2]),s],[5,95])
+            # oof_fr[s,1,0] = cluster.stats['oof_firingrate_adapt'][cluster.status['activity'][:,s,2],s].mean()
+            # oof_fr[s,1,1:] = np.percentile(cluster.stats['oof_firingrate_adapt'][cluster.status['activity'][:,s,2],s],[5,95])
 
         ax = plt.axes([0.65,0.85,0.3,0.1])
-        ax.plot(np.where(cluster.status['sessions'])[0],cluster.status['activity'][:,cluster.status['sessions'],2].sum(0)/cluster.sessions['time_active'][cluster.status['sessions']],'k.',markersize=2)
+        ax.plot(np.where(cluster.status['sessions'])[0],cluster.status['activity'][:,cluster.status['sessions'],2].sum(0)/cluster.behavior['time_active'][cluster.status['sessions']],'k.',markersize=2)
         pl_dat.remove_frame(ax,['top','right'])
         ax.set_ylabel('$t_{active}$')
         ax.set_xticklabels([])
@@ -5577,9 +5599,9 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         RW_reception = np.zeros(nSes)*np.NaN
         slowing = np.zeros(nSes)*np.NaN
         for s in range(nSes):
-            if s in cluster.performance.keys():
-                RW_reception[s] = cluster.performance[s]['trials']['RW_reception'].mean()
-                slowing[s] = cluster.performance[s]['trials']['slowDown'].mean()
+            if s in cluster.behavior['performance'].keys():
+                RW_reception[s] = cluster.behavior['performance'][s]['RW_reception'].mean()
+                slowing[s] = cluster.behavior['performance'][s]['slowDown'].mean()
 
         perf = slowing#cluster.sessions['time_active']/600
         plt.figure(figsize=(7,5),dpi=300)
@@ -5629,7 +5651,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
         s_range = 10
         ds = 1
-        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.meta['field_count_max'],cluster.meta['field_count_max']))
+        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.params['field_count_max'],cluster.params['field_count_max']))
         c_shifts = cluster.compare['pointer'].row
 
         Ds = s2_shifts-s1_shifts
@@ -5682,7 +5704,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
             ### load data from text-file
             # find txt file:
-            pathSession = os.path.join(cluster.meta['pathMouse'],'Session%02d'%(s+1))
+            pathSession = cluster.paths['sessions'][s+1]
             for file in os.listdir(pathSession):
               if file.endswith(".txt"):
                   pathBH = os.path.join(pathSession, file)
@@ -5762,7 +5784,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         # rw2_ct = cluster.sessions['got_reward'].sum(1)
         PC_ct = cluster.status['activity'][...,2].sum(0)
         RW_ct = cluster.status['activity'][...,4].sum(0)
-        t_act = cluster.sessions['time_active']
+        t_act = cluster.behavior['time_active']
 
         s_bool = np.zeros(nSes,'bool')
         s_bool[17:87] = True
@@ -5770,14 +5792,14 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         s_bool[~cluster.status['sessions']] = False
         s=52
 
-        pathSession = os.path.join(cluster.meta['pathMouse'],'Session%02d'%(s))
+        pathSession = cluster.paths['sessions'][s]
         data = define_active(pathSession)
-        dataPerf = get_performance(cluster.meta['pathMouse'],[s],cluster.session_data['RW_pos'][s,:],cluster.session_data['delay'][s],plot_bool=False)
+        dataPerf = get_performance(cluster.params['pathMouse'],[s],cluster.session_data['RW_pos'][s,:],cluster.session_data['delay'][s],plot_bool=False)
 
         RW = np.zeros((nSes,2))*np.NaN
         for s in np.where(cluster.status['sessions'])[0]:
             RW[s,0] = cluster.performance[s]['trials']['RW_reception'].sum()
-            RW[s,1] = RW[s,0]/cluster.sessions['trial_ct'][s]
+            RW[s,1] = RW[s,0]/cluster.behavior['trial_ct'][s]
 
             # t_active = data['active'].sum()/15
             # print(t_active,t_act[s])
@@ -6062,7 +6084,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         loc_vel = np.zeros((nSes,nbin,2))*np.NaN
         for s in range(nSes):
             try:
-                pathSession = os.path.join(cluster.meta['pathMouse'],'Session%02d'%(s+1))
+                pathSession = os.path.join(cluster.params['pathMouse'],'Session%02d'%(s+1))
                 for file in os.listdir(pathSession):
                   if file.endswith(".txt"):
                       pathBH = os.path.join(pathSession, file)
@@ -6124,7 +6146,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             idx_s = idx[1] == s
             c = idx[0][idx_s]
             f = idx[2][idx_s]
-            trials = cluster.fields['trial_act'][c,s,f,:cluster.sessions['trial_ct'][s]]
+            trials = cluster.fields['trial_act'][c,s,f,:cluster.behavior['trial_ct'][s]]
 
             trial_corr = np.corrcoef(trials)
             trial_corr[np.tril_indices_from(trial_corr)] = np.NaN
@@ -6156,7 +6178,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         print('### find neurons which are conjointly activated / coding ###')
         print('also, cant find anything super telling right now...')
         # print(cluster.status)
-        # status_act = cluster.status[cluster.status['clusters'],:,1]
+        # status_act = cluster.status['activity'][cluster.status['clusters'],:,1]
         # status_act = cluster.stats['act_stability_temp'][cluster.status['clusters'],:,1]
         status_act = cluster.stats['field_stability_temp'][cluster.status['clusters'],:]
         # print(status_act)
@@ -6169,7 +6191,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         act_corr[np.tril_indices_from(act_corr)] = np.NaN
         # print(act_corr)
         # return
-        status_code = cluster.status[cluster.status['clusters'],:,2]
+        status_code = cluster.status['activity'][cluster.status['clusters'],:,2]
         status_code = status_code[:,cluster.status['sessions']]
 
         code_corr = np.corrcoef(status_code)
@@ -6296,9 +6318,10 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         pl_dat.add_number(fig,ax,order=1,offset=[-50,25])
         pic_path = '/home/wollex/Data/Science/PhD/Thesis/pics/individual/r_stab_example.png'
         ax.axis('off')
-        im = mpimg.imread(pic_path)
-        ax.imshow(im)
-        ax.set_xlim([0,im.shape[1]])
+        if os.path.exists(pic_path):
+            im = mpimg.imread(pic_path)
+            ax.imshow(im)
+            ax.set_xlim([0,im.shape[1]])
 
         ax = plt.axes([0.575,0.7,0.15,0.225])
         pl_dat.add_number(fig,ax,order=2)
@@ -6310,7 +6333,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
 
         # ax2 = ax.twinx()
-        ax.plot(r_stab+0.02*np.random.rand(nC_good),cluster.status[act_clusters,:,1][:,s_bool].sum(1)+0.5*np.random.rand(nC_good),'k.',markersize=1,markeredgecolor='none')
+        ax.plot(r_stab+0.02*np.random.rand(nC_good),cluster.status['activity'][act_clusters,:,1][:,s_bool].sum(1)+0.5*np.random.rand(nC_good),'k.',markersize=1,markeredgecolor='none')
         # ax.yaxis.set_label_position("left")
         # ax.yaxis.set_ticks_position("left")
         ax.set_xlabel('$r_{\\gamma^+}^{\infty}$')
@@ -6321,7 +6344,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
         ax = plt.axes([0.8,0.7,0.15,0.225])
         Nb_arr = np.arange(80)
-        ax.plot(r_stab+0.02*np.random.rand(nC_good),cluster.status[act_clusters,:][:,s_bool,2].sum(1)+0.5*np.random.rand(nC_good),'k.',markersize=1,markeredgecolor='none')
+        ax.plot(r_stab+0.02*np.random.rand(nC_good),cluster.status['activity'][act_clusters,:][:,s_bool,2].sum(1)+0.5*np.random.rand(nC_good),'k.',markersize=1,markeredgecolor='none')
         SD = 1.96
         sig_theta = cluster.stability['all']['mean'][0,2]
         # ax.plot(((2*SD*sig_theta/100 * Nb_arr**2)/(Nb_arr-1))/s_bool.sum(),Nb_arr,'r--',linewidth=0.75)
@@ -6334,7 +6357,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         pl_dat.remove_frame(ax,['top','right'])
 
         ax = plt.axes([0.89,0.75,0.075,0.05])
-        Nb = cluster.status[act_clusters,:,2]
+        Nb = cluster.status['activity'][act_clusters,:,2]
         Nb = Nb[:,s_bool].sum(1)
         nb_diff = np.zeros(nC_good)*np.NaN
         for nb in range(1,80):
@@ -6367,7 +6390,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         for j in range(len(field_stab_range)-1):
 
             # try:
-            idx_c = np.where((r_stab > field_stab_range[j]) & (r_stab < field_stab_range[j+1]) & (cluster.status[act_clusters,:,1][:,s_bool].sum(1)>0.2*nSes))[0]
+            idx_c = np.where((r_stab > field_stab_range[j]) & (r_stab < field_stab_range[j+1]) & (cluster.status['activity'][act_clusters,:,1][:,s_bool].sum(1)>0.2*nSes))[0]
             # print(idx_c)
             # idx_c = np.where(act_clusters)[0][idx_c0]
             # print(idx_c)
@@ -6379,11 +6402,11 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
                 c = np.where(act_clusters)[0][c0]
                 firingmap = cluster.stats['firingmap'][c,cluster.status['sessions'],:]
-                firingmap[~cluster.status[c,cluster.status['sessions'],1],:] = np.NaN
+                firingmap[~cluster.status['activity'][c,cluster.status['sessions'],1],:] = np.NaN
                 firingmap = gauss_smooth(firingmap,(0,4))
                 firingmap = firingmap - np.nanmin(firingmap,1)[:,np.newaxis]
                 im = ax.imshow(firingmap,aspect='auto',origin='upper',cmap='jet',clim=[0,5])
-                ax.barh(range(cluster.status['sessions'].sum()),-(cluster.status[c,cluster.status['sessions'],2]*10.),left=-5,facecolor='r')
+                ax.barh(range(cluster.status['sessions'].sum()),-(cluster.status['activity'][c,cluster.status['sessions'],2]*10.),left=-5,facecolor='r')
                 ax.set_xlim([-10,nbin])
                 ax.set_ylim([cluster.status['sessions'].sum(),-0.5])
                 if (j==0) & (i==0):
@@ -6454,11 +6477,11 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             ax = plt.axes([0.1+0.225*j,0.08,0.075,0.5])
 
             firingmap = cluster.stats['firingmap'][c,cluster.status['sessions'],:]
-            firingmap[~cluster.status[c,cluster.status['sessions'],1],:] = np.NaN
+            firingmap[~cluster.status['activity'][c,cluster.status['sessions'],1],:] = np.NaN
             firingmap = gauss_smooth(firingmap,(0,2))
             firingmap = firingmap - np.nanmin(firingmap,1)[:,np.newaxis]
             im = ax.imshow(firingmap,aspect='auto',origin='upper',cmap='jet',clim=[0,5])
-            ax.barh(range(cluster.status['sessions'].sum()),-(cluster.status[c,cluster.status['sessions'],2]*10.),left=-5,facecolor='r')
+            ax.barh(range(cluster.status['sessions'].sum()),-(cluster.status['activity'][c,cluster.status['sessions'],2]*10.),left=-5,facecolor='r')
             ax.set_xlim([-10,nbin])
             ax.set_ylim([cluster.status['sessions'].sum(),-0.5])
             if (j==0):
@@ -6514,7 +6537,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         # act_stab = act_stab[cluster.status['clusters'],:]
         act_stab = cluster.stats['act_stability_temp'][...,1]#[cluster.status['clusters'],:,1]
 
-        nC = cluster.status.shape[0]#cluster.status['clusters'].sum()
+        nC = cluster.status['activity'].shape[0]#cluster.status['clusters'].sum()
         nSes_good = s_bool.sum()
 
 
@@ -6860,28 +6883,28 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             inCode = False
             for s in np.where(cluster.status['sessions'])[0]:
                 if inAct:
-                    if ~cluster.status[c,s,1]:
+                    if ~cluster.status['activity'][c,s,1]:
                         La = cluster.status['sessions'][s0_act:s].sum()
                         status_La[c,s0_act:s,0] = La
-                        status_La[c,s0_act:s,1] = cluster.status[c,s0_act:s,2].sum()
-                        if (cluster.status[c,s0_act:s,2].sum() / La)>highCode_thr:
+                        status_La[c,s0_act:s,1] = cluster.status['activity'][c,s0_act:s,2].sum()
+                        if (cluster.status['activity'][c,s0_act:s,2].sum() / La)>highCode_thr:
                             La_highCode[La] += 1
                         IPI_La[La] += 1
                         inAct=False
                 else:
-                    if cluster.status[c,s,1]:
+                    if cluster.status['activity'][c,s,1]:
                         s0_act = s
                         inAct = True
                         IPI_La_start[c,s] = True
 
                 if inCode:
-                    if ~cluster.status[c,s,2]:
+                    if ~cluster.status['activity'][c,s,2]:
                         Lb = cluster.status['sessions'][s0_code:s].sum()
                         status_Lb[c,s0_code:s] = Lb
                         IPI_Lb[Lb] += 1
                         inCode=False
                 else:
-                    if cluster.status[c,s,2]:
+                    if cluster.status['activity'][c,s,2]:
                         s0_code = s
                         inCode = True
                         IPI_Lb_start[c,s] = True
@@ -6889,8 +6912,8 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             if inAct:
                 La = cluster.status['sessions'][s0_act:s+1].sum()
                 status_La[c,s0_act:s+1,0] = La
-                status_La[c,s0_act:s+1,1] = cluster.status[c,s0_act:s+1,2].sum()
-                if (cluster.status[c,s0_act:s,2].sum() / La)>highCode_thr:
+                status_La[c,s0_act:s+1,1] = cluster.status['activity'][c,s0_act:s+1,2].sum()
+                if (cluster.status['activity'][c,s0_act:s,2].sum() / La)>highCode_thr:
                     La_highCode[La] += 1
                 IPI_La[La] += 1
             if inCode:
@@ -7007,7 +7030,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         ds = 1
         session_bool = np.where(np.pad(cluster.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(cluster.status['sessions'][:],(0,0),constant_values=False))[0]
 
-        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.meta['field_count_max'],cluster.meta['field_count_max']))
+        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(cluster.compare['pointer'].col,(nSes,nSes,cluster.params['field_count_max'],cluster.params['field_count_max']))
         c_shifts = cluster.compare['pointer'].row
         sig = 6
         di = 3
@@ -7048,7 +7071,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             ### assign bin-specific remapping to rows, active nPC (nbins+1) & silent (nbins+2)
             for c in np.where(cluster.status['activity'][:,s,2])[0]:
                 ## find belonging fields
-                if cluster.status[c,s+ds,2]:
+                if cluster.status['activity'][c,s+ds,2]:
                     d = np.abs(np.mod(cluster.fields['location'][c,s,:,0][:,np.newaxis] - cluster.fields['location'][c,s+ds,:,0]+nbin/2,nbin)-nbin/2)
                     d[np.isnan(d)] = nbin
                     f1,f2 = sp.optimize.linear_sum_assignment(d)
@@ -7102,7 +7125,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         ax.plot(gauss_smooth(RW_dense,1,mode='constant'),color='tab:red')
         ax.plot(gauss_smooth(GT_dense,1,mode='constant'),color='tab:green')
         ax.plot(gauss_smooth(nRnG_dense,1,mode='constant'),color='tab:blue')
-        # non_start = np.copy(cluster.para['zone_mask']['others'])
+        # non_start = np.copy(cluster.params['zone_mask']['others'])
         # non_start[:13] = False
         # nRnG_stab = np.nanmean(p_rec_loc[:,non_start],1)
         # START_stab = np.nanmean(p_rec_loc[:,15:35],1)
@@ -7118,47 +7141,47 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         # s_arr = np.array([0,10,21])
         n_int = len(s_arr)-1
 
-        gate = np.any(cluster.para['zone_mask']['gate'])
+        gate = np.any(cluster.params['zone_mask']['gate'])
         if gate:
             ax_GT = plt.axes([0.3,0.1,0.15,0.175])
             ax_GT_dist = plt.axes([0.4,0.2,0.05,0.05])
-            ax_GT.bar(range(nbin),1000.*cluster.para['zone_mask']['gate'],width=1,facecolor='tab:green',alpha=0.3)
+            ax_GT.bar(range(nbin),1000.*cluster.params['zone_mask']['gate'],width=1,facecolor='tab:green',alpha=0.3)
             ax_GT.set_ylim([0,0.1])
             pl_dat.remove_frame(ax_GT,['top','right'])
 
         ax_RW = plt.axes([0.1,0.1,0.15,0.175])
         ax_RW_dist = plt.axes([0.125,0.2,0.05,0.05])
-        ax_RW.bar(range(nbin),1000.*cluster.para['zone_mask']['reward'],width=1,facecolor='tab:red',alpha=0.3)
+        ax_RW.bar(range(nbin),1000.*cluster.params['zone_mask']['reward'],width=1,facecolor='tab:red',alpha=0.3)
         ax_RW.set_ylim([0,0.1])
         pl_dat.remove_frame(ax_RW,['top','right'])
         ax_RW.set_xlabel('position [bins]')
 
         ax_nRnG = plt.axes([0.5,0.1,0.15,0.175])
         ax_nRnG_dist = plt.axes([0.6,0.2,0.05,0.05])
-        ax_nRnG.bar(range(nbin),1000.*cluster.para['zone_mask']['others'],width=1,facecolor='tab:blue',alpha=0.3)
+        ax_nRnG.bar(range(nbin),1000.*cluster.params['zone_mask']['others'],width=1,facecolor='tab:blue',alpha=0.3)
         ax_nRnG.set_ylim([0,0.1])
         pl_dat.remove_frame(ax_nRnG,['top','right'])
         ax_nRnG.set_xlabel('position [bins]')
 
         for j in range(n_int):
             col = [1,0.2*j,0.2*j]
-            occ = loc_stab_p[s_arr[j]:s_arr[j+1],cluster.para['zone_mask']['reward'],:].sum(0).sum(0)
+            occ = loc_stab_p[s_arr[j]:s_arr[j+1],cluster.params['zone_mask']['reward'],:].sum(0).sum(0)
             occ /= occ.sum()
             ax_RW.plot(range(nbin),occ,'-',color=col,label='Sessions %d-%d'%(s_arr[j]+1,s_arr[j+1]),linewidth=0.5)
-            # ax.bar(range(nbin),loc_stab[:20,cluster.para['zone_mask']['reward'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
+            # ax.bar(range(nbin),loc_stab[:20,cluster.params['zone_mask']['reward'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
 
             col = [0.2*j,0.2*j,1]
-            occ = loc_stab_p[s_arr[j]:s_arr[j+1],cluster.para['zone_mask']['others'],:].sum(0).sum(0)
+            occ = loc_stab_p[s_arr[j]:s_arr[j+1],cluster.params['zone_mask']['others'],:].sum(0).sum(0)
             occ /= occ.sum()
             ax_nRnG.plot(range(nbin),occ,'-',color=col,linewidth=0.5)
-            # ax.bar(range(nbin),loc_stab[:20,cluster.para['zone_mask']['others'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
+            # ax.bar(range(nbin),loc_stab[:20,cluster.params['zone_mask']['others'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
 
             if gate:
                 col = [0.2*j,0.8,0.2*j]
-                occ = loc_stab_p[s_arr[j]:s_arr[j+1],cluster.para['zone_mask']['gate'],:].sum(0).sum(0)
+                occ = loc_stab_p[s_arr[j]:s_arr[j+1],cluster.params['zone_mask']['gate'],:].sum(0).sum(0)
                 occ /= occ.sum()
                 ax_GT.plot(range(nbin),occ,'-',color=col,linewidth=0.5)
-                # ax.bar(range(nbin),loc_stab[:20,cluster.para['zone_mask']['others'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
+                # ax.bar(range(nbin),loc_stab[:20,cluster.params['zone_mask']['others'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
         ax_RW.legend(fontsize=6,loc='upper left',bbox_to_anchor=[0.05,1.1])
         props = dict(boxstyle='round', facecolor='w', alpha=0.8)
 
@@ -7171,7 +7194,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         ls_arr = ['-','--',':']
         label_arr = ['silent','active','coding']
 
-        mask_others = np.copy(cluster.para['zone_mask']['others'])
+        mask_others = np.copy(cluster.params['zone_mask']['others'])
         mask_others[:15] = False
         smooth = 1
 
@@ -7209,17 +7232,17 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             # ax_abs.plot(-cluster.stats['transition']['dismissal'][:,:,j].sum(1),linestyle=ls_arr[j],color='k',linewidth=0.5)
             # ax_abs.plot(cluster.stats['transition']['recruitment'][:,:,j].sum(1)-cluster.stats['transition']['dismissal'][:,:,j].sum(1),linestyle=ls_arr[j],color='r',linewidth=0.5)
 
-            ax_recruit.plot(range(nSes),gauss_smooth(np.nanmean(cluster.stats['transition']['recruitment'][:,cluster.para['zone_mask']['reward'],j],1),smooth),linestyle=ls_arr[j],color='tab:red',label=label_arr[j])
+            ax_recruit.plot(range(nSes),gauss_smooth(np.nanmean(cluster.stats['transition']['recruitment'][:,cluster.params['zone_mask']['reward'],j],1),smooth),linestyle=ls_arr[j],color='tab:red',label=label_arr[j])
             ax_recruit.plot(range(nSes),gauss_smooth(np.nanmean(cluster.stats['transition']['recruitment'][:,mask_others,0],1),smooth),linestyle=ls_arr[j],color='tab:blue')
 
-            ax_recruit.plot(range(nSes),-gauss_smooth(np.nanmean(cluster.stats['transition']['dismissal'][:,cluster.para['zone_mask']['reward'],j],1),smooth),linestyle=ls_arr[j],color='tab:red')
+            ax_recruit.plot(range(nSes),-gauss_smooth(np.nanmean(cluster.stats['transition']['dismissal'][:,cluster.params['zone_mask']['reward'],j],1),smooth),linestyle=ls_arr[j],color='tab:red')
             ax_recruit.plot(range(nSes),-gauss_smooth(np.nanmean(cluster.stats['transition']['dismissal'][:,mask_others,j],1),smooth),linestyle=ls_arr[j],color='tab:blue')
 
-            ax_diff.plot(range(nSes),gauss_smooth(np.nanmean(cluster.stats['transition']['recruitment'][:,cluster.para['zone_mask']['reward'],j],1),smooth)-gauss_smooth(np.nanmean(cluster.stats['transition']['dismissal'][:,cluster.para['zone_mask']['reward'],j],1),smooth),linestyle=ls_arr[j],color='tab:red')
+            ax_diff.plot(range(nSes),gauss_smooth(np.nanmean(cluster.stats['transition']['recruitment'][:,cluster.params['zone_mask']['reward'],j],1),smooth)-gauss_smooth(np.nanmean(cluster.stats['transition']['dismissal'][:,cluster.params['zone_mask']['reward'],j],1),smooth),linestyle=ls_arr[j],color='tab:red')
 
             ax_diff.plot(range(nSes),gauss_smooth(np.nanmean(cluster.stats['transition']['recruitment'][:,mask_others,0],1),smooth)-gauss_smooth(np.nanmean(cluster.stats['transition']['dismissal'][:,mask_others,j],1),smooth),linestyle=ls_arr[j],color='tab:blue')
 
-        ax_stable.plot(range(nSes),gauss_smooth(np.nanmean(cluster.stats['transition']['stabilization'][:,cluster.para['zone_mask']['reward']],1),smooth),linestyle='-',color='tab:red')
+        ax_stable.plot(range(nSes),gauss_smooth(np.nanmean(cluster.stats['transition']['stabilization'][:,cluster.params['zone_mask']['reward']],1),smooth),linestyle='-',color='tab:red')
         ax_stable.plot(range(nSes),gauss_smooth(np.nanmean(cluster.stats['transition']['stabilization'][:,mask_others],1),smooth),linestyle='-',color='tab:blue')
 
         ax_recruit.set_ylim([-3,3])
@@ -7694,7 +7717,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         s_bool[:] = True
         s_bool[~cluster.status['sessions']] = False
 
-        t_ct_max = max(cluster.sessions['trial_ct'])
+        t_ct_max = max(cluster.behavior['trial_ct'])
 
         nsteps = 4
         perc_act = np.zeros((nsteps,nSes,t_ct_max))*np.NaN
@@ -7744,7 +7767,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         color_t = plt.cm.rainbow(np.linspace(0,1,nsteps))
         for s in tqdm(np.where(s_bool)[0]):
 
-            t_ct = cluster.sessions['trial_ct'][s]
+            t_ct = cluster.behavior['trial_ct'][s]
             trial_coding = np.zeros((t_ct,nC,5),'bool')
             nPF = cluster.status_fields[:,s,:].sum()
 
@@ -7764,14 +7787,14 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
             dt = 5
             if ((s+1)<nSes):
                 if s_bool[s+1]:
-                    t_start = min(cluster.sessions['trial_ct'][s],dt)
-                    t_end = max(0,cluster.sessions['trial_ct'][s]-dt)
+                    t_start = min(cluster.behavior['trial_ct'][s],dt)
+                    t_end = max(0,cluster.behavior['trial_ct'][s]-dt)
                     coding_s1_start = np.any(cluster.fields['trial_act'][:,s,:,:t_start],-1) & cluster.status_fields[:,s,:]
                     coding_s1_end = np.any(cluster.fields['trial_act'][:,s,:,t_end:],-1) & cluster.status_fields[:,s,:]
 
                     ### get first dt trials and last dt trials
-                    t_start = min(cluster.sessions['trial_ct'][s+1],dt)
-                    t_end = max(0,cluster.sessions['trial_ct'][s+1]-dt)
+                    t_start = min(cluster.behavior['trial_ct'][s+1],dt)
+                    t_end = max(0,cluster.behavior['trial_ct'][s+1]-dt)
                     coding_s2_start = np.any(cluster.fields['trial_act'][:,s+1,:,:t_start],-1) & cluster.status_fields[:,s+1,:]
                     coding_s2_end = np.any(cluster.fields['trial_act'][:,s+1,:,t_end:],-1) & cluster.status_fields[:,s+1,:]
 
@@ -8004,7 +8027,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         s_bool[:] = True
         s_bool[~cluster.status['sessions']] = False
 
-        t_ct_max = max(cluster.sessions['trial_ct'])
+        t_ct_max = max(cluster.behavior['trial_ct'])
 
         nsteps = 4
         perc_act = np.zeros((nsteps,nSes,t_ct_max))*np.NaN
@@ -8035,14 +8058,14 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         for s in tqdm(np.where(s_bool)[0][:-1]):
 
             if s_bool[s+1]:
-                t_start = min(cluster.sessions['trial_ct'][s],dt)
-                t_end = max(0,cluster.sessions['trial_ct'][s]-dt)
+                t_start = min(cluster.behavior['trial_ct'][s],dt)
+                t_end = max(0,cluster.behavior['trial_ct'][s]-dt)
                 coding_s1_start = np.any(cluster.fields['trial_act'][:,s,:,:t_start],-1) & cluster.status_fields[:,s,:]
                 coding_s1_end = np.any(cluster.fields['trial_act'][:,s,:,t_end:],-1) & cluster.status_fields[:,s,:]
 
                 ### get first dt trials and last dt trials
-                t_start = cluster.sessions['trial_ct'][s+1]#min(cluster.sessions['trial_ct'][s+1],dt)
-                t_end = 0#max(0,cluster.sessions['trial_ct'][s+1]-dt)
+                t_start = cluster.behavior['trial_ct'][s+1]#min(cluster.behavior['trial_ct'][s+1],dt)
+                t_end = 0#max(0,cluster.behavior['trial_ct'][s+1]-dt)
                 coding_s2_start = np.any(cluster.fields['trial_act'][:,s+1,:,:t_start],-1) & cluster.status_fields[:,s+1,:]
                 coding_s2_end = np.any(cluster.fields['trial_act'][:,s+1,:,t_end:],-1) & cluster.status_fields[:,s+1,:]
 
@@ -8095,7 +8118,7 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
         for s in np.where(cluster.status['sessions'])[0]:
             fmaps = np.copy(cluster.stats['firingmap'][:,s,:])
             baseline = np.percentile(fmaps,20,axis=1)
-            fmap_thr = np.zeros(cluster.meta['nC'])
+            fmap_thr = np.zeros(cluster.data['nC'])
             # SD =
             fmaps_base_subtracted = fmaps-baseline[:,np.newaxis]
             N = (fmaps_base_subtracted <= 0).sum(1)
@@ -8141,14 +8164,17 @@ def plot_PC_analysis(cluster,plot_arr=[0,1],N_bs=10,n_processes=0,reprocess=Fals
 
 def get_field_stability(cluster,SD=1.96,s_bool=None):
 
-    nC,nSes = cluster.status.shape[:2]
+    # nC,nSes = cluster.status['activity'].shape[:2]
+    # nC = cluster.data['nC']
+    # nSes = cluster.data['nSes']
+    nbin = cluster.data['nbin']
+
     sig_theta = cluster.stability['all']['mean'][0,2]
+    stab_thr = SD*sig_theta
 
     s_bool = cluster.status['sessions'] if s_bool is None else s_bool
-    stab_thr = SD*sig_theta
-    nbin = 100
 
-    field_stability = np.zeros(nC)*np.NaN
+    field_stability = np.zeros(cluster.data['nC'])*np.NaN
     # idx_fields = np.where(cluster.status_fields & cluster.status['sessions'][np.newaxis,:,np.newaxis])
     idx_fields = np.where(cluster.status_fields & s_bool[np.newaxis,:,np.newaxis])
 
@@ -8158,16 +8184,16 @@ def get_field_stability(cluster,SD=1.96,s_bool=None):
         fields_ref = cluster.fields['location'][c,idx_fields[1][c_fields],idx_fields[2][c_fields],0]
 
         count_hit = 0
-        # count_ref = cluster.status[c,:,2].sum()
-        if cluster.status[c,s_bool,2].sum()>1:
-            for s in np.where(cluster.status[c,:,1] & s_bool)[0]:
-                if cluster.status[c,s,2]:
+        # count_ref = cluster.status['activity'][c,:,2].sum()
+        if cluster.status['activity'][c,s_bool,2].sum()>1:
+            for s in np.where(cluster.status['activity'][c,:,1] & s_bool)[0]:
+                if cluster.status['activity'][c,s,2]:
                     fields_compare = cluster.fields['location'][c,s,cluster.status_fields[c,s,:],0]
                     count_ref = len(fields_ref)-len(fields_compare)
                     d = np.abs(np.mod(fields_ref[np.newaxis,:]-fields_compare[:,np.newaxis]+nbin/2,nbin)-nbin/2)
                     # count_hit += (np.sum(d < stab_thr)-len(fields_compare))/(count_ref-1) if count_ref > 1 else np.NaN
                     count_hit += (np.sum(d < stab_thr)-len(fields_compare))/count_ref if count_ref > 0 else np.NaN
-        # N_norm = cluster.status[c,:,1].sum()
+        # N_norm = cluster.status['activity'][c,:,1].sum()
         N_norm = s_bool.sum()
         if N_norm > 0:
             field_stability[c] = count_hit / N_norm#count_ref# - count_miss / count_ref
@@ -8177,13 +8203,16 @@ def get_field_stability(cluster,SD=1.96,s_bool=None):
 
 def get_field_stability_temp(cluster,SD=1.96,ds=3):
 
-    nC,nSes = cluster.status.shape[:2]
+    # nC = cluster.data['nC']
+    # nSes = cluster.data['nSes']
+    nbin = cluster.data['nbin']
+    # nC,nSes = cluster.status['activity'].shape[:2]
     sig_theta = cluster.stability['all']['mean'][0,2]
     stab_thr = SD*sig_theta
-    nbin = 100
+    # nbin = 100
     # ds = ds//2
     print(ds)
-    field_stability = np.zeros((nC,nSes))*np.NaN
+    field_stability = np.zeros((cluster.data['nC'],cluster.data['nSes']))*np.NaN
     # act_stability = np.zeros((nC,nSes))*np.NaN
     idx_fields = np.where(cluster.status_fields & cluster.status['sessions'][np.newaxis,:,np.newaxis])
 
@@ -8195,10 +8224,10 @@ def get_field_stability_temp(cluster,SD=1.96,ds=3):
 
             field_stability[c,s] = 0
 
-            if cluster.status[c,s,2]:
+            if cluster.status['activity'][c,s,2]:
                 s_min = max(0,s-ds)
-                s_max = min(nSes-1,s+ds+1)
-                if cluster.status[c,s_min:s_max,2].sum()>1:
+                s_max = min(cluster.data['nSes']-1,s+ds+1)
+                if cluster.status['activity'][c,s_min:s_max,2].sum()>1:
                     s_fields = (idx_fields[1]>=s_min) & (idx_fields[1]<s_max)
                     fields_ref = cluster.fields['location'][c,idx_fields[1][c_fields&s_fields],idx_fields[2][c_fields&s_fields],0]
 
@@ -8209,20 +8238,20 @@ def get_field_stability_temp(cluster,SD=1.96,ds=3):
                     field_stability[c,s] += (np.sum(d < stab_thr)-len(fields_compare))/count_ref# if count_ref > 0 else np.NaN
                     # count_hit = 0
 
-            # count_ref = cluster.status[c,s_min:s_max,2].sum()
-            # act_stability[c,s] = cluster.status[c,s_min:s_max,1].sum()/cluster.status['sessions'][s_min:s_max].sum()
+            # count_ref = cluster.status['activity'][c,s_min:s_max,2].sum()
+            # act_stability[c,s] = cluster.status['activity'][c,s_min:s_max,1].sum()/cluster.status['sessions'][s_min:s_max].sum()
 
 
-            # if cluster.status[c,s_min:s_max,2].sum()>1:
-            #     for s2 in range(s_min,s_max):#np.where(cluster.status[c,:,1])[0]:
-            #         if cluster.status[c,s2,2]:
+            # if cluster.status['activity'][c,s_min:s_max,2].sum()>1:
+            #     for s2 in range(s_min,s_max):#np.where(cluster.status['activity'][c,:,1])[0]:
+            #         if cluster.status['activity'][c,s2,2]:
             #             fields_compare = cluster.fields['location'][c,s2,cluster.status_fields[c,s2,:],0]
             #             count_ref = len(fields_ref)-len(fields_compare)
             #             d = np.abs(np.mod(fields_ref[np.newaxis,:]-fields_compare[:,np.newaxis]+nbin/2,nbin)-nbin/2)
             #             # count_hit += (np.sum(d < stab_thr)-len(fields_compare))/(count_ref-1)
             #             count_hit += (np.sum(d < stab_thr)-len(fields_compare))/count_ref if count_ref > 0 else np.NaN
 
-            # N_norm = cluster.status[c,s_min:s_max,1].sum()
+            # N_norm = cluster.status['activity'][c,s_min:s_max,1].sum()
             # N_norm = cluster.status['sessions'][s_min:s_max].sum()
             # if N_norm > 0:
                 # field_stability[c,s] = count_hit / N_norm#count_ref# - count_miss / count_ref
@@ -8232,12 +8261,16 @@ def get_field_stability_temp(cluster,SD=1.96,ds=3):
 
 def get_act_stability(cluster,s_bool):
 
-    nC,nSes = cluster.status.shape[:2]
-    act_stability = np.zeros((nC,3))*np.NaN
+    # nC = cluster.data['nC']
+    # nSes = cluster.data['nSes']
+    # nbin = cluster.data['nbin']
+
+    # nC,nSes = cluster.status['activity'].shape[:2]
+    act_stability = np.zeros((cluster.data['nC'],3))*np.NaN
 
     for c in np.where(cluster.status['clusters'])[0]:#[:10]
 
-        count_act = cluster.status[c,s_bool,1].sum()
+        count_act = cluster.status['activity'][c,s_bool,1].sum()
         count_act_possible = s_bool.sum()
         count_act_recurr = 0
         count_act_recurr_possible = 0
@@ -8246,8 +8279,8 @@ def get_act_stability(cluster,s_bool):
 
             if cluster.status['sessions'][s+1]:
                 count_act_recurr_possible += 1
-                if cluster.status[c,s,1]:
-                    count_act_recurr += cluster.status[c,s+1,1]
+                if cluster.status['activity'][c,s,1]:
+                    count_act_recurr += cluster.status['activity'][c,s+1,1]
 
         act_stability[c,0] = count_act/count_act_possible
         act_stability[c,1] = count_act_recurr/count_act_recurr_possible if count_act_recurr_possible>0 else np.NaN
@@ -8257,14 +8290,18 @@ def get_act_stability(cluster,s_bool):
         # print(act_stability[c,:])
         # print('counts: %d/%d'%(count_act,count_act_possible))
         # print('counts (recurr): %d/%d'%(count_act_recurr,count_act_recurr_possible))
-        # print(cluster.status[c,s_bool,1])
+        # print(cluster.status['activity'][c,s_bool,1])
         # print(cluster.status['sessions'][s_min:s_max])
     return act_stability
 
 def get_act_stability_temp(cluster,status_act=None,ds=3):
 
-    nC,nSes = cluster.status.shape[:2]
-    act_stability = np.zeros((nC,nSes,2))*np.NaN
+    # nC = cluster.data['nC']
+    # nSes = cluster.data['nSes']
+    # nbin = cluster.data['nbin']
+
+    # nC,nSes = cluster.status['activity'].shape[:2]
+    act_stability = np.zeros((cluster.data['nC'],cluster.data['nSes'],2))*np.NaN
     # ds = ds//2
 
     if status_act is None:
@@ -8275,7 +8312,7 @@ def get_act_stability_temp(cluster,status_act=None,ds=3):
 
         for s in np.where(cluster.status['sessions'])[0][:-1]:
             s_min = max(0,s-ds)
-            s_max = min(nSes-1,s+ds+1)
+            s_max = min(cluster.data['nSes']-1,s+ds+1)
 
             count_act = status_act[c,s_min:s_max].sum()
             count_act_possible = cluster.status['sessions'][s_min:s_max].sum()
@@ -8289,7 +8326,7 @@ def get_act_stability_temp(cluster,status_act=None,ds=3):
                         if status_act[c,s2]:
                             count_act_recurr += status_act[c,s2+1]
 
-            # if cluster.status[c,s,1]:
+            # if cluster.status['activity'][c,s,1]:
             act_stability[c,s,0] = count_act/count_act_possible
             act_stability[c,s,1] = count_act_recurr/count_act_recurr_possible if count_act_recurr_possible>0 else np.NaN
             # else:
@@ -8297,20 +8334,24 @@ def get_act_stability_temp(cluster,status_act=None,ds=3):
             # print('--- neuron %d @ s%d: ---'%(c,s))
             # print(act_stability[c,s,:])
             # print('counts: %d/%d'%(count_act,count_act_possible))
-            # print(cluster.status[c,s_min:s_max,1])
+            # print(cluster.status['activity'][c,s_min:s_max,1])
             # print(cluster.status['sessions'][s_min:s_max])
     return act_stability
 
 
 def get_code_stability(cluster,s_bool):
 
-    nC,nSes = cluster.status.shape[:2]
-    code_stability = np.zeros((nC,3))*np.NaN
+    # nC = cluster.data['nC']
+    # nSes = cluster.data['nSes']
+    # nbin = cluster.data['nbin']
+
+    # nC,nSes = cluster.status['activity'].shape[:2]
+    code_stability = np.zeros((cluster.data['nC'],3))*np.NaN
 
     for c in np.where(cluster.status['clusters'])[0]:#[:10]
 
-        count_code = cluster.status[c,s_bool,2].sum()
-        count_code_possible = cluster.status[c,s_bool,1].sum()#s_bool.sum()
+        count_code = cluster.status['activity'][c,s_bool,2].sum()
+        count_code_possible = cluster.status['activity'][c,s_bool,1].sum()#s_bool.sum()
         count_code_recurr = 0
         count_code_recurr_possible = 0
 
@@ -8318,8 +8359,8 @@ def get_code_stability(cluster,s_bool):
 
             if cluster.status['sessions'][s+1]:
                 count_code_recurr_possible += 1
-                if cluster.status[c,s,2]:
-                    count_code_recurr += cluster.status[c,s+1,2]
+                if cluster.status['activity'][c,s,2]:
+                    count_code_recurr += cluster.status['activity'][c,s+1,2]
 
         code_stability[c,0] = count_code/count_code_possible if count_code_possible>0 else 0
         code_stability[c,1] = count_code_recurr/count_code_recurr_possible if count_code_recurr_possible>0 else np.NaN
@@ -8329,25 +8370,29 @@ def get_code_stability(cluster,s_bool):
         # print(act_stability[c,:])
         # print('counts: %d/%d'%(count_act,count_act_possible))
         # print('counts (recurr): %d/%d'%(count_act_recurr,count_act_recurr_possible))
-        # print(cluster.status[c,s_bool,1])
+        # print(cluster.status['activity'][c,s_bool,1])
         # print(cluster.status['sessions'][s_min:s_max])
     return code_stability
 
 def get_code_stability_temp(cluster,status_PC=None,ds=3):
 
+    # nC = cluster.data['nC']
+    # nSes = cluster.data['nSes']
+    # nbin = cluster.data['nbin']
+
     if status_PC is None:
         status_PC = cluster.status['activity'][...,2]
-    nC,nSes = cluster.status.shape[:2]
-    code_stability = np.zeros((nC,nSes,2))*np.NaN
+    nC,nSes = cluster.status['activity'].shape[:2]
+    code_stability = np.zeros((cluster.data['nC'],cluster.data['nSes'],2))*np.NaN
 
     for c in np.where(cluster.status['clusters'])[0]:#[:10]
 
         for s in np.where(cluster.status['sessions'])[0][:-1]:
             s_min = max(0,s-ds)
-            s_max = min(nSes-1,s+ds+1)
+            s_max = min(cluster.data['nSes']-1,s+ds+1)
 
             count_code = status_PC[c,s_min:s_max].sum()
-            count_code_possible = cluster.status[c,s_min:s_max,1].sum()#cluster.status['sessions'][s_min:s_max].sum()
+            count_code_possible = cluster.status['activity'][c,s_min:s_max,1].sum()#cluster.status['sessions'][s_min:s_max].sum()
             count_code_recurr = 0
             count_code_recurr_possible = 0
 
@@ -8366,7 +8411,7 @@ def get_code_stability_temp(cluster,status_PC=None,ds=3):
             # print('--- neuron %d @ s%d: ---'%(c,s))
             # print(act_stability[c,s,:])
             # print('counts: %d/%d'%(count_act,count_act_possible))
-            # print(cluster.status[c,s_min:s_max,1])
+            # print(cluster.status['activity'][c,s_min:s_max,1])
             # print(cluster.status['sessions'][s_min:s_max])
     return code_stability
 
@@ -8374,15 +8419,15 @@ def get_code_stability_temp(cluster,status_PC=None,ds=3):
 
 def get_field_stability_fmap(cluster,smooth=2):
 
-    nC,nSes = cluster.status.shape[:2]
+    cluster.data['nC'],nSes = cluster.status['activity'].shape[:2]
 
-    field_stability = np.zeros(nC)*np.NaN
+    field_stability = np.zeros(cluster.data['nC'])*np.NaN
 
     for c in np.where(cluster.status['clusters'])[0]:#[:10]
 
         fmap_corr = np.corrcoef(gauss_smooth(cluster.stats['firingmap'][c,:,:],(0,smooth)))
-        fmap_corr = fmap_corr[cluster.status[c,:,1],:]
-        fmap_corr = fmap_corr[:,cluster.status[c,:,1]]
+        fmap_corr = fmap_corr[cluster.status['activity'][c,:,1],:]
+        fmap_corr = fmap_corr[:,cluster.status['activity'][c,:,1]]
         np.fill_diagonal(fmap_corr,np.NaN)
         field_stability[c] = np.nanmean(fmap_corr)
 

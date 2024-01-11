@@ -7,13 +7,13 @@
 
 '''
 
-import pickle, cmath, cv2
+import pickle, cmath, time, cv2, h5py
 import scipy as sp
 import scipy.stats as sstats
-from scipy import signal#, cluster
+from scipy import signal, cluster
 import numpy as np
 import matplotlib.pyplot as plt
-# from fastcluster import linkage
+from fastcluster import linkage
 from scipy.spatial.distance import squareform
 
 def find_modes(data,axis=None,sort_it=True):
@@ -537,9 +537,6 @@ def get_shift_and_flow(A1,A2,dims=(512,512),projection=-1,transpose_it=False,plo
 
   c,(y_shift,x_shift) = calculate_img_correlation(A1,A2,plot_bool=plot_bool)
 
-#   x_grid, y_grid = np.meshgrid(np.arange(0., dims[0]).astype(np.float32), np.arange(0., dims[1]).astype(np.float32))
-#   x_remap = (x_grid - x_shift).astype(np.float32)
-#   y_remap = (y_grid - y_shift).astype(np.float32)
   x_remap,y_remap = build_remap_from_shift_and_flow((x_shift,y_shift),)
 
   A2 = cv2.remap(A2, x_remap, y_remap, interpolation=cv2.INTER_CUBIC)
@@ -808,9 +805,9 @@ def add_number(fig,ax,order=1,offset=None):
 
 def get_status_arr(cluster,SD=1):
 
-    nSes = cluster.meta['nSes']
-    nC = cluster.meta['nC']
-    nbin = cluster.para['nbin']
+    nSes = cluster.data['nSes']
+    nC = cluster.data['nC']
+    nbin = cluster.data['nbin']
     sig_theta = cluster.stability['all']['mean'][0,2]
 
     status_arr = ['act','code','stable']
@@ -818,9 +815,9 @@ def get_status_arr(cluster,SD=1):
     ds_max = nSes
     status = {}
     status['stable'] = np.zeros((nC,nSes,nSes),'bool')
-    for c in np.where(cluster.stats['cluster_bool'])[0]:
-        for s in np.where(cluster.sessions['bool'])[0]:
-            if cluster.status[c,s,2]:
+    for c in np.where(cluster.status['clusters'])[0]:
+        for s in np.where(cluster.status['sessions'])[0]:
+            if cluster.status['activity'][c,s,2]:
                 for f in np.where(cluster.status_fields[c,s,:])[0]:
 
                     loc_compare = cluster.fields['location'][c,:s,:,0]
@@ -833,14 +830,14 @@ def get_status_arr(cluster,SD=1):
                         status['stable'][c,s,np.unique(s-stable_s)] = True
                         # status['stable'][c,s] = ds
 
-    status['act'] = np.pad(cluster.status[...,1][...,np.newaxis],((0,0),(0,0),(0,nSes-1)),mode='edge')
-    status['code'] = np.pad(cluster.status[...,2][...,np.newaxis],((0,0),(0,0),(0,nSes-1)),mode='edge')
+    status['act'] = np.pad(cluster.status['activity'][...,1][...,np.newaxis],((0,0),(0,0),(0,nSes-1)),mode='edge')
+    status['code'] = np.pad(cluster.status['activity'][...,2][...,np.newaxis],((0,0),(0,0),(0,nSes-1)),mode='edge')
     # status['stable'] = status['stable']
     # status['stable'] = status['stable']==1
 
     status_dep = {}
     status_dep['act'] = np.ones((nC,nSes),'bool')
-    status_dep['act'][:,~cluster.sessions['bool']] = False
+    status_dep['act'][:,~cluster.status['sessions']] = False
     status_dep['code'] = np.copy(status['act'][...,0])
     status_dep['stable'] = np.copy(status['code'][...,0])
 

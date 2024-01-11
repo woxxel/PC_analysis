@@ -887,7 +887,7 @@ class cluster:
         ### 2. stability of place fields
         ### 3. dismissal (towards silent / non-coding / coding)
         nSes = self.data['nSes']
-        nbin = self.para['nbin']
+        nbin = self.data['nbin']
 
         SD = 1.96
         sig_theta = self.stability['all']['mean'][0,2]
@@ -901,9 +901,9 @@ class cluster:
             if self.status['sessions'][s-1]:
 
                 ### recruitment
-                idx_recruit_silent = (~self.status[:,s-1,1]) & self.status[:,s,2]                             # neurons turning from silence to coding
-                idx_recruit_active = self.status[:,s-1,1] & (~self.status[:,s-1,2]) & self.status[:,s,2]   # neurons turning from silence to coding
-                idx_recruit_coding = self.status[:,s-1,2] & self.status[:,s,2]   # neurons turning from silence to coding
+                idx_recruit_silent = (~self.status['activity'][:,s-1,1]) & self.status['activity'][:,s,2]                             # neurons turning from silence to coding
+                idx_recruit_active = self.status['activity'][:,s-1,1] & (~self.status['activity'][:,s-1,2]) & self.status['activity'][:,s,2]   # neurons turning from silence to coding
+                idx_recruit_coding = self.status['activity'][:,s-1,2] & self.status['activity'][:,s,2]   # neurons turning from silence to coding
 
                 idx_fields = np.where(idx_recruit_silent[:,np.newaxis] & self.status_fields[:,s,:])
                 self.stats['transition']['recruitment'][s,:,0] = np.nansum(self.fields['p_x'][idx_fields[0],s,idx_fields[1]],0)
@@ -916,9 +916,9 @@ class cluster:
 
 
                 ### dismissal
-                idx_dismiss_silent = self.status[:,s-1,2] & (~self.status[:,s,1])                             # neurons turning from silence to coding
-                idx_dismiss_active = self.status[:,s-1,2] & (~self.status[:,s,2]) & self.status[:,s,1]     # neurons turning from silence to coding
-                idx_dismiss_coding = self.status[:,s-1,2] & self.status[:,s,2]   # neurons turning from silence to coding
+                idx_dismiss_silent = self.status['activity'][:,s-1,2] & (~self.status['activity'][:,s,1])                             # neurons turning from silence to coding
+                idx_dismiss_active = self.status['activity'][:,s-1,2] & (~self.status['activity'][:,s,2]) & self.status['activity'][:,s,1]     # neurons turning from silence to coding
+                idx_dismiss_coding = self.status['activity'][:,s-1,2] & self.status['activity'][:,s,2]   # neurons turning from silence to coding
 
                 idx_fields = np.where(idx_dismiss_silent[:,np.newaxis] & self.status_fields[:,s-1,:])
                 self.stats['transition']['dismissal'][s,:,0] = np.nansum(self.fields['p_x'][idx_fields[0],s-1,idx_fields[1],:],0)
@@ -931,7 +931,7 @@ class cluster:
 
 
                 ### stabilization
-                idx_stabilization = self.status[:,s-1,2] & self.status[:,s,2]   # neurons turning from silence to coding
+                idx_stabilization = self.status['activity'][:,s-1,2] & self.status['activity'][:,s,2]   # neurons turning from silence to coding
                 for c in np.where(idx_stabilization)[0]:
                     field_ref = self.fields['location'][c,s-1,self.status_fields[c,s-1,:],0]
                     field_compare = self.fields['location'][c,s,self.status_fields[c,s,:],0]
@@ -961,17 +961,17 @@ class cluster:
 
 
     def save(self,svBool=np.ones(5).astype('bool')):
-
-        if svBool[0]:
-            pickleData(self.matching['IDs'],self.params['svIDs'],'save')
-        if svBool[1]:
-            pickleData(self.sessions,self.params['svSessions'],'save')
-        if svBool[2]:
-            pickleData(self.stats,self.params['svStats'],'save')
-        if svBool[3]:
-            pickleData(self.fields,self.params['svPCs'],'save')
-        if svBool[4]:
-            pickleData(self.compare,self.params['svCompare'],'save')
+        pass
+        # if svBool[0]:
+        #     pickleData(self.matching['IDs'],self.paths['svIDs'],'save')
+        # if svBool[1]:
+        #     pickleData(self.sessions,self.paths['svSessions'],'save')
+        # if svBool[2]:
+        #     pickleData(self.stats,self.params['svStats'],'save')
+        # if svBool[3]:
+        #     pickleData(self.fields,self.params['svPCs'],'save')
+        # if svBool[4]:
+        #     pickleData(self.compare,self.params['svCompare'],'save')
 
     def load(self,ldBool=np.ones(5).astype('bool')):
         #self.allocate_cluster()
