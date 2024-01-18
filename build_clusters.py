@@ -1,22 +1,19 @@
 from multiprocessing import get_context
-#set_start_method("spawn")
 
-import os, time, warnings, h5py, itertools, pickle
+import os, time, warnings, itertools, pickle
 import numpy as np
 import scipy as sp
-import scipy.io as sio
 from tqdm import *
 import itertools
-# from itertools import chain
-# import multiprocessing as mp
 
 from caiman.utils.utils import load_dict_from_hdf5
 
-from .utils import pickleData, fdr_control, periodic_distr_distance, get_reliability, get_firingrate, get_status_arr, get_average
+from .utils import pickleData, fdr_control, periodic_distr_distance, get_reliability, get_status_arr, get_average
 from .utils import cluster_parameters
-from .utils import extend_dict
 
-from .PC_detection.detection.utils import prepare_behavior
+from matplotlib import pyplot as plt
+
+from .PC_detection.detection.utils import prepare_behavior, get_firingrate
 # from plot_PC_analysis import plot_PC_analysis
 from .mouse_data_scripts.get_session_specifics import *
 
@@ -211,19 +208,23 @@ class cluster:
         self.stats['r_values'] = ldData['results']['r_values']
         self.stats['CNN'] = ldData['results']['cnn_preds']
         
+        has_reference = False
         for s in range(self.data['nSes']):
 
-            self.alignment['shift'][s,:] = ldData['data'][s]['remap']['shift'] if s>0 else [0,0]
-            self.alignment['corr'][s] = ldData['data'][s]['remap']['c_max'] if s>0 else 1
+            if not os.path.exists(ldData['data'][s]['filePath']):
+                continue
+            
+            self.alignment['shift'][s,:] = ldData['data'][s]['remap']['shift'] if has_reference else [0,0]
+            self.alignment['corr'][s] = ldData['data'][s]['remap']['c_max'] if has_reference else 1
 
-            self.alignment['flow'][s,...] = ldData['data'][s]['remap']['flow'] if s>0 else np.NaN
+            self.alignment['flow'][s,...] = ldData['data'][s]['remap']['flow'] if has_reference else np.NaN
 
 
 
             idx_c = np.where(np.isfinite(self.matching['IDs'][:,s]))[0]
 
             ## match- and best non-match-score should be calculated and stored in matching algorithm
-            if s == 0:
+            if not has_reference:
                 self.matching['score'][idx_c,s,0] = 1
                 self.matching['score'][idx_c,s,1] = np.NaN
             elif s in ldData['data'].keys():
@@ -238,7 +239,7 @@ class cluster:
                 self.matching['score'][idx_c,s,0] = p_matched[idx_c,s]
                 scores_now = p_all.toarray()
                 self.matching['score'][idx_c,s,1] = [max(scores_now[c,np.where(scores_now[c,:]!=self.matching['score'][c,s,0])[0]]) for c in idx_c]
-        
+            has_reference = True
         self.classify_sessions()
         self.classify_cluster()
 
@@ -319,8 +320,9 @@ class cluster:
         pathsBehavior = [os.path.join(path,self.paths['fileNameBehavior']) for path in self.paths['sessions']]
         
         for s,path in enumerate(pathsBehavior):
+            if not self.status['sessions'][s]: continue
             
-            ldData = prepare_behavior(path)
+            ldData = prepare_behavior(path,nbin_coarse=20,calculate_performance=True)
             self.behavior['trial_ct'][s] = ldData['trials']['ct']
             self.behavior['trial_frames'][s] = ldData['trials']['nFrames']
 
@@ -331,12 +333,6 @@ class cluster:
                 self.behavior['performance'][s] = ldData['performance']
 
         self.session_data = get_session_specifics(self.data['mouse'],self.data['nSes'])
-
-
-    def get_detection(self):
-
-        self.get_stats()
-        self.get_PC_fields()
 
 
     def get_stats(self):
@@ -685,61 +681,51 @@ class cluster:
 
         oof_frate = np.zeros((self.data['nC'],self.data['nSes']))*np.NaN   # out-of-field firingrate
         if_frate = np.zeros((self.data['nC'],self.data['nSes'],self.params['field_count_max']))*np.NaN    # in-field firingrate
-        for (s,s0) in tqdm(enumerate(self.paths['sessions']),total=self.data['nSes'],leave=False):
-            # pathSession = pathcat([self.params['pathMouse'],'Session%02d'%s0])
-            pathLoad = pathcat([path,self.CNMF_name])
+        
+        for (s,path) in tqdm(enumerate(self.paths['sessions']),total=self.data['nSes'],leave=False):
+        
+            if not self.status['sessions'][s]: continue
 
-            for file in os.listdir(path):
-                if file.endswith("aligned.mat"):
-                    pathBH = os.path.join(path, file)
-                    f = h5py.File(pathBH,'r')
-                    binpos = np.squeeze(f.get('alignedData/resampled/binpos'))
-                    f.close()
-
+            dataBH = prepare_behavior(os.path.join(path, self.paths['fileNameBehavior']))
+            pathLoad = os.path.join(path,self.paths['fileNameCNMF'])
             if os.path.exists(pathLoad):
-                ld = sio.loadmat(pathLoad,variable_names=['S'])
-                S = ld['S']
+                ld = load_dict_from_hdf5(pathLoad)
+                S = ld['S'][:,dataBH['active']]
 
                 c_arr = np.where(np.isfinite(self.matching['IDs'][:,s]))[0]
                 n_arr = self.matching['IDs'][c_arr,s].astype('int')
 
                 for (c,n) in zip(c_arr,n_arr):
                     bool_arr = np.ones(S.shape[1],'bool')
-                    if self.status[c,s,2]:
+                    if self.status['activity'][c,s,2]:
                         for f in np.where(self.fields['status'][c,s,:])[0]:
                             field_bin = int(self.fields['location'][c,s,f,0])
-                            field_bin_l = int(self.fields['location'][c,s,f,0]-self.fields['width'][c,s,f,0]) % self.para['nbin']
-                            field_bin_r = int(self.fields['location'][c,s,f,0]+self.fields['width'][c,s,f,0]+1) % self.para['nbin']
+                            field_bin_l = int(self.fields['location'][c,s,f,0]-self.fields['width'][c,s,f,0]) % self.data['nbin']
+                            field_bin_r = int(self.fields['location'][c,s,f,0]+self.fields['width'][c,s,f,0]+1) % self.data['nbin']
                             if field_bin_l < field_bin_r:
-                                bool_arr[(binpos>field_bin_l) & (binpos<field_bin_r)] = False
+                                bool_arr[(dataBH['binpos']>field_bin_l) & (dataBH['binpos']<field_bin_r)] = False
                             else:
-                                bool_arr[(binpos>field_bin_l) | (binpos<field_bin_r)] = False
+                                bool_arr[(dataBH['binpos']>field_bin_l) | (dataBH['binpos']<field_bin_r)] = False
                     oof_frate[c,s],_,_ = get_firingrate(S[n,bool_arr],self.params['f'],sd_r=sd_r)
 
-                    if self.status[c,s,2]:
-                        binpos -= binpos.min()
-                        binpos *= 100/binpos.max()
-                        idx_teleport = np.where(np.diff(binpos)<-10)[0]+1
+                    if self.status['activity'][c,s,2]:
 
                         for f in np.where(self.status_fields[c,s,:])[0]:
                             bool_arr = np.ones(S.shape[1],'bool')
                             field_bin = int(self.fields['location'][c,s,f,0])
-                            field_bin_l = int(self.fields['location'][c,s,f,0]-self.fields['width'][c,s,f,0]) % self.para['nbin']
-                            field_bin_r = int(self.fields['location'][c,s,f,0]+self.fields['width'][c,s,f,0]+1) % self.para['nbin']
+                            field_bin_l = int(self.fields['location'][c,s,f,0]-self.fields['width'][c,s,f,0]) % self.data['nbin']
+                            field_bin_r = int(self.fields['location'][c,s,f,0]+self.fields['width'][c,s,f,0]+1) % self.data['nbin']
                             # print(field_bin_l,field_bin_r)
                             if field_bin_l < field_bin_r:
-                                bool_arr[(binpos<field_bin_l) | (binpos>field_bin_r)] = False
+                                bool_arr[(dataBH['binpos']<field_bin_l) | (dataBH['binpos']>field_bin_r)] = False
                             else:
-                                bool_arr[(binpos<field_bin_l) & (binpos>field_bin_r)] = False
+                                bool_arr[(dataBH['binpos']<field_bin_l) & (dataBH['binpos']>field_bin_r)] = False
 
-                            for t in range(len(idx_teleport)-1):
+                            for t in range(dataBH['trials']['ct']):
                                 if ~self.fields['trial_act'][c,s,f,t]:
-                                    bool_arr[idx_teleport[t]:idx_teleport[t+1]] = False
-                            # print(self.fields['location'][c,s,:,0])
-                            # print(self.fields['width'][c,s,:,0])
-                            # print(bool_arr.sum())
+                                    bool_arr[dataBH['trials']['start'][t]:dataBH['trials']['start'][t+1]] = False
+
                             if_frate[c,s,f],_,_ = get_firingrate(S[n,bool_arr],self.params['f'],sd_r=sd_r)
-                    #self.stats['firingrate'][c,s]
         self.stats['oof_firingrate_adapt'] = oof_frate
         self.stats['if_firingrate_adapt'] = if_frate
         return oof_frate, if_frate
@@ -749,8 +735,6 @@ class cluster:
     def get_transition_prob(self,which=['p_post_c','p_post_s']):
 
         status_arr = ['act','code','stable']
-
-        nbin = 100
 
 
         nSes = self.data['nSes']
@@ -945,6 +929,13 @@ class cluster:
                         # print(np.round(field_ref[f_stable]))
                         self.stats['transition']['stabilization'][s,int(field_ref[f_stable])] += 1
 
+
+    
+
+
+
+
+
     def fix_missed_loc(self):
 
         idx_c, idx_s, idx_f = np.where(np.isnan(self.fields['location'][...,0]) & (~np.isnan(self.fields['baseline'][...,0])))
@@ -987,6 +978,7 @@ class cluster:
         if ldBool[4]:
             self.compare = pickleData([],self.params['svCompare'],'load')
     
+
 
 
 ### ------------------------ CURRENTLY UNUSED CODE (START) ----------------------------- ###
@@ -1071,216 +1063,3 @@ def get_field_shifts(status,p_x,loc):
                             #i+=1
 
     return out
-
-
-
-
-class multi_cluster:
-    def __init__(self):
-        self.cMice = {}
-        self.set_sessions()
-
-    def set_sessions(self,start_ses=None):
-        self.sessions = {'34':   {'total':22,
-                             'order':range(1,23),
-                             'analyze':[3,15],
-                             'steady':  [3,15]},
-                    '35':   {'total':22,
-                             'order':range(1,23),
-                             'analyze':[3,15],
-                             'steady':  [3,64]},
-                    '65':   {'total':44,
-                             'order':range(1,45),
-                             'analyze':[1,20],
-                             'steady':  [3,20]}, ## maybe until 28
-                    '66':   {'total':45,
-                             'order':range(1,46),
-                             'analyze':[1,21],
-                             'steady':  [3,20]}, ## maybe until 29
-                    '72':   {'total':44,
-                             'order':range(1,45),
-                             'analyze':[1,20],
-                             'steady':  [3,20]}, ## maybe until 28
-                    '243':  {'total':   71,
-                             'order':[range(69,72),range(66,69),range(57,60),range(63,66),range(60,63),range(54,57),range(51,54),range(1,51)],
-                             'analyze': [1,71],
-                             'steady':  [53,71]},
-                    '245':  {'total':73,
-                             'order':[range(68,74),range(65,68),range(62,65),range(1,53),range(56,62),range(53,56)],
-                             'analyze':[1,73],
-                             'steady':  [45,64]},
-                    '246':  {'total':63,
-                             'order':[range(1,32),range(32,43),range(46,49),range(61,64),range(58,61),range(55,58),range(49,55),range(43,46)],       ## achtung!! between 32 & 32 there are 10 measurements missing over 150h
-                             'analyze':[1,60],
-                             'steady':  [33,60]},
-                    '756':  {'total':30,    ## super huge gap between 22 & 23
-                             'order':range(1,31),
-                             'analyze':[1,20],
-                             'steady':  [3,15]},
-                    '757':  {'total':28,    ## super huge gap between 20 & 21
-                             'order':range(1,29),
-                             'analyze':[1,20],
-                             'steady':  [3,15]},
-                    '758':  {'total':28,    ## super huge gap between 20 & 21
-                             'order':range(1,29),
-                             'analyze':[1,20],
-                             'steady':  [3,20]},
-                    '839':  {'total':24,    ## cpp injections starting at 20
-                             'order':range(1,25),
-                             'analyze':[3,20],
-                             'steady':[3,20]},
-                    '840':  {'total':25,    ## cpp injections starting at 20
-                             'order':range(1,25),
-                             'analyze':[1,18],
-                             'steady':  [3,18]},
-                    '841':  {'total':np.NaN,
-                             'analyze':[np.NaN,np.NaN]},
-                    '842':  {'total':np.NaN,
-                             'analyze':[np.NaN,np.NaN]},
-                    '879':  {'total':15,
-                             'order':range(1,16),
-                             'analyze':[1,15],
-                             'steady':  [3,15]},
-                    '882':  {'total':np.NaN,
-                             'analyze':[np.NaN,np.NaN]},
-                    '884':  {'total':24,    ## cpp injections starting at 20
-                             'order':range(1,25),
-                             'analyze':[3,16],
-                             'steady':[3,16]},
-                    '886':  {'total':24,    ## saline injections starting at 22
-                             'order':range(1,25),
-                             'analyze':[3,19]}, ## dont know yet
-                    '549':  {'total':29,    ## super huge gap between 20 & 21, kainate acid @ s21
-                             'order':range(1,30),
-                             'analyze':[3,20],
-                             'steady':  [3,20]}, #bad matching?!
-                    '551':  {'total':28,    ## super huge gap between 20 & 21, kainate acid @ s21
-                             'order':range(1,29),
-                             'analyze':[3,20],
-                             'steady':  [3,20]},
-                    '918shKO':  {'total':28,    # RW change at s16
-                                 'order':range(1,29),
-                             'analyze':[3,15],
-                             'steady':  [3,15]},
-                    '931wt':    {'total':28,    # RW change at s16
-                                 'order':range(1,29),
-                             'analyze':[3,15],
-                             'steady':  [3,15]},
-                    '943shKO':  {'total':28,    # RW change at s16
-                                 'order':range(1,29),
-                             'analyze':[3,15],
-                             'steady':  [3,15]},
-                    '231':  {'total':   87,
-                             'order':   range(1,88),   ## RW change at s11, s21, s31
-                             'analyze': [1,87],
-                             'steady':  [33,87]},
-                    '232':  {'total':   74,
-                             'order':   range(1,75),   ## RW change at s73, s83, s93,s94,s95
-                             'analyze': [18,72],
-                             'steady':  [18,72]},
-                    '236':  {'total':28,
-                             'order':range(1,29),
-                             'analyze':[3,28],
-                             'steady':  [3,28]},
-                    '762':  {'total':   112,
-                             'order':   range(1,113),
-                             'analyze': [1,112],
-                             'steady':  [17,87]},
-                    }
-        if not (start_ses is None):
-            for mouse in self.cMice.keys():
-                self.sessions[mouse]['analyze'][0] = start_ses
-
-
-
-    def load_mice(self,mice,load=False,reload=False,session_start=None,suffix=''):
-
-        for mouse in mice:
-            if (not (mouse in self.cMice.keys())) | reload:
-
-                if mouse in ['34','35','65','66','72','243','244','756','757','758','839','840','841','842','879','882','884','886']:
-                    basePath = '/media/wollex/Analyze_AS3/Data'
-                elif mouse in ['549','551']:
-                    basePath = '/media/wollex/Analyze_AS1/others'
-                elif mouse in ['918shKO','931wt','943shKO']:
-                    basePath = '/media/wollex/Analyze_AS1/Shank'
-                elif mouse in ['231','232','236','245','246','762']:
-                    basePath = '/media/wollex/Analyze_AS1/linstop'
-                else:
-                    print('Mouse %s does not exist'% mouse)
-
-                self.cMice[mouse] = cluster(basePath,mouse,self.sessions[mouse]['total'],session_order=self.sessions[mouse]['order'],dataSet='redetect',suffix=suffix)
-                if not load:
-                    self.cMice[mouse].run_complete(sessions=self.sessions[mouse]['analyze'],n_processes=10,reprocess=True)
-                else:
-                    self.cMice[mouse].load()
-
-        # if load:
-            # self.update_all(which=['sessions','status','compare'],session_start=session_start)
-
-    def update_all(self,mice=None,which=None,SNR_thr=2,rval_thr=0,Bayes_thr=10,rel_thr=0.1,A_thr=3,A0_thr=1,Arate_thr=2,pm_thr=0.3,alpha=1,nCluster_thr=2,session_start=None,session_end=None,sd_r=-1,steady=False):
-
-        if mice is None:
-            mice = self.cMice.keys()
-
-        progress = tqdm(mice,leave=True)
-
-
-        for mouse in tqdm(mice):
-            progress.set_description('updating mouse %s...'%mouse)
-            if 'sessions' in which:
-                if steady:
-                    ses = self.sessions[mouse]['steady']
-                else:
-                    ses = self.sessions[mouse]['analyze']
-
-                if not (session_start is None):
-                    ses[0] = session_start
-                if ((not (session_end is None)) & (not (session_end==-1))):
-                    ses[1] = session_end
-                elif session_end==-1:
-                    ses[1] = self.sessions[mouse]['total']
-                print(mouse)
-                print(ses)
-                self.cMice[mouse].classify_sessions(ses)
-                # self.cMice[mouse].classify_sessions()
-            if 'behavior' in which:
-                self.cMice[mouse].get_behavior()
-            if 'stats' in which:
-                self.cMice[mouse].get_stats(n_processes=4)
-            elif 'firingrate' in which:
-                _,_ = self.cMice[mouse].recalc_firingrate(sd_r)
-
-            if 'status' in which:
-                self.cMice[mouse].update_status(SNR_thr=SNR_thr,rval_thr=rval_thr,Bayes_thr=Bayes_thr,reliability_thr=rel_thr,A_thr=A_thr,A0_thr=A0_thr,Arate_thr=Arate_thr,MI_thr=0,pm_thr=pm_thr,alpha=alpha,nCluster_thr=nCluster_thr)
-            if 'compare' in which:
-                self.cMice[mouse].compareSessions(reprocess=True,n_processes=10)
-            if 'transition' in which:
-                # if not ('stability' in self.cMice[mouse].__dict__):
-                    # plot_PC_analysis(self.cMice[mouse],plot_arr=[6],N_bs=100,n_processes=10,sv=False,reprocess=True)
-                self.cMice[mouse].get_transition_prob()
-                self.cMice[mouse].get_locTransition_prob()
-            if 'save' in which:
-                self.cMice[mouse].save()
-
-# def get_firingrate(S,f=15,sd_r=1):
-#
-#     S[S<0.0001*S.max()]=0
-#     nCells = S.shape[0]
-#     baseline = np.ones(nCells)
-#     noise = np.zeros(nCells)
-#     Ns = (S>0).sum(1)
-#     n_arr = np.where(Ns>0)[0]
-#     for n in n_arr:
-#         trace = S[n,S[n,:]>0]
-#         baseline[n] = np.median(trace)
-#         trace -= baseline[n]
-#         trace *= -1*(trace <= 0)
-#         N_s = (trace>0).sum()
-#         noise[n] = np.sqrt((trace**2).sum()/(N_s*(1-2/np.pi)))
-#
-#     sd_r = sstats.norm.ppf((1-0.01)**(1/Ns)) if (sd_r==-1) else sd_r
-#     firing_threshold_adapt = baseline[:,np.newaxis] + sd_r[:,np.newaxis]*noise[:,np.newaxis]
-#
-#     N_spikes = np.floor(S / (firing_threshold_adapt)).sum(1)
-#     return N_spikes/(S.shape[1]/f),firing_threshold_adapt,S > firing_threshold_adapt

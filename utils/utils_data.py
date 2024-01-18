@@ -86,7 +86,16 @@ class cluster_parameters:
         }
 
         ## get nbins
-        pathPCFields = os.path.join(paths[0],self.paths['fileNamePCFields'])
+        s=0
+        while True:
+          pathPCFields = os.path.join(paths[s],self.paths['fileNamePCFields'])
+          if os.path.exists(pathPCFields):
+             print('breaking')
+             break
+          else:
+             s+=1
+             print('s=',s,pathPCFields)
+        
         with open(pathPCFields,'rb') as f_open:
             PCFields = pickle.load(f_open)
         self.data['nbin'] = PCFields['fields']['p_x'].shape[-1]

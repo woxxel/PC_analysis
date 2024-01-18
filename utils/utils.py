@@ -176,6 +176,28 @@ def wasserstein_distance(u_values, v_values, u_weights=None, v_weights=None):
     return np.sum(np.multiply(np.abs(u_cdf - v_cdf), deltas))
 
 
+
+# def bootstrap_shifts(fun,shifts,N_bs,nbin):
+
+#   L_track = 100
+#   N_data = len(shifts)
+#   if N_data == 0:
+#     return np.zeros(4)*np.NaN,np.zeros((2,4))*np.NaN,np.zeros(4)*np.NaN,np.zeros((2,nbin))*np.NaN
+
+#   samples = np.random.randint(0,N_data,(N_bs,N_data))
+#   # sample_randval = np.random.rand(N_bs,N_data)
+#   shift_distr_bs = np.zeros((N_bs,nbin))
+#   par = np.zeros((N_bs,4))*np.NaN
+#   for i in range(N_bs):
+#     shift_distr_bs[i,:] = shifts[samples[i,:],:].sum(0)
+#     shift_distr_bs[i,:] /= shift_distr_bs[i,:].sum()
+#     par[i,:],p_cov = fun(shift_distr_bs[i,:])
+#   p = np.nanmean(par,0)
+#   p_CI = np.percentile(par,[2.5,97.5],0)
+#   p_std = np.nanstd(par,0)
+
+#   return p, p_CI, p_std, shift_distr_bs
+
 def bootstrap_data(fun,data,N_bs):
   ## data:    data to be bootstrapped over
   ## fun:     function to be applied to data "f(data)". needs to return calculated parameters in first return statement
@@ -609,91 +631,6 @@ def fun_wrapper(fun,x,p):
     return fun(x,p[...,0],p[...,1],p[...,2],p[...,3],p[...,4],p[...,5],p[...,6])
 
 
-def gmean(X,axis=1,nanflag=False):
-
-  if nanflag:
-    return np.exp(np.nansum(np.log(X),axis)/(~np.isnan(X)).sum(axis))
-  else:
-    return np.exp(np.sum(np.log(X),axis)/X.shape[axis])
-
-def corr0(X,Y=None):
-
-  Y = X if Y is None else Y
-
-  X -= np.nanpercentile(X,20)
-  Y -= np.nanpercentile(X,20)
-
-  c_xy = np.zeros((len(X),len(X)))
-  for i,x in enumerate(X):
-    for j,y in enumerate(Y):
-      c_xy[i,j] = (x*y).sum()/np.sqrt((x**2).sum()*(y**2).sum())
-
-  return c_xy
-
-def seriation(Z,N,cur_index):
-    '''
-        input:
-            - Z is a hierarchical tree (dendrogram)
-            - N is the number of points given to the clustering process
-            - cur_index is the position in the tree for the recursive traversal
-        output:
-            - order implied by the hierarchical tree Z
-
-        seriation computes the order implied by a hierarchical tree (dendrogram)
-    '''
-    if cur_index < N:
-        return [cur_index]
-    else:
-        left = int(Z[cur_index-N,0])
-        right = int(Z[cur_index-N,1])
-        return (seriation(Z,N,left) + seriation(Z,N,right))
-
-def compute_serial_matrix(dist_mat,method="ward"):
-    '''
-        input:
-            - dist_mat is a distance matrix
-            - method = ["ward","single","average","complete"]
-        output:
-            - seriated_dist is the input dist_mat,
-              but with re-ordered rows and columns
-              according to the seriation, i.e. the
-              order implied by the hierarchical tree
-            - res_order is the order implied by
-              the hierarhical tree
-            - res_linkage is the hierarhical tree (dendrogram)
-
-        compute_serial_matrix transforms a distance matrix into
-        a sorted distance matrix according to the order implied
-        by the hierarchical tree (dendrogram)
-    '''
-    N = len(dist_mat)
-    flat_dist_mat = squareform(dist_mat,checks=False)
-
-    #res_linkage = linkage(flat_dist_mat, method=method,preserve_input=False)
-    res_linkage = sp.cluster.hierarchy.linkage(flat_dist_mat,method=method,optimal_ordering=True)
-    res_order = seriation(res_linkage, N, N + N-2)
-    seriated_dist = np.zeros((N,N))
-    a,b = np.triu_indices(N,k=1)
-    seriated_dist[a,b] = dist_mat[ [res_order[i] for i in a], [res_order[j] for j in b]]
-    seriated_dist[b,a] = seriated_dist[a,b]
-
-    return seriated_dist, res_order, res_linkage
-
-def gauss_smooth(X,smooth=None,mode='wrap'):
-  if (smooth is None) or not np.any(np.array(smooth)>0):
-    return X
-  else:
-    V = X.copy()
-    V[np.isnan(X)] = 0
-    VV = sp.ndimage.gaussian_filter(V,smooth,mode=mode)
-
-    W = 0*X.copy()+1
-    W[np.isnan(X)] = 0
-    WW = sp.ndimage.gaussian_filter(W,smooth,mode=mode)
-
-  return VV/WW
-
-
 def get_reliability(trial_map,map,field,t):
 
     ### need: obtain reliability for single (or batch of?) neuron
@@ -771,27 +708,6 @@ def get_reliability(trial_map,map,field,t):
 
     return rel, field_max, trial_field
 
-def get_firingrate(S,f=15,sd_r=1):
-
-    S[S<0.0001*S.max()]=0
-    Ns = (S>0).sum()
-    if Ns==0:
-      return 0,np.NaN,np.NaN
-    else:
-      trace = S[S>0]
-      baseline = np.median(trace)
-      trace -= baseline
-      trace *= -1*(trace <= 0)
-
-      Ns_baseline = (trace>0).sum()
-      noise = np.sqrt((trace**2).sum()/(Ns_baseline*(1-2/np.pi)))
-
-      sd_r = sstats.norm.ppf((1-0.1)**(1/Ns)) if (sd_r==-1) else sd_r
-      firing_threshold_adapt = baseline + sd_r*noise
-
-      N_spikes = np.floor(S / firing_threshold_adapt).sum()
-      return N_spikes/(S.shape[0]/f),firing_threshold_adapt,np.floor(S / firing_threshold_adapt)#S > firing_threshold_adapt#
-
 def add_number(fig,ax,order=1,offset=None):
 
     # offset = [-175,50] if offset is None else offset
@@ -842,6 +758,20 @@ def get_status_arr(cluster,SD=1):
     status_dep['stable'] = np.copy(status['code'][...,0])
 
     return status,status_dep
+
+def gauss_smooth(X,smooth=None,mode='wrap'):
+  if (smooth is None) or not np.any(np.array(smooth)>0):
+    return X
+  else:
+    V = X.copy()
+    V[np.isnan(X)] = 0
+    VV = sp.ndimage.gaussian_filter(V,smooth,mode=mode)
+
+    W = 0*X.copy()+1
+    W[np.isnan(X)] = 0
+    WW = sp.ndimage.gaussian_filter(W,smooth,mode=mode)
+
+  return VV/WW
 
 
 def get_CI(p,X,Y,alpha=0.05):
