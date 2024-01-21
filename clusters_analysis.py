@@ -18,7 +18,9 @@ from .utils import gauss_smooth, add_number, bootstrap_data
 
 class cluster_analysis(cluster):
 
-    # def __init__():
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setup_plots()
 
     def setup_plots(self,sv_ext='png'):
         
@@ -1653,7 +1655,7 @@ class plot_dat:
     self.col_fill = [[0.5,0.5,1],[0.5,1,0.5],[1,0.5,0.5]]
 
     self.h_edges = np.linspace(-0.5,nSes+0.5,nSes+2)
-    self.n_edges = np.linspace(1,nSes,self.data['nSes'])
+    self.n_edges = np.linspace(1,nSes,nSes)
     self.bin_edges = np.linspace(1,L_track,nbin)
 
     # self.bars = {}

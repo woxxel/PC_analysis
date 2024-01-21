@@ -37,14 +37,13 @@ class cluster:
     '''
 
     def __init__(self,
-            pathAssignments,
-            pathResults,
+            pathMouse,
             mouse,
             # dataSet='redetect',session_order=None,
             s_corr_min=0.2,suffix=''):
 
         paramsObj = cluster_parameters(mouse,s_corr_min)
-        paramsObj.set_paths(pathAssignments,pathResults,suffix)
+        paramsObj.set_paths(pathMouse,suffix)
 
         self.params = paramsObj.params
         self.paths = paramsObj.paths
@@ -211,15 +210,13 @@ class cluster:
         has_reference = False
         for s in range(self.data['nSes']):
 
-            if not os.path.exists(ldData['data'][s]['filePath']):
+            if not os.path.exists(os.path.join(self.paths['sessions'][s],self.paths['fileNamePCFields'])):
                 continue
-            
+
             self.alignment['shift'][s,:] = ldData['data'][s]['remap']['shift'] if has_reference else [0,0]
             self.alignment['corr'][s] = ldData['data'][s]['remap']['c_max'] if has_reference else 1
 
             self.alignment['flow'][s,...] = ldData['data'][s]['remap']['flow'] if has_reference else np.NaN
-
-
 
             idx_c = np.where(np.isfinite(self.matching['IDs'][:,s]))[0]
 
@@ -342,8 +339,7 @@ class cluster:
         self.prepare_dicts(which=['stats'])
 
         for (s,path) in tqdm(enumerate(self.paths['sessions']),total=self.data['nSes'],leave=False):
-            if not self.status['sessions'][s]:
-                continue
+            if not self.status['sessions'][s]: continue
             
             idx_c = np.where(np.isfinite(self.matching['IDs'][:,s]))[0]
             n_arr = self.matching['IDs'][idx_c,s].astype('int')
@@ -377,7 +373,8 @@ class cluster:
         self.prepare_dicts(which=['fields'])
         
         for (s,path) in tqdm(enumerate(self.paths['sessions']),total=self.data['nSes'],leave=False):
-        # for (s,s0) in enumerate(self.session_order):
+            if not self.status['sessions'][s]: continue
+            # for (s,s0) in enumerate(self.session_order):
             # pathSession = pathcat([self.params['pathMouse'],'Session%02d'%s0])
             pathFields = os.path.join(path,self.paths['fileNamePCFields'])
             if os.path.exists(pathFields):
@@ -386,28 +383,14 @@ class cluster:
                 n_arr = self.matching['IDs'][idx_c,s].astype('int')
                 nCells = len(n_arr)
 
-                # try:
-                #     pathFiring = os.path.join(path,os.path.splitext(self.paths['svname_firingstats'])[0] + '.pkl')
-                #     firingstats_tmp = pickleData([],pathFiring,prnt=False)
-                # except:
-                #     pathFiring = os.path.join(path,self.para['svname_firingstats'])
-                #     print('new detection not found, loading %s'%pathFiring)
-                #     firingstats_tmp = sio.loadmat(pathFiring,squeeze_me=True)
                 with open(pathFields,'rb') as f_open:
                     ld = pickle.load(f_open)
                 firingstats_tmp = ld['firingstats']
                 fields = ld['fields']
-                # ### hand over all other values
-                # try:
-                #     pathFields = os.path.join(path,os.path.splitext(self.para['svname_fields'])[0] + '.pkl')
-                #     fields = pickleData([],pathFields,prnt=False)
-                # except:
-                #     pathFields = os.path.join(path,self.para['svname_fields'])
-                #     print('new detection not found, loading %s'%pathFields)
-                #     fields = sio.loadmat(pathFields,squeeze_me=True);
+
+                ### hand over all other values
                 self.fields['nModes'][idx_c,s] = np.minimum(2,(np.isfinite(fields['parameter'][n_arr,:,3,0]).sum(1)).astype('int'))
-                # print(firingstats_tmp['trial_field'].shape)
-                # return
+
                 for (c,n) in zip(idx_c,n_arr):
 
                     if self.fields['nModes'][c,s] > 0:   ## cell is PC

@@ -57,44 +57,49 @@ class cluster_parameters:
             'nbin': None,
         }
 	
-    def set_paths(self,pathAssignments,pathResults,suffix=''):
+    def set_paths(self,pathMouse,suffix=''):
         
+        pathAssignments = os.path.join(pathMouse,f'matching/neuron_registration_{suffix}.pkl')
         ## load stored filenames in order in which they were matched
         with open(pathAssignments,'rb') as f_open:
             ld = pickle.load(f_open)
         paths = [os.path.split(session['filePath'])[0] for key,session in ld['data'].items() if isinstance(key,int)]
         
+        prepath = os.path.commonpath(paths)
+        paths = [os.path.join(pathMouse,os.path.relpath(path,prepath)) for path in paths]
+
         self.data['nC'],self.data['nSes'] = ld['results']['assignments'].shape
         
         self.paths = {
             'sessions':               paths,
             # 'data':                   pathData,
             'assignments':            pathAssignments,
-            'figures':                os.path.join(pathResults,'figures'),#'/home/wollex/Data/Science/PhD/Thesis/pics/Methods',
+            'figures':                os.path.join(pathMouse,'figures'),#'/home/wollex/Data/Science/PhD/Thesis/pics/Methods',
             
             ### provide names for distinct result files (needed?)
-            'fileNamePCFields':       'PC_fields%s.pkl'%suffix,
+            'fileNamePCFields':       f'PC_fields{suffix}.pkl',
             'fileNameCNMF':           'OnACID_results.hdf5',
             'fileNameBehavior':       'aligned_behavior.pkl',
 
-            'pathResults':            pathResults,
-            'svSessions':             os.path.join(pathResults,'clusterSessions_%s.pkl'%suffix),
-            'svIDs':                  os.path.join(pathResults,'clusterIDs_%s.pkl'%suffix),
-            'svStats':                os.path.join(pathResults,'clusterStats_%s.pkl'%suffix),
-            'svPCs':                  os.path.join(pathResults,'clusterPCs_%s.pkl'%suffix),
-            'svCompare':              os.path.join(pathResults,'clusterCompare_%s.pkl'%suffix)
+            'pathResults':            pathMouse,
+            'svSessions':             os.path.join(pathMouse,'clusterSessions_%s.pkl'%suffix),
+            'svIDs':                  os.path.join(pathMouse,'clusterIDs_%s.pkl'%suffix),
+            'svStats':                os.path.join(pathMouse,'clusterStats_%s.pkl'%suffix),
+            'svPCs':                  os.path.join(pathMouse,'clusterPCs_%s.pkl'%suffix),
+            'svCompare':              os.path.join(pathMouse,'clusterCompare_%s.pkl'%suffix)
         }
 
         ## get nbins
         s=0
+
         while True:
           pathPCFields = os.path.join(paths[s],self.paths['fileNamePCFields'])
           if os.path.exists(pathPCFields):
-             print('breaking')
+            #  print('breaking')
              break
           else:
              s+=1
-             print('s=',s,pathPCFields)
+            #  print('s=',s,pathPCFields)
         
         with open(pathPCFields,'rb') as f_open:
             PCFields = pickle.load(f_open)

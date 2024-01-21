@@ -27,11 +27,13 @@ import warnings
 
 from caiman.utils.utils import load_dict_from_hdf5
 
-from .utils import periodic_distr_distance, bootstrap_data, gauss_smooth, get_reliability, com, get_firingrate, compute_serial_matrix, get_status_arr, get_CI, add_number
+from .utils import periodic_distr_distance, bootstrap_data, gauss_smooth, get_reliability, com, get_status_arr, get_CI, add_number
+
+# get_firingrate, compute_serial_matrix, 
 from .utils import pickleData
 # from .utils_analysis import get_performance, define_active
 
-sys.path.append('/home/wollex/Data/Science/PhD/Programs/PC_modelling/')
+# sys.path.append('/home/wollex/Data/Science/PhD/Programs/PC_modelling/')
 # from model_turnover import *
 
 warnings.filterwarnings("ignore")
