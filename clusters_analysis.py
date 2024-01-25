@@ -1423,6 +1423,147 @@ class cluster_analysis(cluster):
 
 
 
+    def plot_firingmaps(self):
+
+        nSes = self.data['nSes']
+        nbin = self.data['nbin']
+        print('### plot firingmap over sessions and over time ###')
+        # if nSes>65:
+            # s_ref = 50
+        # else:
+        s_ref = 10
+        n_plots = 5
+        n_plots_half = (n_plots-1)/2
+        # ordered = False
+
+        # if ordered:
+            # print('aligned order')
+        idxes_tmp = np.where(self.status_fields[:,s_ref,:])
+        idxes = idxes_tmp[0]
+        sort_idx = np.argsort(self.fields['location'][idxes_tmp[0],s_ref,idxes_tmp[1],0])
+
+        # idxes = np.where(self.status['activity'][:,s_ref,2])[0]
+        # sort_idx = np.argsort(np.nanmin(self.fields['location'][self.status['activity'][:,s_ref,2],s_ref,:,0],-1))
+        sort_idx_ref = idxes[sort_idx]
+        nID_ref = len(sort_idx_ref)
+        # else:
+            # print('non-aligned order')
+
+        width=0.11
+        fig = plt.figure(figsize=(7,5),dpi=self.pl_dat.sv_opt['dpi'])
+
+        ax = plt.axes([0.75,0.05,0.225,0.275])
+        pic_path = '/home/wollex/Data/Science/PhD/Thesis/pics/others/status_sketch.png'
+        ax.axis('off')
+        if os.path.exists(pic_path):
+            im = mpimg.imread(pic_path)
+            ax.imshow(im)
+            ax.set_xlim([0,im.shape[1]])
+            self.pl_dat.add_number(fig,ax,order=4,offset=[-75,50])
+
+
+        ax = plt.axes([0.1,0.525,width,0.4])
+        self.pl_dat.add_number(fig,ax,order=1)
+        ax = plt.axes([0.1,0.08,width,0.4])
+        self.pl_dat.add_number(fig,ax,order=2)
+        for (i,s) in enumerate(range(int(s_ref-n_plots_half),int(s_ref+n_plots_half)+1)):
+            ax = plt.axes([0.1+i*width,0.525,width,0.4])
+            # ax = plt.subplot(2,n_plots+1,i+1)
+            idxes_tmp = np.where(self.status_fields[:,s,:])
+            idxes = idxes_tmp[0]
+            sort_idx = np.argsort(self.fields['location'][idxes_tmp[0],s,idxes_tmp[1],0])
+            # idxes = np.where(self.status['activity'][:,s,2])[0]
+            # sort_idx = np.argsort(np.nanmin(self.fields['location'][self.status['activity'][:,s,2],s,:,0],-1))
+            sort_idx = idxes[sort_idx]
+            nID = len(sort_idx)
+
+            firingmap = self.stats['firingmap'][sort_idx,s,:]
+            firingmap = gauss_smooth(firingmap,[0,3])
+            firingmap = firingmap - np.nanmin(firingmap,1)[:,np.newaxis]
+            # firingmap = firingmap / np.nanmax(firingmap,1)[:,np.newaxis]
+            ax.imshow(firingmap,aspect='auto',origin='upper',cmap='jet',clim=[0,5])
+
+
+            title_str = "s"
+            ds = s-s_ref
+            if ds<0:
+                title_str += "%d"%ds
+            elif ds>0:
+                title_str += "+%d"%ds
+
+            ax.set_title(title_str)
+
+            # ax.plot([self.params['zone_idx']['reward'][0],self.params['zone_idx']['reward'][0]],[1,nID],color='g',linestyle=':',linewidth=3)
+            # ax.plot([self.params['zone_idx']['reward'][1],self.params['zone_idx']['reward'][1]],[1,nID],color='g',linestyle=':',linewidth=3)
+            if i == 0:
+                #ax.plot([self.params['zone_idx']['gate'][0],self.params['zone_idx']['gate'][0]],[1,nID],color='r',linestyle=':',linewidth=3)
+                #ax.plot([self.params['zone_idx']['gate'][1],self.params['zone_idx']['gate'][1]],[1,nID],color='r',linestyle=':',linewidth=3)
+                #ax.set_xticks(np.linspace(0,nbin,3))
+                #ax.set_xticklabels(np.linspace(0,nbin,3))
+                ax.set_ylabel('Neuron ID')
+            else:
+                ax.set_yticklabels([])
+            ax.set_xticks([])
+            ax.set_xlim([0,nbin])
+            ax.set_ylim([nID,0])
+
+            ax = plt.axes([0.1+i*width,0.08,width,0.4])
+            # ax = plt.subplot(2,n_plots+1,i+2+n_plots)
+            # if not ordered:
+
+            firingmap = self.stats['firingmap'][sort_idx_ref,s,:]
+            firingmap = gauss_smooth(firingmap,[0,3])
+            firingmap = firingmap - np.nanmin(firingmap,1)[:,np.newaxis]
+            # firingmap = firingmap / np.nanmax(firingmap,1)[:,np.newaxis]
+            im = ax.imshow(firingmap,aspect='auto',origin='upper',cmap='jet',clim=[0,5])
+
+            ax.set_xlim([0,nbin])
+            if i == 0:
+                ax.set_ylabel('Neuron ID')
+            else:
+                ax.set_xticklabels([])
+                ax.set_yticklabels([])
+            ax.set_ylim([nID_ref,0])
+
+            if i==n_plots_half:
+                ax.set_xlabel('Location [bin]')
+
+        cbaxes = plt.axes([0.67,0.725,0.01,0.2])
+        cb = fig.colorbar(im,cax = cbaxes,orientation='vertical')
+        # cb.set_ticks([0,1])
+        # cb.set_ticklabels(['low','high'])
+        cb.set_label('$\\nu$',fontsize=10)
+
+        ax = plt.axes([0.825,0.5,0.125,0.45])
+        self.pl_dat.add_number(fig,ax,order=3,offset=[-125,30])
+        idx_strong_PC = np.where((self.status['activity'][...,2].sum(1)>10) & (self.status['activity'][...,1].sum(1)<70))[0]
+        idx_PC = np.random.choice(idx_strong_PC)    ## 28,1081
+        print(idx_PC)
+        firingmap = self.stats['firingmap'][idx_PC,...]
+        firingmap = gauss_smooth(firingmap,[0,3])
+        firingmap = firingmap - np.nanmin(firingmap,1)[:,np.newaxis]
+        # firingmap = firingmap / np.nanmax(firingmap,1)[:,np.newaxis]
+        ax.imshow(firingmap,aspect='auto',origin='upper',cmap='jet',clim=[0,5])
+        ax.barh(range(nSes),-(self.status['activity'][idx_PC,:,2]*10.),left=-5,facecolor='r')
+        # idx_coding = np.where(self.status[idx_PC,:,2])[0]
+        # ax.plot(-np.ones_like(idx_coding)*10,idx_coding,'ro')
+        ax.set_xlim([-10,nbin])
+        ax.set_ylim([nSes,0])
+        ax.set_ylabel('Session')
+        ax.set_xlabel('Location [bins]')
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.spines['top'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+        #plt.set_cmap('jet')
+        plt.tight_layout()
+        plt.show(block=False)
+
+        # if sv:
+            # self.pl_dat.save_fig('PC_mapDynamics')
+
+
+
 
     def plot_XY(self):
 

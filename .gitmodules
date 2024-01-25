@@ -4,3 +4,6 @@
 [submodule "PC_detection"]
 	path = PC_detection
 	url = https://github.com/woxxel/PC_detection.git
+[submodule "data_pipeline"]
+	path = data_pipeline
+	url = https://github.com/woxxel/data_pipeline

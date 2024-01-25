@@ -1,6 +1,6 @@
 ''' contains several functions, defining data and parameters used for analysis
 
-  set_para
+    set_para
 
 '''
 import os, pickle
@@ -63,10 +63,9 @@ class cluster_parameters:
         ## load stored filenames in order in which they were matched
         with open(pathAssignments,'rb') as f_open:
             ld = pickle.load(f_open)
+
         paths = [os.path.split(session['filePath'])[0] for key,session in ld['data'].items() if isinstance(key,int)]
-        
-        prepath = os.path.commonpath(paths)
-        paths = [os.path.join(pathMouse,os.path.relpath(path,prepath)) for path in paths]
+        paths = replace_relative_path(paths,pathMouse)
 
         self.data['nC'],self.data['nSes'] = ld['results']['assignments'].shape
         
@@ -93,13 +92,13 @@ class cluster_parameters:
         s=0
 
         while True:
-          pathPCFields = os.path.join(paths[s],self.paths['fileNamePCFields'])
-          if os.path.exists(pathPCFields):
-            #  print('breaking')
-             break
-          else:
-             s+=1
-            #  print('s=',s,pathPCFields)
+            pathPCFields = os.path.join(paths[s],self.paths['fileNamePCFields'])
+            if os.path.exists(pathPCFields):
+                #  print('breaking')
+                break
+            else:
+                s+=1
+                #  print('s=',s,pathPCFields)
         
         with open(pathPCFields,'rb') as f_open:
             PCFields = pickle.load(f_open)
@@ -113,33 +112,36 @@ class cluster_parameters:
 
 
 def extend_dict(D,n,D2=None,dim=0,exclude=[]):
+    '''
+        Extends all entries of dictionary D along axis dim to contain n entries
+        filled with either placeholder values, or values provided by D2. Can exclude
+        keys by providing a list to 'exclude'
+    '''
+    
+    if not bool(D):
+        return D2
+    for key in D.keys():
+        if not (key in exclude):
+            if type(D[key]) is dict:
+                if not (D2 is None):
+                    extend_dict(D[key],n,D2[key],dim)
+                else:
+                    extend_dict(D[key],n,None,dim)
+            else:
+                dims = np.array(D[key].shape[:])
+                dims[dim] = n
+                if D[key].dtype == 'float':
+                    D[key] = np.append(D[key],np.full(dims,np.NaN),dim)
+                else:
+                    D[key] = np.append(D[key],np.zeros(dims).astype(D[key].dtype),dim)
+                if not (D2 is None):
+                    D[key][-n:,...] = D2[key]
+    return D
 
-  '''
-    Extends all entries of dictionary D along axis dim to contain n entries
-    filled with either placeholder values, or values provided by D2. Can exclude
-    keys by providing a list to 'exclude'
-  '''
-  if not bool(D):
-    return D2
-  for key in D.keys():
-    if not (key in exclude):
-      if type(D[key]) is dict:
-        if not (D2 is None):
-          extend_dict(D[key],n,D2[key],dim)
-        else:
-          extend_dict(D[key],n,None,dim)
-      else:
-        dims = np.array(D[key].shape[:])
-        dims[dim] = n
-        if D[key].dtype == 'float':
-          D[key] = np.append(D[key],np.full(dims,np.NaN),dim)
-        else:
-          D[key] = np.append(D[key],np.zeros(dims).astype(D[key].dtype),dim)
-        if not (D2 is None):
-          D[key][-n:,...] = D2[key]
-  return D
-
-
+def replace_relative_path(paths,newPath):
+    prepath = os.path.commonpath(paths)
+    return [os.path.join(newPath,os.path.relpath(path,prepath)) for path in paths]
+        
 # def clean_dict(D,idx,dim=0):
 #   assert dim==0, 'Only works for dimension 0 for now'
 #   print('cleaning dictionary of %d entries'%np.count_nonzero(~idx))

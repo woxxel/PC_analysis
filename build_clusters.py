@@ -105,7 +105,8 @@ class cluster:
                 'shift':np.zeros((self.data['nSes'],2)),
                 'corr':np.full(self.data['nSes'],np.NaN),
                 'borders':np.full((2,2),np.NaN),
-                'flow': np.zeros((self.data['nSes'],2)+self.params['dims'])
+                'flow': np.zeros((self.data['nSes'],2)+self.params['dims']),
+                'transposed': np.zeros(self.data['nSes'],'bool')
             }
 
         if 'matching' in which and (not hasattr(self,'matching') or overwrite):
@@ -188,6 +189,7 @@ class cluster:
         #     else:
         #         print('nope')
 
+
     def get_matching(self):
         '''
             loads information from matching algorithm, such as session-specifics (e.g. shift and session-correlation) and neuron specifics (e.g. center of mass, matching probability, IDs)
@@ -212,7 +214,8 @@ class cluster:
 
             if not os.path.exists(os.path.join(self.paths['sessions'][s],self.paths['fileNamePCFields'])):
                 continue
-
+            
+            self.alignment['transposed'][s] = ldData['data'][s]['remap']['transposed'] if has_reference else False
             self.alignment['shift'][s,:] = ldData['data'][s]['remap']['shift'] if has_reference else [0,0]
             self.alignment['corr'][s] = ldData['data'][s]['remap']['c_max'] if has_reference else 1
 
@@ -237,6 +240,7 @@ class cluster:
                 scores_now = p_all.toarray()
                 self.matching['score'][idx_c,s,1] = [max(scores_now[c,np.where(scores_now[c,:]!=self.matching['score'][c,s,0])[0]]) for c in idx_c]
             has_reference = True
+        
         self.classify_sessions()
         self.classify_cluster()
 
