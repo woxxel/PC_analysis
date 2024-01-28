@@ -7,29 +7,14 @@
 
 '''
 
-import pickle, cmath, time, cv2, h5py
+import pickle, cmath
 import scipy as sp
 import scipy.stats as sstats
-from scipy import signal, cluster
+from scipy import signal
 import numpy as np
 import matplotlib.pyplot as plt
-from fastcluster import linkage
-from scipy.spatial.distance import squareform
-
-def find_modes(data,axis=None,sort_it=True):
-
-  if axis is not None:
-    def fnc(x): return find_modes(x,sort_it=sort_it)
-    dataMode = np.apply_along_axis(fnc, axis, data)
-  else:
-    data = data[np.isfinite(data)]
-    if sort_it:
-      data = np.sort(data)
-
-    dataMode = _hsm(data)
-
-  return dataMode
-
+# from fastcluster import linkage
+# from scipy.spatial.distance import squareform
 
 
 def _hsm(data):

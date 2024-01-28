@@ -196,13 +196,19 @@ class cluster:
         '''
 
         self.prepare_dicts(which=['alignment','matching','stats'])
+        
+        ## load model first, to allow proper matching of footprints
+        with open(os.path.join(*os.path.split(self.paths['assignments'])[:-1],'match_model_.pkl'),'rb') as f_open:
+            ldModel = pickle.load(f_open)
+        self.matching['f_same'] = ldModel['f_same']
 
         with open(self.paths['assignments'],'rb') as f_open:
             ldData = pickle.load(f_open)
+
         self.matching['IDs'] = ldData['results']['assignments']
 
         ## get matching results
-        p_matched = ldData['results']['p_matched']
+        self.matching['score'] = ldData['results']['p_matched']
         self.matching['com'] = ldData['results']['cm']
 
         self.stats['SNR'] = ldData['results']['SNR_comp']
@@ -221,24 +227,24 @@ class cluster:
 
             self.alignment['flow'][s,...] = ldData['data'][s]['remap']['flow'] if has_reference else np.NaN
 
-            idx_c = np.where(np.isfinite(self.matching['IDs'][:,s]))[0]
+            # idx_c = np.where(np.isfinite(self.matching['IDs'][:,s]))[0]
 
-            ## match- and best non-match-score should be calculated and stored in matching algorithm
-            if not has_reference:
-                self.matching['score'][idx_c,s,0] = 1
-                self.matching['score'][idx_c,s,1] = np.NaN
-            elif s in ldData['data'].keys():
+            # ## match- and best non-match-score should be calculated and stored in matching algorithm
+            # if not has_reference:
+            #     self.matching['score'][idx_c,s,0] = 1
+            #     self.matching['score'][idx_c,s,1] = np.NaN
+            # elif s in ldData['data'].keys():
 
-                p_all = ldData['data'][s]['p_same']
+            #     p_all = ldData['data'][s]['p_same']
 
-                idx_c_first = idx_c[idx_c>=p_all.shape[0]]    # first occurence of a neuron is always certain match!
-                self.matching['score'][idx_c_first,s,0] = 1
-                self.matching['score'][idx_c_first,s,1] = np.NaN
+            #     idx_c_first = idx_c[idx_c>=p_all.shape[0]]    # first occurence of a neuron is always certain match!
+            #     self.matching['score'][idx_c_first,s,0] = 1
+            #     self.matching['score'][idx_c_first,s,1] = np.NaN
 
-                idx_c = idx_c[idx_c<p_all.shape[0]]    # remove entries of first-occurence neurons (no matching possible)
-                self.matching['score'][idx_c,s,0] = p_matched[idx_c,s]
-                scores_now = p_all.toarray()
-                self.matching['score'][idx_c,s,1] = [max(scores_now[c,np.where(scores_now[c,:]!=self.matching['score'][c,s,0])[0]]) for c in idx_c]
+            #     idx_c = idx_c[idx_c<p_all.shape[0]]    # remove entries of first-occurence neurons (no matching possible)
+            #     self.matching['score'][idx_c,s,0] = p_matched[idx_c,s]
+            #     scores_now = p_all.toarray()
+            #     self.matching['score'][idx_c,s,1] = [max(scores_now[c,np.where(scores_now[c,:]!=self.matching['score'][c,s,0])[0]]) for c in idx_c]
             has_reference = True
         
         self.classify_sessions()
@@ -299,6 +305,7 @@ class cluster:
         self.status['clusters'] = np.ones(self.data['nC']).astype('bool')
         if idxes is None:
             idxes = (self.stats['SNR']>self.params['SNR_thr']) & (self.stats['r_values']>self.params['rval_thr']) & (self.stats['CNN']>self.params['CNN_thr'])
+        print(idxes.sum(0))
         # self.status['clusters'][(~np.isnan(self.matching['IDs'])).sum(1)<self.params['min_cluster_count']] = False
         self.status['clusters'][idxes[:,self.status['sessions']].sum(1)<self.params['min_cluster_count']] = False
 
@@ -308,6 +315,9 @@ class cluster:
 
             idx_remove_high = self.matching['com'][:,self.status['sessions'],i] > (self.alignment['borders'][1,i]-self.params['border_margin'])
             self.status['clusters'][np.any(idx_remove_high,1)] = False
+
+            print(np.any(idx_remove_low,1).sum())
+            print(np.any(idx_remove_high,1).sum())
 
 
 
