@@ -1,4 +1,3 @@
-from multiprocessing import get_context
 
 import os, time, warnings, itertools, pickle
 import numpy as np
@@ -6,21 +5,19 @@ import scipy as sp
 from tqdm import *
 import itertools
 
+from multiprocessing import get_context
 from caiman.utils.utils import load_dict_from_hdf5
 
 from .utils import pickleData, fdr_control, periodic_distr_distance, get_reliability, get_status_arr, get_average
 from .utils import cluster_parameters
 
-from matplotlib import pyplot as plt
-
-from .PC_detection.detection.utils import prepare_behavior, get_firingrate
-# from plot_PC_analysis import plot_PC_analysis
+from .placefield_detection import prepare_behavior, get_firingrate
 from .mouse_data_scripts.get_session_specifics import *
 
 
 warnings.filterwarnings("ignore")
 
-class cluster:
+class cluster_analysis:
     '''
         class of functions and objects to accumulate previously obtained 
         results processing sessions separately and calculating cross session statistics

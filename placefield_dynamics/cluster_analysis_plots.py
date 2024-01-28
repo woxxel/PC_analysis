@@ -9,14 +9,14 @@ import scipy.stats as sstats
 from collections import Counter
 
 from multiprocessing import get_context
-
-
 from caiman.utils.utils import load_dict_from_hdf5
-from .build_clusters import cluster
-from .utils import get_ICPI, get_dp
-from .utils import gauss_smooth, add_number, bootstrap_data
 
-class cluster_analysis(cluster):
+
+from .cluster_analysis import cluster_analysis
+
+from .utils import get_ICPI, get_dp, gauss_smooth, add_number, bootstrap_data
+
+class cluster_analysis_plots(cluster_analysis):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1267,7 +1267,7 @@ class cluster_analysis(cluster):
 
         # print('plot fmap corr vs distance for 1. all PC, 2. all active')
         # ax = plt.axes([0.1,0.1,0.25,0.25])
-        # D_ROIs_PC = sp.spatial.distance.squareform(sp.spatial.distance.pdist(self.matching['com'][c_arr_PC,s,:]))
+        # D_ROIs_PC =  sp.spatial.distance.pdist(self.matching['com'][c_arr_PC,s,:]))
         # ax.hist(D_ROIs[mat_PC].flat,np.linspace(0,700,201))
 
         nsteps = 51

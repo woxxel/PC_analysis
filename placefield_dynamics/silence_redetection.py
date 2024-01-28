@@ -6,45 +6,33 @@ import scipy.sparse
 from tqdm import *
 from scipy.io import loadmat
 from scipy.optimize import linear_sum_assignment
-# from .utils import find_modes, pickleData, com, get_shift_and_flow, normalize_sparse_array, add_number
-# from .neuron_matching.matching.utils import replace_relative_path
-# sys.path.append('/home/wollex/Data/Science/PhD/Programs/CaImAn')
 
 import caiman as cm
 from caiman.source_extraction import cnmf as cnmf
-# from caiman.source_extraction.cnmf.initialization import hals
 
-# from caiman.paths import caiman_datadir
-# from caiman.motion_correction import MotionCorrect
-# from past.utils import old_div
+from .neuron_detection import *
+from .neuron_matching import get_shift_and_flow, calculate_statistics, calculate_p
+from .cluster_analysis import cluster_analysis
 
-from .neuron_matching.matching import get_shift_and_flow, calculate_statistics, calculate_p
-# from .neuron_matching.matching.utils.utils_analysis import calculate_p
-from .build_clusters import *
+# from .PC_detection.detection.utils import find_modes
 
-from .PC_detection.detection.utils import find_modes
 
-from .data_pipeline.preprocessing import *
-from .data_pipeline.image_processing import *
-from .data_pipeline.parameters import CaImAn as CaImAn_paras
+class silence_redetection:
 
-### import packages from CNMF, etc
-
-class test_silence_in_sessions:
-
-    def __init__(self,mousePath,
-                dataset='AlzheimerMice_Hayashi',mouse='556wt',
-                source='/usr/users/cidbn1/neurodyn/',
+    def __init__(self,dataset='AlzheimerMice_Hayashi',mouse='556wt',
+                path_detected='usr/users/cidbn1/placefields',
+                path_images='/usr/users/cidbn1/neurodyn',
                 fileName_results='CaImAn_complete.hdf5'):
 
         '''
-
+            
         '''
-        
-        self.pathSource = os.path.join(source,dataset,mouse)
+
+        mousePath = os.path.join(path_detected,dataset,mouse)        
+        self.path_images = os.path.join(path_images,dataset,mouse)
         self.fileName_results = fileName_results
 
-        self.cluster = cluster(mousePath,'')
+        self.cluster = cluster_analysis(mousePath,'')
         self.cluster.get_matching()
 
         self.params = {
@@ -54,39 +42,39 @@ class test_silence_in_sessions:
 
         self.dims = self.cluster.params['dims']
 
-    def run_all(self,n_processes=4,
-                plt_bool=False,complete_new=False):
 
-        '''
-            TODO:
-                * split into one code for a single session, and one code iterating over it, to allow hpc-queuing
-                (what kind of data is required by each instance? what can be removed?)
-        '''
-        
+    # def run_all(self,n_processes=4,
+    #             plt_bool=False,complete_new=False):
 
-        
+    #     '''
+    #         TODO:
+    #             * split into one code for a single session, and one code iterating over it, to allow hpc-queuing
+    #             (what kind of data is required by each instance? what can be removed?)
+    #     '''
 
-        for s,path in enumerate(self.cluster.paths['sessions']):
+    #     for s,path in enumerate(self.cluster.paths['sessions']):
 
             
-            ## test some stuff (such as session correlation and shift distance)
-            if s==0:
-                process = True
-            else:
-                process = self.cluster['alignment']['corr'][s] > self.params['s_corr_min']
-                print(path,self.cluster['alignment']['shifts'][s,:])
-                print(np.sqrt(np.sum([x**2 for x in self.cluster['alignment']['shifts'][s,:]])))
-                process &= np.sqrt(np.sum([x**2 for x in self.cluster['alignment']['shifts'][s,:]])) < self.params['max_shift']
+    #         ## test some stuff (such as session correlation and shift distance)
+    #         if s==0:
+    #             process = True
+    #         else:
+    #             process = self.cluster['alignment']['corr'][s] > self.params['s_corr_min']
+    #             print(path,self.cluster['alignment']['shifts'][s,:])
+    #             print(np.sqrt(np.sum([x**2 for x in self.cluster['alignment']['shifts'][s,:]])))
+    #             process &= np.sqrt(np.sum([x**2 for x in self.cluster['alignment']['shifts'][s,:]])) < self.params['max_shift']
 
-            if process:
-                self.process_session(s)
-                # print('process this!')
-                # pass
+    #         if process:
+    #             self.process_session(s)
+    #             # print('process this!')
+    #             # pass
 
     
-    def process_session(self,s,n_processes=8,ssh_alias='transfer-gwdg',plt_bool=True):
+    def process_session(self,s,n_processes=8,path_tmp='data/tmp',ssh_alias='transfer-gwdg',plt_bool=True):
 
         self.currentSession = self.cluster.paths['sessions'][s]
+        self.path_tmp = os.path.join(path_tmp,os.path.split(self.currentSession)[-1])
+
         print('process',self.currentSession)
         t_start = time.time()
         self.obtain_footprints(s)
@@ -112,11 +100,8 @@ class test_silence_in_sessions:
     def obtain_footprints(self,s,max_diff=None,complete_new=False):
 
         print(f'Run redetection of "silent" cells on session {s+1}')
-
-        
         
         ## prepare some dictionaries for storing in- and output data
-        
         if max_diff is None:
             max_diff = self.cluster.data['nSes']
 
@@ -133,8 +118,8 @@ class test_silence_in_sessions:
             'out': {
                 'active': None,
                 'silent': None,
-                'match_to_c': None,     # indexing of matching cluster number
-                'match_to_n': None,     # indexing to session neuron number
+                # 'match_to_c': None,     # indexing of matching cluster number
+                # 'match_to_n': None,     # indexing to session neuron number
             },
         }
 
@@ -248,33 +233,30 @@ class test_silence_in_sessions:
         max_thr = 0.001
         self.dataIn['A'] = scipy.sparse.vstack([a.multiply(a>(max_thr*a.max()))/a.sum() for a in self.dataIn['A'].T]).T
 
-    def prepare_CNMF(self,path_target='data/tmp',
+    def prepare_CNMF(self,
                 n_processes=8,
                 ssh_alias='hpc-sofja'):
 
         '''
             function to set up a CaImAn batch-processing instance
         '''
-        self.currentSession_source = os.path.join(self.pathSource,os.path.split(self.currentSession)[-1])
-        
-        # if os.path.exists(os.path.join(self.currentSession,self.fileName_results)):
-        #     print("Processed file already present - skipping")
-        #     return
+        self.currentSession_source = os.path.join(self.path_images,os.path.split(self.currentSession)[-1])
 
         ### if file(s) are on remote, copy over data, first
-        
-        path_target_images = os.path.join(path_target,'images')
         if ssh_alias:
-            get_data_from_server(self.currentSession_source,path_target_images,ssh_alias)
+            path_tmp_images = os.path.join(self.path_tmp,'images')
+            get_data_from_server(self.currentSession_source,path_tmp_images,ssh_alias)
         else:
-            path_target_images = self.currentSession_source
+            path_tmp_images = self.currentSession_source
         
         ### if files present in single tifs, only, run batch-creation
-        path_to_stacks = make_stack_from_single_tifs(path_target_images,path_target,data_type='float16',clean_after_stacking=True)
+        path_to_stacks = make_stack_from_single_tifs(path_tmp_images,self.path_tmp,data_type='float16',clean_after_stacking=True)
 
-        # path_to_stacks = 'data/tmp/thy1g7#556_hp_16x1.5x_139um_97v92v_60p_res_lave2_pm.tif'
+        # path_to_stacks = 'data/tmp/thy1g7#556_hp_16x1.5x_132um_97v93v_60p_res_lave2_am.tif'
+
 
         # run motion correction separately (to not having to call everything manually...)
+        CaImAn_paras['fnames'] = None   # reset to remove previously set data
         path_to_motion_correct = motion_correct(path_to_stacks,CaImAn_paras,n_processes=n_processes)
         
         # path_to_motion_correct = 'data/tmp/thy1g7#556_hp_16x1.5x_129um_96v94v_59p_res_lave2_am_els__d1_512_d2_512_d3_1_order_F_frames_8989.mmap'
@@ -285,8 +267,13 @@ class test_silence_in_sessions:
 
     def run_detection(self,s,n_processes,as_c=False,cleanup=False):
         
+        '''
+            calls cnmf to run redetection with predefined neuron footprints from current, as well as adjacent sessions
+                1. temporal trace updates on ROIs and background
+                2. spatial update on silent neurons (?) - rather not!
+        '''
         #if not self.preprocessed:
-        use_parallel = n_processes>1
+        # use_parallel = n_processes>1
         if use_parallel:
             c, dview, n_processes = cm.cluster.setup_cluster(backend='local', n_processes=n_processes, single_thread=False)
         else:
@@ -294,7 +281,7 @@ class test_silence_in_sessions:
             n_processes=1
 
     
-        self.cnm = cnmf.CNMF(n_processes,dview=dview)
+        self.cnm = cnmf.CNMF(n_processes)#dview=dview
 
         Yr, dims, T = cm.load_memmap(CaImAn_paras['fnames'][0])
         images = np.reshape(Yr.T, [T] + list(dims), order='F')
@@ -350,61 +337,13 @@ class test_silence_in_sessions:
 
         self.cnm.estimates.Cn = cm.load(Y.filename, subindices=slice(0,None,10)).local_correlations(swap_dim=False)
 
-        if use_parallel:
-            self.cnm.stop_server(dview=dview)      ## restart server to clean up memory
+        # if use_parallel:
+        #     self.cnm.stop_server(dview=dview)      ## restart server to clean up memory
 
         print(f'done! after {time.time()-t_start}s')
         if cleanup:
-            os.remove(CaImAn_paras['fnames'][0])
-
-
-  ## call cnmf to run
-  ###   1. temporal trace updates on ROIs and background
-  ###   2. spatial update on silent neurons (?) - rather not!
-
-  ## evaluate results:
-  ### significant calcium-activity? / spikes?
-  ### correlation with overlapping/nearby neurons?
-
-    # def run_evaluation(self):
-    #     Yr, dims, T = cm.load_memmap(CaImAn_paras['fnames'])
-    #     images = np.reshape(Yr.T, [T] + list(dims), order='F')
-
-    #     Y = np.reshape(Yr.T, [T] + list(self.cluster.meta['dims']), order='F')
-    #     Yr = np.transpose(np.reshape(images, (T, -1), order='F'))
-    #     #print(Y.shape)
-    #     #print(Yr.shape)
-
-    #     #self.Y_proj = np.sum(Y,0)
-    #     #self.Yr_proj = np.sum(Yr,1).reshape(dims)
-
-    #     #plt.figure()
-    #     #plt.subplot(121)
-    #     #plt.imshow(self.Yr_proj,origin='lower')
-
-    #     #plt.subplot(122)
-    #     #plt.imshow(self.Yr_proj,origin='lower')
-    #     #plt.show(block=False)
-
-
-    #     #plt.figure()
-    #     #plt.subplot(121)
-    #     #plt.imshow(self.dataOut['A'].sum(1).reshape(dims),origin='lower')
-
-    #     #plt.subplot(122)
-    #     #plt.imshow(self.dataOut['A'].sum(1).reshape(dims),origin='lower')
-    #     #plt.show(block=False)
-
-    #     #plt.pause(1)
-
-    #     #self.cnm.estimates.dims = self.cnm.dims = dims
-    #     self.cnm.deconvolve(optimize_g=5,s_min=0)
-    #     self.cnm.estimates.evaluate_components(Y,self.opts)
-
-    #     self.analyze_traces(redo=True)
-    #     #self.analyze_pre_plot(redo=True)
-    #     #self.plot_analysis()
-
+            # os.remove(CaImAn_paras['fnames'][0])
+            shutil.rmtree(self.path_tmp)
 
 
     def analyze_traces(self,redo=False):
@@ -1783,101 +1722,106 @@ class plot_test_undetected:
     #print('Figure saved as %s'%pathFigure)
 
 
-def compute_event_exceptionality(traces, robust_std=False, N=5, sigma_factor=3.):
-    """
-    Define a metric and order components according to the probability of some "exceptional events" (like a spike).
+# def compute_event_exceptionality(traces, robust_std=False, N=5, sigma_factor=3.):
+#     """
+#     Define a metric and order components according to the probability of some "exceptional events" (like a spike).
 
-    Such probability is defined as the likelihood of observing the actual trace value over N samples given an estimated noise distribution.
-    The function first estimates the noise distribution by considering the dispersion around the mode.
-    This is done only using values lower than the mode. The estimation of the noise std is made robust by using the approximation std=iqr/1.349.
-    Then, the probability of having N consecutive events is estimated.
-    This probability is used to order the components.
+#     Such probability is defined as the likelihood of observing the actual trace value over N samples given an estimated noise distribution.
+#     The function first estimates the noise distribution by considering the dispersion around the mode.
+#     This is done only using values lower than the mode. The estimation of the noise std is made robust by using the approximation std=iqr/1.349.
+#     Then, the probability of having N consecutive events is estimated.
+#     This probability is used to order the components.
 
-    Args:
-        traces: ndarray
-            Fluorescence traces
+#     Args:
+#         traces: ndarray
+#             Fluorescence traces
 
-        N: int
-            N number of consecutive events
+#         N: int
+#             N number of consecutive events
 
-        sigma_factor: float
-            multiplicative factor for noise estimate (added for backwards compatibility)
+#         sigma_factor: float
+#             multiplicative factor for noise estimate (added for backwards compatibility)
 
-    Returns:
-        fitness: ndarray
-            value estimate of the quality of components (the lesser the better)
+#     Returns:
+#         fitness: ndarray
+#             value estimate of the quality of components (the lesser the better)
 
-        erfc: ndarray
-            probability at each time step of observing the N consequtive actual trace values given the distribution of noise
+#         erfc: ndarray
+#             probability at each time step of observing the N consequtive actual trace values given the distribution of noise
 
-        noise_est: ndarray
-            the components ordered according to the fitness
-    """
+#         noise_est: ndarray
+#             the components ordered according to the fitness
+#     """
 
-    T = np.shape(traces)[-1]
+#     T = np.shape(traces)[-1]
 
-    md = find_modes(traces,axis=1)
-    ff1 = traces - md[:,None]
+#     md = find_modes(traces,axis=1)
+#     ff1 = traces - md[:,None]
 
-    # only consider values under the mode to determine the noise standard deviation
-    ff1 = -ff1 * (ff1 < 0)
-    if robust_std:
+#     # only consider values under the mode to determine the noise standard deviation
+#     ff1 = -ff1 * (ff1 < 0)
+#     if robust_std:
 
-        # compute 25 percentile
-        ff1 = np.sort(ff1, axis=1)
-        ff1[ff1 == 0] = np.nan
-        Ns = np.round(np.sum(ff1 > 0,1) * .5)
-        iqr_h = np.zeros(traces.shape[0])
+#         # compute 25 percentile
+#         ff1 = np.sort(ff1, axis=1)
+#         ff1[ff1 == 0] = np.nan
+#         Ns = np.round(np.sum(ff1 > 0,1) * .5)
+#         iqr_h = np.zeros(traces.shape[0])
 
-        for idx, _ in enumerate(ff1):
-            iqr_h[idx] = ff1[idx, -Ns[idx]]
+#         for idx, _ in enumerate(ff1):
+#             iqr_h[idx] = ff1[idx, -Ns[idx]]
 
-        # approximate standard deviation as iqr/1.349
-        sd_r = 2 * iqr_h / 1.349
+#         # approximate standard deviation as iqr/1.349
+#         sd_r = 2 * iqr_h / 1.349
 
-    else:
-        Ns = np.sum(ff1 > 0, -1)
-        sd_r = np.sqrt(old_div(np.sum(ff1**2, -1), Ns))
+#     else:
+#         Ns = np.sum(ff1 > 0, -1)
+#         sd_r = np.sqrt(old_div(np.sum(ff1**2, -1), Ns))
 
-    # compute z value
-    z = old_div((traces - md[:,None]), (sigma_factor * sd_r[:,None]))
+#     # compute z value
+#     z = old_div((traces - md[:,None]), (sigma_factor * sd_r[:,None]))
 
-    # probability of observing values larger or equal to z given normal
-    # distribution with mean md and std sd_r
-    #erf = 1 - norm.cdf(z)
+#     # probability of observing values larger or equal to z given normal
+#     # distribution with mean md and std sd_r
+#     #erf = 1 - norm.cdf(z)
 
-    # use logarithm so that multiplication becomes sum
-    #erf = np.log(erf)
-    # compute with this numerically stable function
-    erf = scipy.special.log_ndtr(-z)
+#     # use logarithm so that multiplication becomes sum
+#     #erf = np.log(erf)
+#     # compute with this numerically stable function
+#     erf = scipy.special.log_ndtr(-z)
 
-    # moving sum
-    erfc = np.cumsum(erf, 1)
-    erfc[:, N:] -= erfc[:, :-N]
+#     # moving sum
+#     erfc = np.cumsum(erf, 1)
+#     erfc[:, N:] -= erfc[:, :-N]
 
-    # select the maximum value of such probability for each trace
-    fitness = np.min(erfc, 1)
+#     # select the maximum value of such probability for each trace
+#     fitness = np.min(erfc, 1)
 
-    return fitness, erfc, sd_r, md
+#     return fitness, erfc, sd_r, md
 
-def get_spikeNr(traces):
-    md = find_modes(traces)
-    ff1 = traces - md
+# def get_spikeNr(traces):
+#     md = find_modes(traces)
+#     ff1 = traces - md
 
-    # only consider values under the mode to determine the noise standard deviation
-    ff1 = -ff1 * (ff1 < 0)
+#     # only consider values under the mode to determine the noise standard deviation
+#     ff1 = -ff1 * (ff1 < 0)
 
-    # compute 25 percentile
-    ff1 = np.sort(ff1)
-    ff1[ff1 == 0] = np.nan
-    Ns = round((ff1>0).sum() * .5).astype('int')
-    iqr_h = np.zeros(traces.shape[0])
+#     # compute 25 percentile
+#     ff1 = np.sort(ff1)
+#     ff1[ff1 == 0] = np.nan
+#     Ns = round((ff1>0).sum() * .5).astype('int')
+#     iqr_h = np.zeros(traces.shape[0])
 
-    #for idx, _ in enumerate(ff1):
-    iqr_h = ff1[-Ns]
+#     #for idx, _ in enumerate(ff1):
+#     iqr_h = ff1[-Ns]
 
-    # approximate standard deviation as iqr/1.349
-    sd_r = 2 * iqr_h / 1.349
-    data_thr = md+2*sd_r
-    spikeNr = np.floor(traces/data_thr).sum()
-    return spikeNr,md,sd_r
+#     # approximate standard deviation as iqr/1.349
+#     sd_r = 2 * iqr_h / 1.349
+#     data_thr = md+2*sd_r
+#     spikeNr = np.floor(traces/data_thr).sum()
+#     return spikeNr,md,sd_r
+
+
+if __name__=='__main__':
+    sr = silence_redetection()
+    print(sr.cluster.paths)

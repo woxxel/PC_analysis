@@ -2,3 +2,4 @@
 *.npz
 *.txt
 *.mp4
+__pycache__
