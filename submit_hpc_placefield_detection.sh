@@ -7,6 +7,9 @@ dataset="AlzheimerMice_Hayashi"
 
 SUBMIT_FILE="./sbatch_submit.sh"
 
+read -p "Which CaImAn result files should be processed? " result_files
+read -p "Which suffix should the result files contain? " suffix
+
 mice=$(find $datapath/$dataset/* -maxdepth 0 -type d -exec basename {} \;)
 echo "Found mice in dataset $dataset: $mice"
 read -p 'Which mouse should be processed? ' mouse
@@ -21,10 +24,10 @@ read -p 'Which mouse should be processed? ' mouse
   for session_name in $session_names
   do
 
-    if test -f $datapath/$dataset/$mouse/$session_name/PC_Fields.pkl; then
-      # echo "$session_name already processed - skipping"
-      continue
-    fi
+    # if test -f $datapath/$dataset/$mouse/$session_name/placefields.pkl; then
+    #   # echo "$session_name already processed - skipping"
+    #   continue
+    # fi
 
     echo "Processing mouse $mouse, $session_name"
 
@@ -35,7 +38,7 @@ read -p 'Which mouse should be processed? ' mouse
 #SBATCH -p medium
 #SBATCH -c $cpus
 #SBATCH -t 01:00:00
-#SBATCH -o $datapath/$dataset/$mouse/$session_name/log_PC_detection.out
+#SBATCH -o $datapath/$dataset/$mouse/$session_name/log_placefield_detection.out
 #SBATCH --mem=8000
 
 module use /usr/users/cidbn_sw/sw/modules
@@ -47,7 +50,7 @@ export OPENBLAS_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 export OMP_NUM_THREADS=1
 
-python3 ./placefield_detection_hpc_wrapper.py $datapath $dataset $mouse $session_name $cpus
+python3 ./placefield_detection_hpc_wrapper.py $datapath $result_files $suffix $dataset $mouse $session_name $cpus
 EOF
 
     sbatch $SUBMIT_FILE

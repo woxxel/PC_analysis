@@ -25,9 +25,9 @@ class cluster_parameters:
             'border_margin':              5,
             'min_cluster_count':          2,
 
-            'SNR_thr':                    3,
-            'rval_thr':                   0.2,
-            'CNN_thr':                    0.6,
+            # 'SNR_thr':                    3,
+            # 'rval_thr':                   0.2,
+            # 'CNN_thr':                    0.6,
             'pm_thr':                     0.5,
 
             'fr_thr':                     0,

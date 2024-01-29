@@ -2,7 +2,6 @@ import cv2, os, time, scipy
 import numpy as np
 from matplotlib import pyplot as plt, colors as mcolors, rc, patches as mppatches, lines as mplines
 from matplotlib_scalebar.scalebar import ScaleBar
-import scipy.sparse
 from tqdm import *
 from scipy.io import loadmat
 from scipy.optimize import linear_sum_assignment
@@ -14,8 +13,6 @@ from .neuron_detection import *
 from .neuron_matching import get_shift_and_flow, calculate_statistics, calculate_p
 from .cluster_analysis import cluster_analysis
 
-# from .PC_detection.detection.utils import find_modes
-
 
 class silence_redetection:
 
@@ -25,7 +22,9 @@ class silence_redetection:
                 fileName_results='CaImAn_complete.hdf5'):
 
         '''
-            
+            find an as-complete-as-possible set of neurons active in this session by using input footprints from
+                1. neurons previously detected in this session
+                2. neurons detected in other sessions, that could not be matched to any in this
         '''
 
         mousePath = os.path.join(path_detected,dataset,mouse)        
@@ -80,7 +79,7 @@ class silence_redetection:
         self.obtain_footprints(s)
         print('### --------- footprints constructed - time took: %5.3fs ---------- ###'%(time.time()-t_start))
 
-        self.prepare_CNMF(n_processes=0,ssh_alias=ssh_alias)
+        self.prepare_CNMF(n_processes=0,ssh_alias=ssh_alias)    ## for some reason, motion correction gets slower with parallel processing
         self.run_detection(s,n_processes,cleanup=True)
         print('### --------- rerun completed - time took: %5.3fs ---------- ###'%(time.time()-t_start))
 
@@ -116,10 +115,7 @@ class silence_redetection:
                 'match_to_n': None,     # indexing to session neuron number
             },
             'out': {
-                'active': None,
-                'silent': None,
-                # 'match_to_c': None,     # indexing of matching cluster number
-                # 'match_to_n': None,     # indexing to session neuron number
+                'active': None, 'silent': None,
             },
         }
 
@@ -131,11 +127,12 @@ class silence_redetection:
         self.dataIn['C'] = np.random.rand(self.nC,T)
 
         if complete_new:
+            ## if (for whatever reason) you just want to throw in nC random footprints
             self.idxes['in']['silent'] = np.ones(self.nC,'bool')
             self.dataIn['b'] = np.random.rand(np.prod(dims),1)
             self.dataIn['f'] = np.random.rand(1,T)
         else:
-            ## find silent neurons in session s
+            ## find active and silent neurons in session s
             isSilent = self.cluster.status['clusters'] & np.isnan(self.cluster.matching['IDs'][:,s])
             self.idxes['in']['nSilent'] = isSilent.sum()
             isActive = self.cluster.status['clusters'] & np.isfinite(self.cluster.matching['IDs'][:,s])
@@ -147,7 +144,7 @@ class silence_redetection:
 
             print('silent:', self.idxes['in']['nSilent'], 'active:', self.idxes['in']['nActive'])
             
-            ## load footprints of active cells
+            ## load footprints of active cells from session s
             ld = load_dict_from_hdf5(os.path.join(self.currentSession,self.cluster.paths['fileNameCNMF']))
             Cn_ref = ld['Cn'].T
 
@@ -165,8 +162,11 @@ class silence_redetection:
             
             #if not (ld['C'].shape[0] == ld['A'].shape[1]):
                 #ld['C'] = ld['C'].transpose()
+            ## load temporal components of active cells from session s
             T1 = ld['C'].shape[1]   # adjusted for a session, where T != T1
             self.dataIn['C'][:self.idxes['in']['nActive'],:T1] = ld['C'][n_idx,:]
+            
+            ## load background components from session s
             if not (ld['b'].shape[0] == ld['A'].shape[0]):
                 ld['b'] = ld['b'].transpose()
             self.dataIn['b'] = ld['b']
@@ -175,7 +175,7 @@ class silence_redetection:
             self.dataIn['f'] = ld['f']
             
 
-        ## for each cluster identify the closest footprints identified before & after current session
+        ## for each silent neuron identify footprints as close as possible before & after current session
         s_ref = np.full((self.idxes['in']['nSilent'],2),-1,'int')
         n_ref = np.full((self.idxes['in']['nSilent'],2),-1,'int')
 
@@ -197,7 +197,7 @@ class silence_redetection:
                     n_ref[i,1] = self.cluster.matching['IDs'][c,int(s_ref[i,1])].astype(int)
         s_load = np.unique(s_ref[s_ref>=0])
 
-        ## construct footprint of silent cells (interpolation between adjacent sessions?) and adjust for shift & rotation
+        ## construct footprint of silent cells as interpolation between footprints of adjacent sessions and adjust for shift & rotation
         progress = tqdm.tqdm(s_load,total=len(s_load),desc='Loading footprints for processing Session %d...'%(s+1))
         for s_ld in progress:
 
@@ -216,8 +216,8 @@ class silence_redetection:
             x_remap = (x_grid - x_shift + flow[:,:,0])
             y_remap = (y_grid - y_shift + flow[:,:,1])
 
-            A_tmp = sp.sparse.hstack([
-                sp.sparse.csc_matrix(                    # cast results to sparse type
+            A_tmp = scipy.sparse.hstack([
+                scipy.sparse.csc_matrix(                    # cast results to sparse type
                     cv2.remap(
                         fp.reshape(dims),   # reshape image to original dimensions
                         x_remap, y_remap,                 # apply reverse identified shift and flow
@@ -229,12 +229,11 @@ class silence_redetection:
             self.dataIn['A'][:,self.idxes['in']['nActive'] + np.where(s_ref==s_ld)[0]] += 1./abs(s_ld-s) * scipy.sparse.vstack([a/a.sum() for a in A_tmp.T]).T
             #print('%d neuron footprints taken from session %d'%(A_tmp.shape[1],s_ld+1))
 
-
         max_thr = 0.001
         self.dataIn['A'] = scipy.sparse.vstack([a.multiply(a>(max_thr*a.max()))/a.sum() for a in self.dataIn['A'].T]).T
 
     def prepare_CNMF(self,
-                n_processes=8,
+                n_processes=0,
                 ssh_alias='hpc-sofja'):
 
         '''
@@ -242,27 +241,23 @@ class silence_redetection:
         '''
         self.currentSession_source = os.path.join(self.path_images,os.path.split(self.currentSession)[-1])
 
-        ### if file(s) are on remote, copy over data, first
         if ssh_alias:
+            ## if file(s) are on remote, copy over data, first
             path_tmp_images = os.path.join(self.path_tmp,'images')
             get_data_from_server(self.currentSession_source,path_tmp_images,ssh_alias)
         else:
-            path_tmp_images = self.currentSession_source
+            path_tmp_images = os.path.join(self.currentSession_source,'images')
         
-        ### if files present in single tifs, only, run batch-creation
+        ### if files present in single tifs, only (its the case for my data), run batch-creation
         path_to_stacks = make_stack_from_single_tifs(path_tmp_images,self.path_tmp,data_type='float16',clean_after_stacking=True)
 
-        # path_to_stacks = 'data/tmp/thy1g7#556_hp_16x1.5x_132um_97v93v_60p_res_lave2_am.tif'
-
-
         # run motion correction separately (to not having to call everything manually...)
-        CaImAn_paras['fnames'] = None   # reset to remove previously set data
-        path_to_motion_correct = motion_correct(path_to_stacks,CaImAn_paras,n_processes=n_processes)
+        CaImAn_params['fnames'] = None   # reset to remove previously set data
+        path_to_motion_correct = motion_correct(path_to_stacks,CaImAn_params,n_processes=n_processes)
         
-        # path_to_motion_correct = 'data/tmp/thy1g7#556_hp_16x1.5x_129um_96v94v_59p_res_lave2_am_els__d1_512_d2_512_d3_1_order_F_frames_8989.mmap'
-        CaImAn_paras['fnames'] = [path_to_motion_correct]
+        CaImAn_params['fnames'] = [path_to_motion_correct]
 
-        self.opts = cnmf.params.CNMFParams(params_dict=CaImAn_paras)
+        self.opts = cnmf.params.CNMFParams(params_dict=CaImAn_params)
 
 
     def run_detection(self,s,n_processes,as_c=False,cleanup=False):
@@ -273,7 +268,7 @@ class silence_redetection:
                 2. spatial update on silent neurons (?) - rather not!
         '''
         #if not self.preprocessed:
-        # use_parallel = n_processes>1
+        use_parallel = n_processes>1
         if use_parallel:
             c, dview, n_processes = cm.cluster.setup_cluster(backend='local', n_processes=n_processes, single_thread=False)
         else:
@@ -281,9 +276,9 @@ class silence_redetection:
             n_processes=1
 
     
-        self.cnm = cnmf.CNMF(n_processes)#dview=dview
+        self.cnm = cnmf.CNMF(n_processes,dview=dview)
 
-        Yr, dims, T = cm.load_memmap(CaImAn_paras['fnames'][0])
+        Yr, dims, T = cm.load_memmap(CaImAn_params['fnames'][0])
         images = np.reshape(Yr.T, [T] + list(dims), order='F')
         Y = np.reshape(Yr.T, [T] + list(dims), order='F')
 
@@ -337,12 +332,12 @@ class silence_redetection:
 
         self.cnm.estimates.Cn = cm.load(Y.filename, subindices=slice(0,None,10)).local_correlations(swap_dim=False)
 
-        # if use_parallel:
-        #     self.cnm.stop_server(dview=dview)      ## restart server to clean up memory
+        if use_parallel:
+            cm.cluster.stop_server(dview=dview)      ## restart server to clean up memory
 
         print(f'done! after {time.time()-t_start}s')
         if cleanup:
-            # os.remove(CaImAn_paras['fnames'][0])
+            # os.remove(CaImAn_params['fnames'][0])
             shutil.rmtree(self.path_tmp)
 
 
@@ -560,8 +555,8 @@ class silence_redetection:
             'S':self.dataOut['S'],
             'b':self.cnm.estimates.b,
             'f':self.cnm.estimates.f,
+            'Cn':self.cnm.estimates.Cn,
             'dims': self.dims,
-        #    'Cn':self.cnm.estimates.Cn,
             'SNR_comp':self.dataOut['SNR_comp'],
             'r_values':self.dataOut['r_values'],
             'cnn_preds':self.dataOut['cnn_preds']
@@ -576,7 +571,8 @@ class silence_redetection:
             'idxes': self.idxes,
         }
         svPath = os.path.splitext(svPath)[0] + '_compares.pkl'
-        pickleData(compares,svPath,'save')
+        with open(svPath,'wb') as f_open:
+            pickle.dump(compares,f_open)
 
         ### analyze silent ones: do they show firing behavior at all? are they correlated with nearby active neurons?
 
@@ -588,7 +584,8 @@ class silence_redetection:
         # if ext == 'mat':
         #     ld = loadmat(pathData,squeeze_me=True)
         # else:
-        ld = pickleData([],pathData,'load')
+        with open(pathData,'rb') as f_open:
+            ld = pickle.load(f_open)
         self.dataOut = {'A':ld['A'],
                     'C':ld['C'],
                     'S':ld['S'],
@@ -916,7 +913,7 @@ class plot_test_undetected:
       nC_in = ld['Ain'].shape[1]
       nC_out = ld['A'].shape[1]
 
-      D_ROIs = sp.spatial.distance.cdist(cm_in,cm_out)
+      D_ROIs = scipy.spatial.distance.cdist(cm_in,cm_out)
       D_ROI_mask = np.ma.array(D_ROIs, mask = np.isnan(D_ROIs))
 
       #idx_out_bool = np.zeros(nC_out,'bool')
@@ -1236,7 +1233,7 @@ class plot_test_undetected:
         cm = com(ld['A'],dims[0],dims[1])
 
         # calculate CoMs and distance
-        D_ROIs = sp.spatial.distance.cdist(cm,cm)
+        D_ROIs = scipy.spatial.distance.cdist(cm,cm)
         n_close = np.where(D_ROIs[n,:]<10)[0]
         print(n_close)
         A_norm = np.linalg.norm(ld['A'].toarray(),axis=0)
@@ -1311,7 +1308,7 @@ class plot_test_undetected:
         cm = com(ld['A'],dims[0],dims[1])
 
         # calculate CoMs and distance
-        D_ROIs = sp.spatial.distance.cdist(cm,cm)
+        D_ROIs = scipy.spatial.distance.cdist(cm,cm)
         n_close = np.where(D_ROIs[n,:]<10)[0]
         A_norm = np.linalg.norm(ld['A'].toarray(),axis=0)
 

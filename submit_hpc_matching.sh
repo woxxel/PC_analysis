@@ -7,12 +7,15 @@ dataset="AlzheimerMice_Hayashi"
 
 SUBMIT_FILE="./sbatch_submit.sh"
 
-mice=$(find $datapath/$dataset/* -maxdepth 0 -type d -exec basename {} \;)
-# echo "Found mice in dataset $dataset: $mice"
-# read -p 'Which mouse should be processed? ' mouse
+read -p "Which CaImAn result files should be processed? " result_files
+read -p "Which suffix should the matched files contain? " suffix
 
-for mouse in $mice
-do
+mice=$(find $datapath/$dataset/* -maxdepth 0 -type d -exec basename {} \;)
+echo "Found mice in dataset $dataset: $mice"
+read -p 'Which mouse should be processed? ' mouse
+
+# for mouse in $mice
+# do
 
   # if test -f $datapath/$dataset/$mouse/matching/neuron_registration_.pkl; then
   #   echo "$session_name already processed - skipping"
@@ -38,10 +41,10 @@ export OPENBLAS_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 export OMP_NUM_THREADS=1
 
-python3 ./neuron_matching_hpc_wrapper.py $datapath $dataset $mouse $cpus
+python3 ./neuron_matching_hpc_wrapper.py $datapath $result_files $suffix $dataset $mouse $cpus
 EOF
 
   sbatch $SUBMIT_FILE
   rm $SUBMIT_FILE
 
-done
+# done

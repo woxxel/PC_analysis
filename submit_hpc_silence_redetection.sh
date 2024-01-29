@@ -27,10 +27,10 @@ read -p 'Which mouse should be processed? ' mouse
       mkdir -p $datapath_out/$dataset/$mouse/$session_name;
     fi
 
-    # if test -f $datapath_out/$dataset/$mouse/$session_name/OnACID_results.hdf5; then
-    #   echo "$session_name already processed - skipping"
-    #   continue
-    # fi
+    if test -f $datapath_out/$dataset/$mouse/$session_name/CaImAn_complete.hdf5; then
+      echo "$session_name already processed - skipping"
+      continue
+    fi
 
     session_path=$datapath_in/$dataset/$mouse/$session_name
 
@@ -64,9 +64,9 @@ EOF
     fi
 
     # only process first 5 sessions (for now)
-    if [[ $s -eq 3 ]]; then
-      break
-    fi
+    # if [[ $s -eq 3 ]]; then
+    #   break
+    # fi
     ((s++))
 
   done
