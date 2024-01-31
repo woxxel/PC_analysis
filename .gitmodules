@@ -1,5 +1,5 @@
 [submodule "neuron_matching"]
-	path = placcefield_dynamics/neuron_matching
+	path = placefield_dynamics/neuron_matching
 	url = https://github.com/woxxel/neuron_matching.git
 [submodule "placefield_detection"]
 	path = placefield_dynamics/placefield_detection
