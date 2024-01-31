@@ -13,7 +13,7 @@ from .utils import cluster_parameters
 
 from .placefield_detection import prepare_behavior, get_firingrate
 from .mouse_data_scripts.get_session_specifics import *
-
+from .neuron_matching import matching_params
 
 warnings.filterwarnings("ignore")
 
@@ -195,7 +195,7 @@ class cluster_analysis:
         self.prepare_dicts(which=['alignment','matching','stats'])
         
         ## load model first, to allow proper matching of footprints
-        with open(os.path.join(*os.path.split(self.paths['assignments'])[:-1],'match_model_.pkl'),'rb') as f_open:
+        with open(os.path.join(*os.path.split(self.paths['assignments'])[:-1],'match_model.pkl'),'rb') as f_open:
             ldModel = pickle.load(f_open)
         self.matching['f_same'] = ldModel['f_same']
 
@@ -208,9 +208,9 @@ class cluster_analysis:
         self.matching['score'] = ldData['results']['p_matched']
         self.matching['com'] = ldData['results']['cm']
 
-        self.stats['SNR'] = ldData['results']['SNR_comp']
+        self.stats['SNR_comp'] = ldData['results']['SNR_comp']
         self.stats['r_values'] = ldData['results']['r_values']
-        self.stats['CNN'] = ldData['results']['cnn_preds']
+        self.stats['cnn_preds'] = ldData['results']['cnn_preds']
         
         has_reference = False
         for s in range(self.data['nSes']):
@@ -301,7 +301,7 @@ class cluster_analysis:
 
         self.status['clusters'] = np.ones(self.data['nC']).astype('bool')
         if idxes is None:
-            idxes = (self.stats['SNR']>self.params['SNR_thr']) & (self.stats['r_values']>self.params['rval_thr']) & (self.stats['CNN']>self.params['CNN_thr'])
+            idxes = ((self.stats['SNR_comp']>matching_params['SNR_lowest']) & (self.stats['r_values']>matching_params['rval_lowest']) & (self.stats['cnn_preds']>matching_params['cnn_lowest'])) & ((self.stats['SNR_comp']>matching_params['min_SNR']) | (self.stats['r_values']>matching_params['rval_thr']) | (self.stats['cnn_preds']>matching_params['min_cnn_thr']))
         print(idxes.sum(0))
         # self.status['clusters'][(~np.isnan(self.matching['IDs'])).sum(1)<self.params['min_cluster_count']] = False
         self.status['clusters'][idxes[:,self.status['sessions']].sum(1)<self.params['min_cluster_count']] = False
