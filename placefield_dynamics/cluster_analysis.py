@@ -119,8 +119,8 @@ class cluster_analysis:
                 'firingmap':    np.zeros((self.data['nC'],self.data['nSes'],self.data['nbin'])),
                 # 'trial_map':np.zeros((0,self.data['nSes'],self.params['field_count_max'],self.sessions['trial_ct'].max()),'bool'),
 
-                'SNR':          np.zeros((self.data['nC'],self.data['nSes'])),
-                'CNN':          np.zeros((self.data['nC'],self.data['nSes'])),
+                'SNR_comp':          np.zeros((self.data['nC'],self.data['nSes'])),
+                'cnn_preds':          np.zeros((self.data['nC'],self.data['nSes'])),
                 'r_values':     np.zeros((self.data['nC'],self.data['nSes'])),
 
                 'MI_value':     np.zeros((self.data['nC'],self.data['nSes'])),
@@ -128,8 +128,6 @@ class cluster_analysis:
                 'MI_z_score':   np.zeros((self.data['nC'],self.data['nSes'])),
 
                 'Isec_value':   np.zeros((self.data['nC'],self.data['nSes'])),
-
-                'Bayes_factor': np.zeros((self.data['nC'],self.data['nSes']))
             }
 
         if 'behavior' in which and (not hasattr(self,'behavior') or overwrite):
@@ -301,17 +299,29 @@ class cluster_analysis:
 
         self.status['clusters'] = np.ones(self.data['nC']).astype('bool')
         if idxes is None:
-            idxes = ((self.stats['SNR_comp']>matching_params['SNR_lowest']) & (self.stats['r_values']>matching_params['rval_lowest']) & (self.stats['cnn_preds']>matching_params['cnn_lowest'])) & ((self.stats['SNR_comp']>matching_params['min_SNR']) | (self.stats['r_values']>matching_params['rval_thr']) | (self.stats['cnn_preds']>matching_params['min_cnn_thr']))
+            idxes = (
+                    (self.stats['SNR_comp']>matching_params['SNR_lowest']) & \
+                    (self.stats['r_values']>matching_params['rval_lowest']) & \
+                    (self.stats['cnn_preds']>matching_params['cnn_lowest'])
+                ) & \
+                (
+                    (self.stats['SNR_comp']>matching_params['min_SNR']) | \
+                    (self.stats['r_values']>matching_params['rval_thr']) | \
+                    (self.stats['cnn_preds']>matching_params['min_cnn_thr'])
+                )
+        
         print(idxes.sum(0))
         # self.status['clusters'][(~np.isnan(self.matching['IDs'])).sum(1)<self.params['min_cluster_count']] = False
         self.status['clusters'][idxes[:,self.status['sessions']].sum(1)<self.params['min_cluster_count']] = False
-
+        print(self.status['clusters'].sum())
         for i in range(2):
             idx_remove_low = self.matching['com'][:,self.status['sessions'],i] < (self.alignment['borders'][0,i]+self.params['border_margin'])
             self.status['clusters'][np.any(idx_remove_low,1)] = False
 
             idx_remove_high = self.matching['com'][:,self.status['sessions'],i] > (self.alignment['borders'][1,i]-self.params['border_margin'])
             self.status['clusters'][np.any(idx_remove_high,1)] = False
+            # print(idx_remove_low)
+            # print(idx_remove_high)
 
             print(np.any(idx_remove_low,1).sum())
             print(np.any(idx_remove_high,1).sum())
@@ -504,9 +514,9 @@ class cluster_analysis:
         # print('further, implement method to calculate inter-coding intervals, etc, after updating statusses')
 
         self.thr = {
-            'SNR':          self.params['SNR_thr'] if SNR_thr is None else SNR_thr,
+            'SNR_comp':          self.params['SNR_thr'] if SNR_thr is None else SNR_thr,
             'r_values':     self.params['rval_thr'] if rval_thr is None else rval_thr,
-            'CNN':          self.params['CNN_thr'] if CNN_thr is None else CNN_thr,
+            'cnn_preds':          self.params['CNN_thr'] if CNN_thr is None else CNN_thr,
             'p_matched':    self.params['pm_thr'] if pm_thr is None else pm_thr,
 
             'firingrate':   self.params['fr_thr'] if fr_thr is None else fr_thr,
@@ -527,7 +537,6 @@ class cluster_analysis:
 
             'nCluster':     self.params['nCluster'] if nCluster_thr is None else nCluster_thr,
         }
-        # print(self.thr)
 
         t_start = time.time()
 
@@ -535,12 +544,18 @@ class cluster_analysis:
         self.status['activity'] = np.zeros((self.data['nC'],self.data['nSes'],6),'bool')
 
         ### appearance in cluster: defined by (SNR,r_values,CNN), p_matched
-        if np.any(~np.isnan(self.stats['SNR'])):
-            self.status['activity'][...,0] = (self.stats['SNR']>self.thr['SNR']) & \
-                                (self.stats['r_values']>self.thr['r_values']) & \
-                                (self.stats['CNN']>self.thr['CNN']) & \
-                                (self.matching['score'][...,0]>self.thr['p_matched'])
-                                # (((self.matching['score'][...,0]-self.matching['score'][...,1])>self.thr['p_matched']) | (self.matching['score'][...,0]>0.95))
+        if np.any(~np.isnan(self.stats['SNR_comp'])):
+            self.status['activity'][...,0] = (
+                    (self.stats['SNR_comp']>matching_params['SNR_lowest']) & \
+                    (self.stats['r_values']>matching_params['rval_lowest']) & \
+                    (self.stats['cnn_preds']>matching_params['cnn_lowest'])
+                ) & \
+                (
+                    (self.stats['SNR_comp']>matching_params['min_SNR']) | \
+                    (self.stats['r_values']>matching_params['rval_thr']) | \
+                    (self.stats['cnn_preds']>matching_params['min_cnn_thr'])
+                ) & \
+                (self.matching['score'][...,0]>self.thr['p_matched'])
         else:
             self.status['activity'][...,0] = ((self.matching['score'][...,0]-self.matching['score'][...,1])>self.thr['p_matched']) | (self.matching['score'][...,0]>0.95)
 
