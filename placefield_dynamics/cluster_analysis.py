@@ -78,11 +78,6 @@ class cluster_analysis:
         self.compareSessions(n_processes=n_processes)
         # _,_ = self.recalc_firingrate()
         self.save()
-        # else:
-        #     print('already present')
-        #     #self.load('cluster.pkl')
-        #     #self.data['nC'] = self.PCs['status'].shape[0]
-        #     #self.classify_sessions(sessions)
 
 
     def prepare_dicts(self,which=None,overwrite=False):
@@ -193,7 +188,7 @@ class cluster_analysis:
         self.prepare_dicts(which=['alignment','matching','stats'])
         
         ## load model first, to allow proper matching of footprints
-        with open(os.path.join(*os.path.split(self.paths['assignments'])[:-1],'match_model.pkl'),'rb') as f_open:
+        with open(os.path.join(*os.path.split(self.paths['assignments'])[:-1],f'match_model{self.paths["suffix"]}.pkl'),'rb') as f_open:
             ldModel = pickle.load(f_open)
         self.matching['f_same'] = ldModel['f_same']
 
@@ -454,8 +449,6 @@ class cluster_analysis:
 
         self.prepare_dicts(which=['compare'])
 
-        # pathComp = os.path.join(self.paths['pathResults'],'compareSessions.pkl')
-        # if reprocess | (not os.path.exists(pathComp)):
         self.compare = {
             'pointer':sp.sparse.lil_matrix((self.data['nC'],self.data['nSes']**2*self.params['field_count_max']**2)),
             'shifts':[],
@@ -546,11 +539,13 @@ class cluster_analysis:
         ### appearance in cluster: defined by (SNR,r_values,CNN), p_matched
         if np.any(~np.isnan(self.stats['SNR_comp'])):
             self.status['activity'][...,0] = (
+                    ## minimum requirements for each neuron
                     (self.stats['SNR_comp']>matching_params['SNR_lowest']) & \
                     (self.stats['r_values']>matching_params['rval_lowest']) & \
                     (self.stats['cnn_preds']>matching_params['cnn_lowest'])
                 ) & \
                 (
+                    ## each neuron needs to exceed at least one of the following thresholds
                     (self.stats['SNR_comp']>matching_params['min_SNR']) | \
                     (self.stats['r_values']>matching_params['rval_thr']) | \
                     (self.stats['cnn_preds']>matching_params['min_cnn_thr'])

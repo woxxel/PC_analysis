@@ -72,13 +72,14 @@ class cluster_parameters:
         
         self.paths = {
             'sessions':               paths,
+            'suffix':                 suffix,
             # 'data':                   pathData,
             'assignments':            pathAssignments,
             'figures':                os.path.join(pathMouse,'figures'),#'/home/wollex/Data/Science/PhD/Thesis/pics/Methods',
             
             ### provide names for distinct result files (needed?)
             'fileNamePCFields':       f'PC_fields{suffix}.pkl',
-            'fileNameCNMF':           'OnACID_results.hdf5',
+            'fileNameCNMF':           f'OnACID_results{suffix}.hdf5',
             # 'fileNameCNMF':           f'CaImAn{suffix}.hdf5',
             'fileNameBehavior':       'aligned_behavior.pkl',
 
