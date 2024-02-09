@@ -1562,7 +1562,384 @@ class cluster_analysis_plots(cluster_analysis):
         # if sv:
             # self.pl_dat.save_fig('PC_mapDynamics')
 
+    def plot_stability_dynamics(self, n_processes = 4, reprocess = False, N_bs=10, sv = False):
 
+        SD = 1.96
+        nSes = self.data['nSes']
+        nbin = self.data['nbin']
+        L_track = 100
+
+
+        s_bool = np.ones(nSes,'bool')
+        s_bool[~self.status['sessions']] = False
+
+        recurrence = {'active': {'all':               np.zeros((nSes,nSes))*np.NaN,
+                                 'continuous':        np.zeros((nSes,nSes))*np.NaN,
+                                 'overrepresentation':np.zeros((nSes,nSes))*np.NaN},
+                      'coding': {'all':               np.zeros((nSes,nSes))*np.NaN,
+                                 'ofactive':          np.zeros((nSes,nSes))*np.NaN,
+                                 'continuous':        np.zeros((nSes,nSes))*np.NaN,
+                                 'overrepresentation':np.zeros((nSes,nSes))*np.NaN}}
+
+        N = {'active': self.status['activity'][:,:,1].sum(0),
+             'coding': self.status['activity'][:,:,2].sum(0)}
+        L=1#00
+
+        #for s in tqdm(range(nSes)):#min(30,nSes)):
+        if n_processes>1:
+            pool = get_context("spawn").Pool(n_processes)
+            res = pool.starmap(get_overlap,zip(range(nSes),itertools.repeat((self.status['activity'],N,L))))
+   
+        for (s,r) in enumerate(res):
+            for pop in r.keys():
+                for key in r[pop].keys():
+                    recurrence[pop][key][s,:] = r[pop][key]
+
+
+        ### ds = 0
+        plt0 = True
+        if plt0:
+            print(nbin)
+            p_shift = np.zeros(nbin)
+            for s in np.where(s_bool)[0]:
+                idx_field = np.where(self.status_fields[:,s,:])
+                for c,f in zip(idx_field[0],idx_field[1]):
+                    roll = round((-self.fields['location'][c,s,f,0]+nbin/2)/L_track*nbin)
+                    p_shift += np.roll(self.fields['p_x'][c,s,f,:],roll)
+            p_shift /= p_shift.sum()
+
+            PC_idx = np.where(self.status['activity'][...,2])
+            N_data = len(PC_idx[0])
+            print('N data: %d'%N_data)
+            print(p_shift)
+
+            p_ds0,p_cov = fit_shift_model(p_shift)
+            print('p_ds0',p_ds0)
+
+        ### ds > 0
+        p = {'all':     {'mean': np.zeros((nSes,4))*np.NaN,
+                         'CI':   np.zeros((nSes,2,4))*np.NaN,
+                         'std':  np.zeros((nSes,4))*np.NaN},
+             'cont':    {'mean': np.zeros((nSes,4))*np.NaN,
+                         'CI':   np.zeros((nSes,2,4))*np.NaN,
+                         'std':  np.zeros((nSes,4))*np.NaN},
+             'mix':     {'mean': np.zeros((nSes,4))*np.NaN,
+                         'CI':   np.zeros((nSes,2,4))*np.NaN,
+                         'std':  np.zeros((nSes,4))*np.NaN},
+             'discont': {'mean': np.zeros((nSes,4))*np.NaN,
+                         'CI':   np.zeros((nSes,2,4))*np.NaN,
+                         'std':  np.zeros((nSes,4))*np.NaN},
+             'silent_mix':  {'mean': np.zeros((nSes,4))*np.NaN,
+                         'CI':   np.zeros((nSes,2,4))*np.NaN,
+                         'std':  np.zeros((nSes,4))*np.NaN},
+             'silent':  {'mean': np.zeros((nSes,4))*np.NaN,
+                         'CI':   np.zeros((nSes,2,4))*np.NaN,
+                         'std':  np.zeros((nSes,4))*np.NaN}}
+
+        t_start = time.time()
+        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(self.compare['pointer'].col,(nSes,nSes,self.params['field_count_max'],self.params['field_count_max']))
+        c_shifts = self.compare['pointer'].row
+
+
+        celltype = 'all'
+        if celltype == 'all':
+            idx_celltype = self.status['activity'][c_shifts,s1_shifts,2]
+        if celltype == 'gate':
+            idx_celltype = self.status['activity'][c_shifts,s1_shifts,3]
+        if celltype == 'reward':
+            idx_celltype = self.status['activity'][c_shifts,s1_shifts,4]
+
+        idx_celltype = idx_celltype & s_bool[s1_shifts] & s_bool[s2_shifts]
+
+        if (not('stability' in vars(self).keys())) | reprocess:
+
+            if n_processes>1:
+                pool = get_context("spawn").Pool(n_processes)
+                # pool = mp.Pool(n_processes)
+                res = pool.starmap(get_shift_distr,zip(range(1,nSes),itertools.repeat(self.compare),itertools.repeat((nSes,nbin,N_bs,idx_celltype))))
+                pool.close()
+            else:
+                res = []
+                for ds in range(1,nSes):
+                    res.append(get_shift_distr(ds,self.compare,(nSes,nbin,N_bs,idx_celltype)))
+
+            for (ds,r) in enumerate(res):
+                for pop in r.keys():
+                    for key in r[pop].keys():
+                        p[pop][key][ds,...] = r[pop][key]
+
+            
+
+            self.stability = p
+        else:
+            p = self.stability
+        t_end = time.time()
+        print('done - time: %5.3g'%(t_end-t_start))
+
+        fig = plt.figure(figsize=(7,4),dpi=self.pl_dat.sv_opt['dpi'])
+
+        ax_distr = plt.axes([0.075,0.11,0.35,0.325])
+        self.pl_dat.add_number(fig,ax_distr,order=2,offset=[-100,50])
+
+        for j,ds in tqdm(enumerate([1,5,10,20,40])):#min(nSes,30)):
+
+            Ds = s2_shifts-s1_shifts
+            idx_ds = np.where((Ds==ds) & idx_celltype & s_bool[s1_shifts] & s_bool[s2_shifts])[0]
+            N_data = len(idx_ds)
+            cdf_shifts_ds = np.zeros((N_data,nbin))
+
+            idx_shifts = self.compare['pointer'].data[idx_ds].astype('int')-1
+            shifts_distr = self.compare['shifts_distr'][idx_shifts,:].toarray()
+            # for i,_ in enumerate(idx_ds):
+            #     roll = round(-shifts[i]+L_track/2).astype('int')
+            #     cdf_shifts_ds[i,:] = np.cumsum(np.roll(shifts_distr[i,:],roll))
+            #     cdf_shifts_ds[i,:] = np.roll(cdf_shifts_ds[i,:],-roll)
+
+            _, _, _, shift_distr = bootstrap_shifts(fit_shift_model,shifts_distr,N_bs,nbin)
+
+            s1_ds = s1_shifts[idx_ds]
+            s2_ds = s2_shifts[idx_ds]
+            c_ds = self.compare['pointer'].row[idx_ds]
+
+            idxes = self.compare['inter_coding'][idx_ds,1]==1
+
+            CI = np.percentile(shift_distr,[5,95],0)
+            ax_distr.plot(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),shift_distr.mean(0),color=[0.2*j,0.2*j,0.2*j],linewidth=0.5,label='$\Delta$ s = %d'%ds)
+            # ax_distr.errorbar(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),shift_distr.mean(0),shift_distr.mean(0)-CI[0,:],CI[1,:]-shift_distr.mean(0),fmt='none',ecolor=[1,0.,0.],elinewidth=0.5)
+
+            # ax_distr.plot(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),F_shifts(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),cluster.stability['all']['mean'][ds,0],cluster.stability['all']['mean'][ds,1],cluster.stability['all']['mean'][ds,2],cluster.stability['all']['mean'][ds,3]),'g',linewidth=2)
+        self.pl_dat.remove_frame(ax_distr,['top','right'])
+
+        dx_arr = np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin)
+        ax_distr.plot(dx_arr,p_shift,'k--',linewidth=0.5)
+        ax_distr.set_xlim([-L_track/2,L_track/2])
+        ax_distr.set_ylim([0,0.065])
+        ax_distr.set_xlabel('field shift $\Delta \\theta$ [bin]')
+        ax_distr.set_ylabel('$\\left \\langle p(\Delta \\theta) \\right \\rangle$')
+        ax_distr.set_yticks([])
+        ax_distr.legend(loc='upper left',fontsize=8, handlelength=1,bbox_to_anchor=[0.05,1.1])
+
+        N_data = np.zeros(nSes)*np.NaN
+
+        D_KS = np.zeros(nSes)*np.NaN
+        N_stable = np.zeros(nSes)*np.NaN
+        N_total = np.zeros(nSes)*np.NaN     ### number of PCs which could be stable
+        # fig = plt.figure()
+        p_rec_alt = np.zeros(nSes)*np.NaN
+
+        for ds in range(1,nSes):#min(nSes,30)):
+            Ds = s2_shifts-s1_shifts
+            idx_ds = np.where((Ds==ds) & s_bool[s1_shifts] & s_bool[s2_shifts])[0]
+            N_data[ds] = len(idx_ds)
+
+            idx_shifts = self.compare['pointer'].data[idx_ds].astype('int')-1
+            shifts = self.compare['shifts'][idx_shifts]
+            N_stable[ds] = (np.abs(shifts)<(SD*self.stability['all']['mean'][0,2])).sum()
+            shifts_distr = self.compare['shifts_distr'][idx_shifts,:].toarray().sum(0)
+            shifts_distr /= shifts_distr.sum()
+
+            session_bool = np.pad(self.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(self.status['sessions'][:],(0,0),constant_values=False)
+            N_total[ds] = self.status_fields[:,session_bool,:].sum()
+            # if ds < 20:
+            #     plt.subplot(5,4,ds)
+            #     plt.plot(dx_arr,np.cumsum(shifts_distr),'k')
+            #     plt.plot(dx_arr,np.cumsum(fun_distr),'r')
+            #     plt.title('$\Delta s=%d$'%ds)
+            fun_distr = F_shifts(dx_arr,self.stability['all']['mean'][ds,0],self.stability['all']['mean'][ds,1],self.stability['all']['mean'][ds,2],self.stability['all']['mean'][ds,3])
+            
+            
+            D_KS[ds] = np.abs(np.cumsum(shifts_distr)-np.cumsum(fun_distr)).max()
+
+            p_rec_alt[ds] = N_stable[ds]/N_data[ds]
+        # plt.show(block=False)
+        
+        # plt.figure(fig_test.number)
+        ax_p1 = plt.axes([0.05,0.825,0.175,0.1])
+        ax_p2 = plt.axes([0.05,0.675,0.175,0.1])
+        ax_shift1 = plt.axes([0.275,0.825,0.175,0.1])
+        ax_shift2 = plt.axes([0.275,0.675,0.175,0.1])
+        self.pl_dat.add_number(fig,ax_p1,order=1,offset=[-50,25])
+        try:
+            c = 5
+            p1 = self.fields['p_x'][c,10,0,:]
+            p2 = self.fields['p_x'][c,11,0,:]
+            ax_p1.plot(p1,color='tab:orange',label='$p(\\theta_s$)')
+            ax_p1.plot(p2,color='tab:blue',label='$p(\\theta_{s+\Delta s})$')
+            ax_p1.set_xticklabels([])
+            ax_p1.legend(fontsize=8,handlelength=1,loc='upper right',bbox_to_anchor=[1.2,1.6])
+            self.pl_dat.remove_frame(ax_p1,['top','left','right'])
+            ax_p1.set_yticks([])
+
+            _,dp = periodic_distr_distance(p1,p2,nbin,nbin,N_bs=10000,mode='bootstrap')
+            ax_shift1.plot(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),dp,'k',label='$p(\Delta \\theta)$')
+            ax_shift1.set_xticklabels([])
+            ax_shift1.legend(fontsize=8,handlelength=1,loc='upper right',bbox_to_anchor=[1.2,1.6])
+            self.pl_dat.remove_frame(ax_shift1,['top','left','right'])
+            ax_shift1.set_yticks([])
+
+            p1 = self.fields['p_x'][248,34,1,:]
+            p2 = self.fields['p_x'][248,79,0,:]
+            ax_p2.plot(p1,color='tab:orange')
+            ax_p2.plot(p2,color='tab:blue')
+            ax_p2.set_yticks([])
+            _,dp = periodic_distr_distance(p1,p2,nbin,nbin,N_bs=10000,mode='bootstrap')
+            ax_shift2.plot(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),dp,'k')
+            ax_shift2.set_xlabel('field shift $\Delta \\theta$')
+            self.pl_dat.remove_frame(ax_shift2,['top','left','right'])
+            ax_shift2.set_yticks([])
+
+            ax_p2.set_xlabel('position')
+            self.pl_dat.remove_frame(ax_p2,['top','left','right'])
+        except:
+            pass
+
+        ax_img = plt.axes([0.3,0.3,0.15,0.15])
+
+        x_arr = np.linspace(-49.5,49.5,nbin)
+        r = 0.3
+        sig=5
+        y_arr = F_shifts(x_arr,1-r,r,sig,0)
+        # print(y_arr)
+        ax_img.fill_between(x_arr,y_arr,color='tab:blue')
+        ax_img.fill_between(x_arr,(1-r)/nbin,color='tab:red')
+        # ax_img.fill_between([-sig*SD,sig*SD],(1-r)/nbin,0,color='tab:blue',alpha=0.5,facecolor='tab:blue',lw=0)
+        # ax_img.fill_betweenx([0,(1-r)/nbin],-sig*SD,sig*SD,color='tab:red')
+        plt.plot([-sig*SD,-sig*SD],[0,4*(1-r)/nbin],':',color='tab:blue')
+        plt.plot([sig*SD,sig*SD],[0,4*(1-r)/nbin],':',color='tab:blue')
+
+        # img = mpimg.imread('/home/wollex/Data/Science/PhD/Thesis/pics/others/shifthist_theory_0.3.png')
+        # ax_img.imshow(img)
+        self.pl_dat.remove_frame(ax_img)
+        ax_img.set_xticks([])
+        ax_img.set_yticks([])
+
+        # x_lim = np.where(cluster.status['sessions'])[0][-1] - np.where(cluster.status['sessions'])[0][0] + 1
+        x_lim = np.where(s_bool)[0][-1] - np.where(s_bool)[0][0] + 1
+        ax_D = plt.axes([0.6,0.8,0.375,0.13])
+        ax_D.plot(range(1,nSes+1),D_KS,'k')
+        ax_D.set_xlim([0,x_lim])
+        ax_D.set_ylabel('$D_{KS}$')
+        ax_D.yaxis.set_label_coords(-0.15,0.5)
+        ax_D.set_xticklabels([])
+        ax_D.set_ylim([0,0.2])
+
+        
+
+        self.pl_dat.add_number(fig,ax_D,order=3)
+
+        ax_mu = plt.axes([0.6,0.635,0.375,0.13])
+        ax_sigma = plt.axes([0.6,0.46,0.375,0.13])
+        ax_r = plt.axes([0.6,0.285,0.375,0.13])
+
+        ax_sigma.plot([0,nSes],[p_ds0[2],p_ds0[2]],linestyle='--',color=[0.6,0.6,0.6])
+        ax_sigma.text(10,p_ds0[2]+1,'$\sigma_0$',fontsize=8)
+        ax_mu.plot([0,nSes],[0,0],linestyle=':',color=[0.6,0.6,0.6])
+
+        sig_theta = self.stability['all']['mean'][0,2]
+        r_random = 2*SD*self.stability['all']['mean'][0,2]/nbin
+        ax_r.plot([1,nSes],[r_random,r_random],'--',color='tab:blue',linewidth=0.5)
+        ax_r.plot([0,nSes],[0.5,0.5],linestyle=':',color=[0.6,0.6,0.6])
+
+        # pl_dat.plot_with_confidence(ax_mu,range(1,nSes+1),p['all']['mean'][:,3],p['all']['mean'][:,3]+np.array([[-1],[1]])*p['all']['std'][:,3]*SD,'k','-')
+        # pl_dat.plot_with_confidence(ax_sigma,range(1,nSes+1),p['all']['mean'][:,2],p['all']['mean'][:,2]+np.array([[-1],[1]])*p['all']['std'][:,2]*SD,'k','-')
+        # pl_dat.plot_with_confidence(ax_r,range(1,nSes+1),p['all']['mean'][:,1],p['all']['mean'][:,1]+np.array([[-1],[1]])*p['all']['std'][:,1]*SD,'k','-')
+        print(p['all']['CI'].shape)
+        self.pl_dat.plot_with_confidence(ax_mu,range(1,nSes+1),p['all']['mean'][:,3],p['all']['CI'][...,3].T,'k','-')
+        self.pl_dat.plot_with_confidence(ax_sigma,range(1,nSes+1),p['all']['mean'][:,2],p['all']['CI'][...,2].T,'k','-')
+        self.pl_dat.plot_with_confidence(ax_r,range(1,nSes+1),p['all']['mean'][:,1],p['all']['CI'][...,1].T,'k','-')
+
+        p_corr = np.minimum(1,p['all']['mean'][:,1]+(1-p['all']['mean'][:,1])*(2*SD*p['all']['mean'][0,2]/nbin))
+        p_SD = np.sqrt((1-2*SD*p['all']['mean'][0,2]/nbin)**2*p['all']['std'][:,1]**2 + ((1-p['all']['mean'][:,1])*2*SD/nbin)**2 * p['all']['std'][0,2]**2)
+        # pl_dat.plot_with_confidence(ax_r,range(1,nSes+1),p_corr,p_SD,'tab:blue','-')
+        ax_r.plot(range(nSes),p_rec_alt,'-',color='tab:blue')
+
+        # ax_r.plot(range(1,nSes+1),p_corr,'k--')
+        # pl_dat.plot_with_confidence(ax_r,range(1,nSes+1),p_corr,p_corr+np.array([[-1],[1]])*p['all']['std'][:,1]*SD,'k','-',label='stable place fields (of rec. place cell)')
+
+
+        ax_mu.set_xlim([0,x_lim])
+        ax_mu.set_ylim([-10,10])
+        ax_mu.set_xticklabels([])
+        ax_mu.set_ylabel('$\mu_{\Delta \\theta}$')
+        ax_mu.yaxis.set_label_coords(-0.15,0.5)
+        ax_sigma.set_xlim([0,x_lim])
+        ax_sigma.set_ylim([0,10])
+        ax_sigma.set_xticklabels([])
+        ax_sigma.set_ylabel('$\sigma_{\Delta \\theta}$')
+        ax_sigma.yaxis.set_label_coords(-0.15,0.5)
+        ax_r.set_xlim([0,x_lim])
+        ax_r.set_ylim([0.0,1])
+        ax_r.set_yticks(np.linspace(0,1,3))
+        ax_r.set_yticklabels(np.linspace(0,1,3))
+        ax_r.set_xticklabels([])
+        # ax_r.set_ylabel('$p(\\gamma_{\Delta s})$')
+        ax_r.set_ylabel('$p_{\\gamma}$')
+        ax_r.yaxis.set_label_coords(-0.15,0.5)
+        self.pl_dat.remove_frame(ax_D,['top','right'])
+        self.pl_dat.remove_frame(ax_mu,['top','right'])
+        self.pl_dat.remove_frame(ax_sigma,['top','right'])
+        self.pl_dat.remove_frame(ax_r,['top','right'])
+        # axs[0][1].set_ylim([0,1])
+
+        ax_N = plt.axes([0.6,0.11,0.375,0.13])
+        ax_N.plot(N_data,'k',label='total')
+        ax_N.plot(N_stable,'tab:blue',label='stable')
+        ax_N.set_xlabel('session difference $\Delta s$')
+        ax_N.set_xlim([0,x_lim])
+        ax_N.set_ylabel('$N_{shifts}$')
+        ax_N.yaxis.set_label_coords(-0.15,0.5)
+        self.pl_dat.remove_frame(ax_N,['top','right'])
+        ax_N.legend(fontsize=8,loc='upper right',bbox_to_anchor=[1.0,1.3])
+        # print(N_stable/N_total)
+        plt.tight_layout()
+        plt.show(block=False)
+
+        # plt.figure()
+        # plt.plot(range(1,nSes+1),N_stable/N_total,'k--',linewidth=0.5)
+        # plt.yscale('log')
+        # plt.show(block=False)
+
+
+        def plot_shift_distr(p,p_std,p_ds0):
+            nSes = p.shape[0]
+            f,axs = plt.subplots(2,2,figsize=(6,4),sharex=True)
+            axs[1][0].plot([0,nSes],[p_ds0[2],p_ds0[2]],linestyle='--',color=[0.6,0.6,0.6])
+            axs[1][1].plot([0,nSes],[0,0],linestyle='--',color=[0.6,0.6,0.6])
+            for i in range(4):
+                self.pl_dat.plot_with_confidence(axs[int(np.floor(i/2))][i%2],range(nSes),p[:,i],p[:,i]+np.array([[-1],[1]])*p_std[:,i]*SD,'k','--')
+            #axs[0][1].set_yscale('log')
+
+            axs[0][1].yaxis.set_label_position("right")
+            axs[0][1].yaxis.tick_right()
+
+            axs[1][1].yaxis.set_label_position("right")
+            axs[1][1].yaxis.tick_right()
+
+            axs[0][0].set_xlim([0,max(20,nSes/2)])
+            axs[0][0].set_ylim([0,1])
+            axs[0][1].set_ylim([0,1])
+            axs[1][0].set_ylim([0,10])
+            axs[1][1].set_ylim([-10,10])
+
+            axs[1][0].set_xlabel('$\Delta$ s',fontsize=14)
+            axs[1][1].set_xlabel('$\Delta$ s',fontsize=14)
+            axs[0][0].set_ylabel('1-$r_{stable}$',fontsize=14)
+            axs[0][1].set_ylabel('$r_{stable}$',fontsize=14)
+            axs[1][0].set_ylabel('$\sigma$',fontsize=14)
+            axs[1][1].set_ylabel('$\mu$',fontsize=14)
+            plt.tight_layout()
+            #plt.title('cont')
+            plt.show(block=False)
+
+
+        # plot_shift_distr(p['all']['mean'],p['all']['std'],p_ds0)
+        #for key in p.keys():
+          #plot_shift_distr(p[key]['mean'],p[key]['std'],p_ds0)
+        if sv:
+            self.pl_dat.save_fig('stability_dynamics')
+
+
+        return
 
 
     def plot_XY(self):
@@ -1911,3 +2288,79 @@ def get_overlap(s,inVars):
   recurr['active']['overrepresentation'][:nSes-s] = (overlap_act[s:]-np.nanmean(rand_pull_act,1))/np.nanstd(rand_pull_act,1)
   recurr['coding']['overrepresentation'][:nSes-s] = (overlap_PC[s:]-np.nanmean(rand_pull_PC,1))/np.nanstd(rand_pull_PC,1)
   return recurr
+
+def bootstrap_shifts(fun,shifts,N_bs,nbin):
+
+  L_track = 100
+  N_data = len(shifts)
+  if N_data == 0:
+    return np.zeros(4)*np.NaN,np.zeros((2,4))*np.NaN,np.zeros(4)*np.NaN,np.zeros((2,nbin))*np.NaN
+
+  samples = np.random.randint(0,N_data,(N_bs,N_data))
+  # sample_randval = np.random.rand(N_bs,N_data)
+  shift_distr_bs = np.zeros((N_bs,nbin))
+  par = np.zeros((N_bs,4))*np.NaN
+  for i in range(N_bs):
+    shift_distr_bs[i,:] = shifts[samples[i,:],:].sum(0)
+    shift_distr_bs[i,:] /= shift_distr_bs[i,:].sum()
+    par[i,:],p_cov = fun(shift_distr_bs[i,:])
+  p = np.nanmean(par,0)
+  p_CI = np.percentile(par,[2.5,97.5],0)
+  p_std = np.nanstd(par,0)
+
+  return p, p_CI, p_std, shift_distr_bs
+
+
+def get_shift_distr(ds,compare,para):
+
+  nSes,nbin,N_bs,idx_celltype = para
+  L_track=100
+  p = {'all':{},
+        'cont':{},
+        'mix':{},
+        'discont':{},
+        'silent_mix':{},
+        'silent':{}}
+
+  s1_shifts,s2_shifts,f1,f2 = np.unravel_index(compare['pointer'].col,(nSes,nSes,5,5))
+  #print(idx_celltype)
+  Ds = s2_shifts-s1_shifts
+  idx_ds = np.where((Ds==ds) & idx_celltype)[0]
+  N_data = len(idx_ds)
+
+  idx_shifts = compare['pointer'].data[idx_ds].astype('int')-1
+  shifts = compare['shifts'][idx_shifts]
+  shifts_distr = compare['shifts_distr'][idx_shifts,:].toarray()
+  
+  for pop in p.keys():
+    if pop == 'all':
+      idxes = np.ones(N_data,'bool')
+    elif pop=='cont':
+      idxes = compare['inter_coding'][idx_ds,1]==1
+    elif pop=='mix':
+      idxes = ((compare['inter_coding'][idx_ds,1]>0) & (compare['inter_coding'][idx_ds,1]<1)) & (compare['inter_active'][idx_ds,1]==1)
+    elif pop=='discont':
+      idxes = (compare['inter_coding'][idx_ds,1]==0) & (compare['inter_active'][idx_ds,1]==1)
+    elif pop=='silent_mix':
+      idxes =(compare['inter_active'][idx_ds,1]>0) & (compare['inter_active'][idx_ds,1]<1)
+    elif pop=='silent':
+      idxes = compare['inter_active'][idx_ds,1]==0
+
+    # p[pop]['mean'], p[pop]['std'], _ = bootstrap_shifts(fit_shift_model,cdf_shifts_ds[idxes,:],N_bs,nbin)
+    p[pop]['mean'], p[pop]['CI'], p[pop]['std'], _ = bootstrap_shifts(fit_shift_model,shifts_distr[idxes,:],N_bs,nbin)
+  return p
+
+## fitting functions and options
+F_shifts = lambda x,A0,A,sig,theta : A/(np.sqrt(2*np.pi)*sig)*np.exp(-(x-theta)**2/(2*sig**2)) + A0/len(x)     ## gaussian + linear offset
+
+def fit_shift_model(data):
+  p_bounds = ([0,0,0,-10],[1,1,50,10])
+  # shift_hist = np.histogram(data,np.linspace(-50,50,101),density=True)[0]
+  # shift_hist[0] = shift_hist[1]
+  # shift_hist /= shift_hist.sum()
+  try:
+    # return curve_fit(F_shifts,np.linspace(-49.5,49.5,100),shift_hist,bounds=p_bounds)
+    return curve_fit(F_shifts,np.linspace(-49.5,49.5,100),data,bounds=p_bounds)
+  except:
+    return np.zeros(4)*np.NaN, np.NaN
+  
