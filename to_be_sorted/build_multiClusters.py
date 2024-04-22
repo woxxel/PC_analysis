@@ -1,6 +1,6 @@
 from tqdm import *
 import numpy as np
-from .build_clusters import cluster
+from .cluster_analysis import cluster
 
 
 class multi_cluster:
