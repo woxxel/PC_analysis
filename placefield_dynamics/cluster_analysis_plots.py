@@ -1,4 +1,4 @@
-import os, cv2, time, itertools
+import os, cv2, time, itertools, copy
 
 from tqdm import *
 import numpy as np
@@ -7,19 +7,42 @@ from matplotlib_scalebar.scalebar import ScaleBar
 import scipy as sp
 import scipy.stats as sstats
 from collections import Counter
+from scipy.optimize import curve_fit
 
 from multiprocessing import get_context
 from caiman.utils.utils import load_dict_from_hdf5
 
 from .cluster_analysis import cluster_analysis
 
-from .placefield_detection import get_firingrate, compute_serial_matrix
+from .placefield_detection import get_firingrate
 
-from .utils import get_ICPI, get_dp, gauss_smooth, add_number, bootstrap_data, com
+from .utils import get_ICPI, get_dp, gauss_smooth, add_number, bootstrap_data, com, periodic_distr_distance
 
 from matplotlib.ticker import AutoMinorLocator, LogLocator, NullFormatter
 
 class cluster_analysis_plots(cluster_analysis):
+
+    '''
+        TODO:
+            * Plot 16 - missing key ’t_measures’
+            
+            * Plot 191, 23, 31, 45 - missing keys self.stats [p_post_s] - get_transition_prob function has some bugs
+            * Plot 22 - missing key - ‘zone_mask’
+            * Plot 25, 27 - missing key - ‘SNR’ - has the name changed to 'SNR_comp'? 
+            * Plot 41 - indexing issue
+            * Plot 46 - missing key - ‘if_firingrate_adapt’
+            * Plot 50, 52  - missing behaviour text file
+        
+        DONE:
+            * Plot 12 - missing key - alignment['rotation_normal'] -> plot has been covered in neuron_matching.plot_alignment_statistics(s_compare)
+            * Plot 15 - covered by plot_pv_correlation
+            * Plot 19 - variable dloc empty -> uhm - no. it's working :) (plot_hierarchy_interaction)
+            * Plot 20 - completely changed into plot_parameter_dependent_neuron_numbers
+            * Plot 191 - fixed get_transition_prob function and cleaned up plot function (some more to do)
+
+
+            
+    '''
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -29,6 +52,22 @@ class cluster_analysis_plots(cluster_analysis):
         
         nSes = self.data['nSes']
         self.pl_dat = plot_dat(self.data['mouse'],self.paths['figures'],nSes,self.data,sv_ext=sv_ext)
+    
+
+    def plotting(self):
+        
+        method_list = [func for func in dir(self) if callable(getattr(self,func)) and func.startswith("plot_")]
+
+        print("Please choose a method to plot:")
+        for i,method in enumerate(method_list):
+            print("\t%d: %s"%(i,method))
+        
+        choice = int(input("Enter the number of the method to plot: "))
+        if choice < len(method_list):
+            getattr(self,method_list[choice])()
+        else:
+            print("Invalid choice. Please try again.")
+            self.plot_data()
 
 
     def plot_turnover_mechanism(self,mode='act',sv=False,N_bs=10):
@@ -988,7 +1027,7 @@ class cluster_analysis_plots(cluster_analysis):
         ### stats of all (PC & nPC) cells
         plt.figure(figsize=(4,3),dpi=self.pl_dat.sv_opt['dpi'])
 
-        key_arr = ['SNR',fr_key,'Isec_value','MI_value']
+        key_arr = ['SNR_comp',fr_key,'Isec_value','MI_value']
 
         for i,key in enumerate(key_arr):
             print(key)
@@ -1565,7 +1604,7 @@ class cluster_analysis_plots(cluster_analysis):
         # if sv:
             # self.pl_dat.save_fig('PC_mapDynamics')
 
-    def plot_stability_dynamics(self, n_processes = 4, reprocess = False, N_bs=10, sv = False):
+    def plot_stability_dynamics(self, n_processes = 8, reprocess = False, N_bs=10, sv = False):
 
         SD = 1.96
         nSes = self.data['nSes']
@@ -1586,7 +1625,7 @@ class cluster_analysis_plots(cluster_analysis):
 
         N = {'active': self.status['activity'][:,:,1].sum(0),
              'coding': self.status['activity'][:,:,2].sum(0)}
-        L=1#00
+        L=100
 
         #for s in tqdm(range(nSes)):#min(30,nSes)):
         if n_processes>1:
@@ -1616,26 +1655,6 @@ class cluster_analysis_plots(cluster_analysis):
             p_ds0,p_cov = fit_shift_model(p_shift)
 
         ### ds > 0
-        p = {'all':     {'mean': np.zeros((nSes,4))*np.NaN,
-                         'CI':   np.zeros((nSes,2,4))*np.NaN,
-                         'std':  np.zeros((nSes,4))*np.NaN},
-             'cont':    {'mean': np.zeros((nSes,4))*np.NaN,
-                         'CI':   np.zeros((nSes,2,4))*np.NaN,
-                         'std':  np.zeros((nSes,4))*np.NaN},
-             'mix':     {'mean': np.zeros((nSes,4))*np.NaN,
-                         'CI':   np.zeros((nSes,2,4))*np.NaN,
-                         'std':  np.zeros((nSes,4))*np.NaN},
-             'discont': {'mean': np.zeros((nSes,4))*np.NaN,
-                         'CI':   np.zeros((nSes,2,4))*np.NaN,
-                         'std':  np.zeros((nSes,4))*np.NaN},
-             'silent_mix':  {'mean': np.zeros((nSes,4))*np.NaN,
-                         'CI':   np.zeros((nSes,2,4))*np.NaN,
-                         'std':  np.zeros((nSes,4))*np.NaN},
-             'silent':  {'mean': np.zeros((nSes,4))*np.NaN,
-                         'CI':   np.zeros((nSes,2,4))*np.NaN,
-                         'std':  np.zeros((nSes,4))*np.NaN}}
-
-        t_start = time.time()
         s1_shifts,s2_shifts,f1,f2 = np.unravel_index(self.compare['pointer'].col,(nSes,nSes,self.params['field_count_max'],self.params['field_count_max']))
         c_shifts = self.compare['pointer'].row
 
@@ -1649,62 +1668,30 @@ class cluster_analysis_plots(cluster_analysis):
 
         idx_celltype = idx_celltype & s_bool[s1_shifts] & s_bool[s2_shifts]
 
-        if (not('stability' in vars(self).keys())) | reprocess:
-
-            if n_processes>1:
-                pool = get_context("spawn").Pool(n_processes)
-                # pool = mp.Pool(n_processes)
-                res = pool.starmap(get_shift_distr,zip(range(1,nSes),itertools.repeat(self.compare),itertools.repeat((nSes,nbin,N_bs,idx_celltype))))
-                pool.close()
-            else:
-                res = []
-                for ds in range(1,nSes):
-                    res.append(get_shift_distr(ds,self.compare,(nSes,nbin,N_bs,idx_celltype)))
-
-            for (ds,r) in enumerate(res):
-                for pop in r.keys():
-                    for key in r[pop].keys():
-                        p[pop][key][ds,...] = r[pop][key]
-
-
-            self.stability = p
-        else:
-            p = self.stability
-        t_end = time.time()
-        print('done - time: %5.3g'%(t_end-t_start))
+        if reprocess:
+            self.stability = self.calculate_placefield_stability(dsMax=nSes,celltype='all',n_processes=n_processes,N_bs=100,p_keys=['all','cont','mix','discont','silent_mix','silent'])
 
         fig = plt.figure(figsize=(7,4),dpi=self.pl_dat.sv_opt['dpi'])
 
         ax_distr = plt.axes([0.075,0.11,0.35,0.325])
         self.pl_dat.add_number(fig,ax_distr,order=2,offset=[-100,50])
 
+        ## plot shift distributions for different ds
         for j,ds in tqdm(enumerate([1,5,10,20,40])):#min(nSes,30)):
 
             Ds = s2_shifts-s1_shifts
             idx_ds = np.where((Ds==ds) & idx_celltype & s_bool[s1_shifts] & s_bool[s2_shifts])[0]
-            N_data = len(idx_ds)
-            cdf_shifts_ds = np.zeros((N_data,nbin))
 
             idx_shifts = self.compare['pointer'].data[idx_ds].astype('int')-1
             shifts_distr = self.compare['shifts_distr'][idx_shifts,:].toarray()
-            # for i,_ in enumerate(idx_ds):
-            #     roll = round(-shifts[i]+L_track/2).astype('int')
-            #     cdf_shifts_ds[i,:] = np.cumsum(np.roll(shifts_distr[i,:],roll))
-            #     cdf_shifts_ds[i,:] = np.roll(cdf_shifts_ds[i,:],-roll)
 
             _, _, _, shift_distr = bootstrap_shifts(fit_shift_model,shifts_distr,N_bs,nbin)
 
-            s1_ds = s1_shifts[idx_ds]
-            s2_ds = s2_shifts[idx_ds]
-            c_ds = self.compare['pointer'].row[idx_ds]
-
-            idxes = self.compare['inter_coding'][idx_ds,1]==1
-
-            CI = np.percentile(shift_distr,[5,95],0)
             ax_distr.plot(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),shift_distr.mean(0),color=[0.2*j,0.2*j,0.2*j],linewidth=0.5,label='$\Delta$ s = %d'%ds)
+
+            # CI = np.percentile(shift_distr,[5,95],0)
             # ax_distr.errorbar(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),shift_distr.mean(0),shift_distr.mean(0)-CI[0,:],CI[1,:]-shift_distr.mean(0),fmt='none',ecolor=[1,0.,0.],elinewidth=0.5)
 
-            # ax_distr.plot(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),F_shifts(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),cluster.stability['all']['mean'][ds,0],cluster.stability['all']['mean'][ds,1],cluster.stability['all']['mean'][ds,2],cluster.stability['all']['mean'][ds,3]),'g',linewidth=2)
         self.pl_dat.remove_frame(ax_distr,['top','right'])
 
         dx_arr = np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin)
@@ -1756,61 +1743,65 @@ class cluster_analysis_plots(cluster_analysis):
         ax_shift1 = plt.axes([0.275,0.825,0.175,0.1])
         ax_shift2 = plt.axes([0.275,0.675,0.175,0.1])
         self.pl_dat.add_number(fig,ax_p1,order=1,offset=[-50,25])
-        try:
-            c = 5
-            p1 = self.fields['p_x'][c,10,0,:]
-            p2 = self.fields['p_x'][c,11,0,:]
-            ax_p1.plot(p1,color='tab:orange',label='$p(\\theta_s$)')
-            ax_p1.plot(p2,color='tab:blue',label='$p(\\theta_{s+\Delta s})$')
-            ax_p1.set_xticklabels([])
-            ax_p1.legend(fontsize=8,handlelength=1,loc='upper right',bbox_to_anchor=[1.2,1.6])
-            self.pl_dat.remove_frame(ax_p1,['top','left','right'])
-            ax_p1.set_yticks([])
 
+
+        ### obtain shift data
+        Ds = s2_shifts-s1_shifts
+        ds=1
+        idx_ds = np.where((Ds==ds) & s_bool[s1_shifts] & s_bool[s2_shifts])[0]
+        for i,(ax,ax_shift) in enumerate(zip([ax_p1,ax_p2],[ax_shift1,ax_shift2])):
+            
+            ## choose random shift entry
+            idx = np.random.choice(idx_ds)
+
+            ## obtain field location posterior for both sessions
+            p1 = self.fields['p_x'][c_shifts[idx],s1_shifts[idx],f1[idx],:]
+            p2 = self.fields['p_x'][c_shifts[idx],s2_shifts[idx],f2[idx],:]
+            
+            ## calculate shift between location posteriors
             _,dp = periodic_distr_distance(p1,p2,nbin,nbin,N_bs=10000,mode='bootstrap')
-            ax_shift1.plot(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),dp,'k',label='$p(\Delta \\theta)$')
-            ax_shift1.set_xticklabels([])
-            ax_shift1.legend(fontsize=8,handlelength=1,loc='upper right',bbox_to_anchor=[1.2,1.6])
-            self.pl_dat.remove_frame(ax_shift1,['top','left','right'])
-            ax_shift1.set_yticks([])
+            
+            ## plot location posteriors and shift
+            ax.plot(p1,color='tab:orange',label='$p(\\theta_s$)')
+            ax.plot(p2,color='tab:blue',label='$p(\\theta_{s+\Delta s})$')
+            ax_shift.plot(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),dp,'k',label='$p(\Delta \\theta)$')
+            
+            ## set axis properties
+            self.pl_dat.remove_frame(ax,['top','left','right'])
+            self.pl_dat.remove_frame(ax_shift,['top','left','right'])
+            ax.set_yticks([])
+            ax_shift.set_yticks([])
 
-            p1 = self.fields['p_x'][248,34,1,:]
-            p2 = self.fields['p_x'][248,79,0,:]
-            ax_p2.plot(p1,color='tab:orange')
-            ax_p2.plot(p2,color='tab:blue')
-            ax_p2.set_yticks([])
-            _,dp = periodic_distr_distance(p1,p2,nbin,nbin,N_bs=10000,mode='bootstrap')
-            ax_shift2.plot(np.linspace(-L_track/2+0.5,L_track/2-0.5,nbin),dp,'k')
-            ax_shift2.set_xlabel('field shift $\Delta \\theta$')
-            self.pl_dat.remove_frame(ax_shift2,['top','left','right'])
-            ax_shift2.set_yticks([])
+        ## further set axis-specific properties
+        ax_p1.legend(fontsize=8,handlelength=1,loc='upper right',bbox_to_anchor=[1.2,1.6])
+        ax_p1.set_xticklabels([])
+        ax_shift1.legend(fontsize=8,handlelength=1,loc='upper right',bbox_to_anchor=[1.2,1.6])
+        ax_shift1.set_xticklabels([])
 
-            ax_p2.set_xlabel('position')
-            self.pl_dat.remove_frame(ax_p2,['top','left','right'])
-        except:
-            pass
+        ax_p2.set_xlabel('position')
+        ax_shift2.set_xlabel('field shift $\Delta \\theta$')
 
+
+
+        ## plot sketch of shift distribution
         ax_img = plt.axes([0.3,0.3,0.15,0.15])
 
         x_arr = np.linspace(-49.5,49.5,nbin)
         r = 0.3
         sig=5
         y_arr = F_shifts(x_arr,1-r,r,sig,0)
-        #print(y_arr)
         ax_img.fill_between(x_arr,y_arr,color='tab:blue')
         ax_img.fill_between(x_arr,(1-r)/nbin,color='tab:red')
-        # ax_img.fill_between([-sig*SD,sig*SD],(1-r)/nbin,0,color='tab:blue',alpha=0.5,facecolor='tab:blue',lw=0)
-        # ax_img.fill_betweenx([0,(1-r)/nbin],-sig*SD,sig*SD,color='tab:red')
         plt.plot([-sig*SD,-sig*SD],[0,4*(1-r)/nbin],':',color='tab:blue')
         plt.plot([sig*SD,sig*SD],[0,4*(1-r)/nbin],':',color='tab:blue')
 
-        # img = mpimg.imread('/home/wollex/Data/Science/PhD/Thesis/pics/others/shifthist_theory_0.3.png')
-        # ax_img.imshow(img)
         self.pl_dat.remove_frame(ax_img)
         ax_img.set_xticks([])
         ax_img.set_yticks([])
 
-        # x_lim = np.where(cluster.status['sessions'])[0][-1] - np.where(cluster.status['sessions'])[0][0] + 1
+
+
+        # x_lim = np.where(self.status['sessions'])[0][-1] - np.where(self.status['sessions'])[0][0] + 1
         x_lim = np.where(s_bool)[0][-1] - np.where(s_bool)[0][0] + 1
         ax_D = plt.axes([0.6,0.8,0.375,0.13])
         ax_D.plot(range(1,nSes+1),D_KS,'k')
@@ -1838,13 +1829,13 @@ class cluster_analysis_plots(cluster_analysis):
         # pl_dat.plot_with_confidence(ax_mu,range(1,nSes+1),p['all']['mean'][:,3],p['all']['mean'][:,3]+np.array([[-1],[1]])*p['all']['std'][:,3]*SD,'k','-')
         # pl_dat.plot_with_confidence(ax_sigma,range(1,nSes+1),p['all']['mean'][:,2],p['all']['mean'][:,2]+np.array([[-1],[1]])*p['all']['std'][:,2]*SD,'k','-')
         # pl_dat.plot_with_confidence(ax_r,range(1,nSes+1),p['all']['mean'][:,1],p['all']['mean'][:,1]+np.array([[-1],[1]])*p['all']['std'][:,1]*SD,'k','-')
-        print(p['all']['CI'].shape)
-        self.pl_dat.plot_with_confidence(ax_mu,range(1,nSes+1),p['all']['mean'][:,3],p['all']['CI'][...,3].T,'k','-')
-        self.pl_dat.plot_with_confidence(ax_sigma,range(1,nSes+1),p['all']['mean'][:,2],p['all']['CI'][...,2].T,'k','-')
-        self.pl_dat.plot_with_confidence(ax_r,range(1,nSes+1),p['all']['mean'][:,1],p['all']['CI'][...,1].T,'k','-')
 
-        p_corr = np.minimum(1,p['all']['mean'][:,1]+(1-p['all']['mean'][:,1])*(2*SD*p['all']['mean'][0,2]/nbin))
-        p_SD = np.sqrt((1-2*SD*p['all']['mean'][0,2]/nbin)**2*p['all']['std'][:,1]**2 + ((1-p['all']['mean'][:,1])*2*SD/nbin)**2 * p['all']['std'][0,2]**2)
+        self.pl_dat.plot_with_confidence(ax_mu,range(1,nSes+1),self.stability['all']['mean'][:,3],self.stability['all']['CI'][...,3].T,'k','-')
+        self.pl_dat.plot_with_confidence(ax_sigma,range(1,nSes+1),self.stability['all']['mean'][:,2],self.stability['all']['CI'][...,2].T,'k','-')
+        self.pl_dat.plot_with_confidence(ax_r,range(1,nSes+1),self.stability['all']['mean'][:,1],self.stability['all']['CI'][...,1].T,'k','-')
+
+        p_corr = np.minimum(1,self.stability['all']['mean'][:,1]+(1-self.stability['all']['mean'][:,1])*(2*SD*self.stability['all']['mean'][0,2]/nbin))
+        p_SD = np.sqrt((1-2*SD*self.stability['all']['mean'][0,2]/nbin)**2*self.stability['all']['std'][:,1]**2 + ((1-self.stability['all']['mean'][:,1])*2*SD/nbin)**2 * self.stability['all']['std'][0,2]**2)
         # pl_dat.plot_with_confidence(ax_r,range(1,nSes+1),p_corr,p_SD,'tab:blue','-')
         ax_r.plot(range(nSes),p_rec_alt,'-',color='tab:blue')
 
@@ -1853,12 +1844,12 @@ class cluster_analysis_plots(cluster_analysis):
 
 
         ax_mu.set_xlim([0,x_lim])
-        ax_mu.set_ylim([-10,10])
+        ax_mu.set_ylim([-20,20])
         ax_mu.set_xticklabels([])
         ax_mu.set_ylabel('$\mu_{\Delta \\theta}$')
         ax_mu.yaxis.set_label_coords(-0.15,0.5)
         ax_sigma.set_xlim([0,x_lim])
-        ax_sigma.set_ylim([0,10])
+        ax_sigma.set_ylim([0,20])
         ax_sigma.set_xticklabels([])
         ax_sigma.set_ylabel('$\sigma_{\Delta \\theta}$')
         ax_sigma.yaxis.set_label_coords(-0.15,0.5)
@@ -1927,56 +1918,71 @@ class cluster_analysis_plots(cluster_analysis):
             plt.show(block=False)
 
 
-        # plot_shift_distr(p['all']['mean'],p['all']['std'],p_ds0)
-        #for key in p.keys():
-          #plot_shift_distr(p[key]['mean'],p[key]['std'],p_ds0)
         if sv:
             self.pl_dat.save_fig('stability_dynamics')
 
+        plot_shift_distr(self.stability['all']['mean'],self.stability['all']['std'],p_ds0)
+        # for key in p.keys():
+        #   plot_shift_distr(p[key]['mean'],p[key]['std'],p_ds0)
+
+
+        t_ses = np.arange(nSes)
+        plt.figure(figsize=(4,4))
+        ax = plt.axes([0.15,0.725,0.8,0.225])
+        self.pl_dat.plot_with_confidence(ax,self.pl_dat.n_edges-1,np.nanmean(recurrence['active']['all'],0),SD*np.nanstd(recurrence['active']['all'],0),col='k',ls='-',label='recurrence of active cells')
+        ax.legend(loc='lower right',fontsize=10,bbox_to_anchor=[1.05,0.8])
+        ax.set_xlim([0,t_ses[-1]])
+        ax.set_ylim([0,1.1])
+        ax.set_xticklabels([])
+        ax.set_ylabel('fraction',fontsize=14)
+        #ax.set_xlabel('session diff. $\Delta$ s',fontsize=14)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        ax = plt.axes([0.15,0.425,0.8,0.225])
+        self.pl_dat.plot_with_confidence(ax,self.pl_dat.n_edges-1,np.nanmean(recurrence['coding']['ofactive'],0),1.0*np.nanstd(recurrence['coding']['ofactive'],0),col='k',ls='-',label='place cell recurrence (of rec. active)')
+        #ax.plot(pl_dat.n_edges-1,np.nanmean(recurrence['coding']['all'],0),'b--',label='recurrence of place cells')
+        ax.legend(loc='lower right',fontsize=10,bbox_to_anchor=[1.05,0.8])
+        ax.set_xlim([0,t_ses[-1]])
+        ax.set_ylim([0,1.1])
+        ax.set_xticklabels([])
+        ax.set_ylabel('fraction',fontsize=14)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        ax = plt.axes([0.15,0.125,0.8,0.225])
+        p_corr = np.minimum(1,self.stability['all']['mean'][:,1]+(1-self.stability['all']['mean'][:,1])*(2*SD*self.stability['all']['mean'][:,2]/nbin))
+        self.pl_dat.plot_with_confidence(ax,self.pl_dat.n_edges-1,p_corr,p_corr+np.array([[-1],[1]])*self.stability['all']['std'][:,1]*SD,'k','-',label='stable place fields (of rec. place cell)')
+        ax.set_xlim([0,t_ses[-1]])
+        ax.set_ylim([0,1.1])
+        ax.set_ylabel('fraction',fontsize=14)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.set_xlabel('session diff. $\Delta$ s',fontsize=14)
+        ax.legend(loc='lower right',fontsize=10,bbox_to_anchor=[1.05,0.8])
+        
+        plt.tight_layout()
+        plt.show(block=False)
+
+
         return
-        # plt.figure(figsize=(4,4))
-        # ax = plt.axes([0.15,0.725,0.8,0.225])
-        # pl_dat.plot_with_confidence(ax,pl_dat.n_edges-1,np.nanmean(recurrence['active']['all'],0),SD*np.nanstd(recurrence['active']['all'],0),col='k',ls='-',label='recurrence of active cells')
-        # ax.legend(loc='lower right',fontsize=10,bbox_to_anchor=[1.05,0.8])
-        # ax.set_xlim([0,t_ses[-1]])
-        # ax.set_ylim([0,1.1])
-        # ax.set_xticklabels([])
-        # ax.set_ylabel('fraction',fontsize=14)
-        # #ax.set_xlabel('session diff. $\Delta$ s',fontsize=14)
-        # ax.spines['top'].set_visible(False)
-        # ax.spines['right'].set_visible(False)
-        #
-        # ax = plt.axes([0.15,0.425,0.8,0.225])
-        # pl_dat.plot_with_confidence(ax,pl_dat.n_edges-1,np.nanmean(recurrence['coding']['ofactive'],0),1.0*np.nanstd(recurrence['coding']['ofactive'],0),col='k',ls='-',label='place cell recurrence (of rec. active)')
-        # #ax.plot(pl_dat.n_edges-1,np.nanmean(recurrence['coding']['all'],0),'b--',label='recurrence of place cells')
-        # ax.legend(loc='lower right',fontsize=10,bbox_to_anchor=[1.05,0.8])
-        # ax.set_xlim([0,t_ses[-1]])
-        # ax.set_ylim([0,1.1])
-        # ax.set_xticklabels([])
-        # ax.set_ylabel('fraction',fontsize=14)
-        # ax.spines['top'].set_visible(False)
-        # ax.spines['right'].set_visible(False)
-        #
-        # ax = plt.axes([0.15,0.125,0.8,0.225])
-        # p_corr = np.minimum(1,p['all']['mean'][:,1]+(1-p['all']['mean'][:,1])*(2*SD*p['all']['mean'][:,2]/nbin))
-        # pl_dat.plot_with_confidence(ax,pl_dat.n_edges-1,p_corr,p_corr+np.array([[-1],[1]])*p['all']['std'][:,1]*SD,'k','-',label='stable place fields (of rec. place cell)')
-        # ax.set_xlim([0,t_ses[-1]])
-        # ax.set_ylim([0,1.1])
-        # ax.set_ylabel('fraction',fontsize=14)
-        # ax.spines['top'].set_visible(False)
-        # ax.spines['right'].set_visible(False)
-        # ax.set_xlabel('session diff. $\Delta$ s',fontsize=14)
-        # ax.legend(loc='lower right',fontsize=10,bbox_to_anchor=[1.05,0.8])
-        #
-        # plt.tight_layout()
-        # plt.show(block=False)
+    
+
+    def plot_stability_dynamics2(self):
+
+        nSes = self.data['nSes']
+
+        SD = 1.96
 
         # if sv:
         #     pl_dat.save_fig('stability_dynamics_hierarchy')
 
         plt.figure(figsize=(4,2))
+
+        p = self.stability
+
         ax = plt.subplot(111)
-        pl_dat.plot_with_confidence(ax,pl_dat.n_edges-1,p['all']['mean'][:,2],p['all']['mean'][:,2]+np.array([[-1],[1]])*p['all']['std'][:,2]*SD,'k','--')
+        self.pl_dat.plot_with_confidence(ax,self.pl_dat.n_edges-1,p['all']['mean'][:,2],p['all']['mean'][:,2]+np.array([[-1],[1]])*p['all']['std'][:,2]*SD,'k','--')
         ax.set_xlim([0,40])
         ax.set_ylim([0,12])
         ax.set_xlabel('session diff. $\Delta$ s')
@@ -1988,8 +1994,8 @@ class cluster_analysis_plots(cluster_analysis):
 
         plt.tight_layout()
         plt.show(block=False)
-        if sv:
-            pl_dat.save_fig('stability_dynamics_width')
+        # if sv:
+        #     self.pl_dat.save_fig('stability_dynamics_width')
 
         #plot_shift_distr(p['cont']['mean'],p['cont']['std'],p_ds0)
         #plot_shift_distr(p['silent']['mean'],p['silent']['std'],p_ds0)
@@ -2004,9 +2010,9 @@ class cluster_analysis_plots(cluster_analysis):
         #f,axs = plt.subplots(2,2,figsize=(6,4),sharex=True)
         plt.figure(figsize=(4,2.5))
         ax = plt.subplot(111)
-        pl_dat.plot_with_confidence(ax,range(nSes),cluster.stability['cont']['mean'][:,1],cluster.stability['cont']['mean'][:,1]+np.array([[-1],[1]])*cluster.stability['cont']['std'][:,1],'b','--',label='coding')
-        pl_dat.plot_with_confidence(ax,range(nSes),cluster.stability['discont']['mean'][:,1],cluster.stability['discont']['mean'][:,1]+np.array([[-1],[1]])*cluster.stability['discont']['std'][:,1],'r','--',label='no coding')
-        #pl_dat.plot_with_confidence(ax,range(nSes),cluster.stability['silent']['mean'][:,1],cluster.stability['silent']['mean'][:,1]+np.array([[-1],[1]])*cluster.stability['silent']['std'][:,1]*SD,'g','--',label='silent')
+        self.pl_dat.plot_with_confidence(ax,range(nSes),self.stability['cont']['mean'][:,1],self.stability['cont']['mean'][:,1]+np.array([[-1],[1]])*self.stability['cont']['std'][:,1],'b','--',label='coding')
+        self.pl_dat.plot_with_confidence(ax,range(nSes),self.stability['discont']['mean'][:,1],self.stability['discont']['mean'][:,1]+np.array([[-1],[1]])*self.stability['discont']['std'][:,1],'r','--',label='no coding')
+        #pl_dat.plot_with_confidence(ax,range(nSes),self.stability['silent']['mean'][:,1],self.stability['silent']['mean'][:,1]+np.array([[-1],[1]])*self.stability['silent']['std'][:,1]*SD,'g','--',label='silent')
         #ax.set_yscale('log')
         ax.set_ylim([0,1.1])
         ax.set_xlim([0,20])
@@ -2016,8 +2022,8 @@ class cluster_analysis_plots(cluster_analysis):
         plt.legend(loc='lower right',fontsize=10)
         #plt.title('cont')
         plt.show(block=False)
-        if sv:
-            pl_dat.save_fig('stability_dynamics_cont_vs_disc')
+        # if sv:
+        #     self.pl_dat.save_fig('stability_dynamics_cont_vs_disc')
 
 
 
@@ -2035,8 +2041,8 @@ class cluster_analysis_plots(cluster_analysis):
 
         for i,key in enumerate(key_arr):
 
-            plt.bar(np.arange(1,maxSes+1)-offset_bar+i*w_bar,cluster.stability[key]['mean'][:maxSes,1],width=w_bar,facecolor=col_arr[i],edgecolor='k',label=label_arr[i])
-            plt.errorbar(np.arange(1,maxSes+1)-offset_bar+i*w_bar,cluster.stability[key]['mean'][:maxSes,1],cluster.stability[key]['std'][:maxSes,1],fmt='none',ecolor='r')
+            plt.bar(np.arange(1,maxSes+1)-offset_bar+i*w_bar,self.stability[key]['mean'][:maxSes,1],width=w_bar,facecolor=col_arr[i],edgecolor='k',label=label_arr[i])
+            plt.errorbar(np.arange(1,maxSes+1)-offset_bar+i*w_bar,self.stability[key]['mean'][:maxSes,1],self.stability[key]['std'][:maxSes,1],fmt='none',ecolor='r')
 
         plt.xlabel('session difference $\Delta s$',fontsize=14)
         plt.ylabel('$\%$ stable fields',fontsize=14)
@@ -2045,8 +2051,99 @@ class cluster_analysis_plots(cluster_analysis):
         plt.tight_layout()
         plt.show(block=False)
 
-        if sv:
-            pl_dat.save_fig('intercoding_state')
+        # if sv:
+        #     self.pl_dat.save_fig('intercoding_state')
+
+    
+    def plot_param_dependent_stability(self,iterate_var=('pm_thr',[0.95,0.8,0.5,0.2,0.05]),n_processes=8,stability_in=None):
+        
+        p_keys=['all','cont','mix','discont','silent']
+
+        dsMax = 6
+        nSteps = len(iterate_var[1])
+        
+        params = {
+            'SNR_thr': 2,
+            'rval_thr': 0,
+            'pm_thr': 0.05,
+            'alpha': 1,
+            'CI_thr': 10,
+            'Bayes_thr': 3
+        }
+
+        if stability_in is None:
+            stability = {} 
+            p_stats = {
+                'mean': np.full((nSteps,dsMax,4),np.NaN),
+                'CI':   np.full((nSteps,dsMax,2,4),np.NaN),
+                'std':  np.full((nSteps,dsMax,4),np.NaN)
+            }
+            for key in p_keys:
+                stability[key] = copy.deepcopy(p_stats)
+
+            ## iterate over parameter
+            for (i,val) in enumerate(iterate_var[1]):
+                params[iterate_var[0]] = val
+
+                ## update activity and field status
+                self.update_status(**params)
+                self.compareSessions(n_processes=n_processes)
+
+                ## and calculate stability
+                p = self.calculate_placefield_stability(dsMax=dsMax,celltype='all',n_processes=n_processes,N_bs=100,p_keys=p_keys)
+
+                ## hand over results to stability dict
+                for key in p.keys():
+                    for stat in p[key].keys():
+                        stability[key][stat][i,...] = p[key][stat]
+        else:
+            stability = stability_in
+
+        
+        plt.figure(figsize=(4,3))
+        pop_key = 'all'
+        for (i,ds) in enumerate([1,2,5]):
+            for pop_key in ['all','cont','discont','silent']:
+                #s1_shifts,s2_shifts = np.unravel_index(self.compare['pointer'].col,(nSes,nSes))
+                #idx_ds = np.where(s2_shifts-s1_shifts==ds)[0]
+                
+                if pop_key=='all':
+                    col = [0.2+0.3*i,0.2+0.3*i,0.2+0.3*i]
+                if pop_key=='cont':
+                    col = [0.2+0.3*i,0.2+0.3*i,1]
+                    #idxes = compare['inter_coding'][idx_ds,1]==1
+                if pop_key=='discont':
+                    col = [1,0.2+0.3*i,0.2+0.3*i]
+                    #idxes = (compare['inter_coding'][idx_ds,1]==0) & (compare['inter_active'][idx_ds,1]==1)
+                if pop_key=='silent':
+                    col = [0.2+0.3*i,1,0.2+0.3*i]
+                    #idxes = compare['inter_active'][idx_ds,1]==0
+
+                plt.plot(iterate_var[1],stability[pop_key]['mean'][:,ds,1],color=col,label=pop_key if i==0 else None)
+            # plt.errorbar(val_arr[:-1],stability[pop_key]['mean'][:,ds][:-1],stability[pop_key]['std'][:,ds,1][:-1],fmt='none',ecolor='r')
+
+        plt.xlabel(iterate_var[0],fontsize=14)
+        plt.legend(fontsize=10)
+        plt.ylim([0,1.])
+        plt.ylabel('$r_{stable}$',fontsize=14)
+        plt.tight_layout()
+        plt.show(block=False)
+
+        return stability
+
+        # if sv:
+        #     pl_dat.save_fig('stability_impact_pm')
+        ##for i in range(nSteps):
+            ##col = np.ones(3)*0.2*i
+            ##plt.bar(np.arange(1,sesMax+1)-0.1*nSteps+0.2*i,self.stability['cont']['mean'][i,:sesMax,1],width=0.2,facecolor=col,label='continuous')
+            ##plt.errorbar(np.arange(1,sesMax+1)-0.1*nSteps+0.2*i,self.stability['cont']['mean'][i,:sesMax,1],self.stability['cont']['std'][i,:sesMax,1],fmt='none',ecolor='r')
+        ##plt.show(block=False)
+        #return cluster
+
+
+
+
+
 
     def plot_PC_choice(self, sv = False):
 
@@ -2073,7 +2170,7 @@ class cluster_analysis_plots(cluster_analysis):
         ax = plt.subplot(111)#,projection='3d')
 
         for n in range(nDisp):
-            sc = ax.plot(self.matching['com'][n,::5,0],self.matching['com'][n,::5,1],'k-')#,c=range(0,nSes,5))#,cmap='jet')#,cluster.matching['com'][n,::5,2]
+            sc = ax.plot(self.matching['com'][n,::5,0],self.matching['com'][n,::5,1],'k-')#,c=range(0,nSes,5))#,cmap='jet')#,self.matching['com'][n,::5,2]
         #plt.colorbar(sc)
        
         plt.show(block=False)
@@ -2111,8 +2208,8 @@ class cluster_analysis_plots(cluster_analysis):
 
 
         ### get place field max firing rate
-        #for c in range(cluster.params['nC']):
-          #for s in range(cluster.data['nSes']):
+        #for c in range(self.params['nC']):
+          #for s in range(self.data['nSes']):
 
         print('test field width as well')
         print('test peak firing rate as well')
@@ -2154,7 +2251,7 @@ class cluster_analysis_plots(cluster_analysis):
         fr_instable = self.stats['firingrate'][idx_loosePC]
 
         idx_nPC = np.where(self.status['activity'][...,1] & ~self.status['activity'][...,2])
-        #rel_instable = np.nanmax(cluster.fields['reliability'][idx_loosePC[0],idx_loosePC[1],:],-1)
+        #rel_instable = np.nanmax(self.fields['reliability'][idx_loosePC[0],idx_loosePC[1],:],-1)
         Isec_nPC = self.stats['Isec_value'][idx_nPC]
         fr_nPC = self.stats['firingrate'][idx_nPC]
 
@@ -2168,9 +2265,9 @@ class cluster_analysis_plots(cluster_analysis):
         ax.hist(rel_relocate,np.linspace(0,1,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='b')
         ax.hist(rel_instable,np.linspace(0,1,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='r')
         #plt.hist(rel_nPC,np.linspace(0,1,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='k',linestyle=':')
-        #rel_all = cluster.fields['reliability']
-        #rel_all[~cluster.status_fields] = np.NaN
-        #rel_all = rel_all[cluster.status['activity'][...,2],...]
+        #rel_all = self.fields['reliability']
+        #rel_all[~self.status_fields] = np.NaN
+        #rel_all = rel_all[self.status['activity'][...,2],...]
         #ax.hist(rel_all.flat,np.linspace(0,1,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='k')
         ax.set_xlabel('reliability [%]',fontsize=14)
         ax.set_xlim([0,1])
@@ -2182,10 +2279,10 @@ class cluster_analysis_plots(cluster_analysis):
         MI_instable = self.stats['MI_value'][idx_loosePC]
         MI_relocate = self.stats['MI_value'][c_relocate,s1_relocate]
 
-        # MI_nPC = cluster.stats['Isec_value'][idx_nPC]
-        # MI_stable = cluster.stats['Isec_value'][c_stable,s1_stable]
-        # MI_instable = cluster.stats['Isec_value'][idx_loosePC]
-        # MI_relocate = cluster.stats['Isec_value'][c_relocate,s1_relocate]
+        # MI_nPC = self.stats['Isec_value'][idx_nPC]
+        # MI_stable = self.stats['Isec_value'][c_stable,s1_stable]
+        # MI_instable = self.stats['Isec_value'][idx_loosePC]
+        # MI_relocate = self.stats['Isec_value'][c_relocate,s1_relocate]
 
         plt.hist(MI_nPC,np.linspace(0,1,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='k',linestyle=':',label='nPC')
         plt.hist(MI_stable,np.linspace(0,1,51),alpha=0.5,density=True,cumulative=True,histtype='step',color=col_stable,label='stable')
@@ -2211,9 +2308,9 @@ class cluster_analysis_plots(cluster_analysis):
         ax.legend(fontsize=10,loc='lower right')
 
         #ax = plt.subplot(133)
-        #maxrate_stable = cluster.fields['max_rate'][c_stable,s1_stable,f_stable]
-        ##idx_loosePC = np.where(np.diff(cluster.status['activity'][...,2].astype('int'),1)==-1)
-        #maxrate_instable = np.nanmax(cluster.fields['max_rate'][idx_loosePC[0],idx_loosePC[1],:],-1)
+        #maxrate_stable = self.fields['max_rate'][c_stable,s1_stable,f_stable]
+        ##idx_loosePC = np.where(np.diff(self.status['activity'][...,2].astype('int'),1)==-1)
+        #maxrate_instable = np.nanmax(self.fields['max_rate'][idx_loosePC[0],idx_loosePC[1],:],-1)
         #plt.hist(maxrate_stable,np.linspace(0,20,51),alpha=0.5,density=True,cumulative=True,histtype='step',color=col_stable,label='stable')
         #plt.hist(maxrate_instable,np.linspace(0,20,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='r',label='instable')
         #ax.set_xlabel('$\\nu_{max}$',fontsize=14)
@@ -2221,7 +2318,7 @@ class cluster_analysis_plots(cluster_analysis):
 
         ax = plt.subplot(141)
         width_stable = self.fields['width'][c_stable,s1_stable,f_stable,0]
-        #idx_loosePC = np.where(np.diff(cluster.status['activity'][...,2].astype('int'),1)==-1)
+        #idx_loosePC = np.where(np.diff(self.status['activity'][...,2].astype('int'),1)==-1)
         width_instable = np.nanmax(self.fields['width'][idx_loosePC[0],idx_loosePC[1],:,0],-1)
         plt.hist(width_stable,np.linspace(0,20,51),alpha=0.5,density=True,cumulative=True,histtype='step',color=col_stable,label='stable')
         plt.hist(width_instable,np.linspace(0,20,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='r',label='instable')
@@ -2231,9 +2328,9 @@ class cluster_analysis_plots(cluster_analysis):
         ax.set_ylabel('cdf',fontsize=14)
 
         # ax = plt.subplot(144)
-        # A_stable = cluster.fields['amplitude'][c_stable,s1_stable,f_stable,0]
-        # #idx_loosePC = np.where(np.diff(cluster.status['activity'][...,2].astype('int'),1)==-1)
-        # A_instable = np.nanmax(cluster.fields['amplitude'][idx_loosePC[0],idx_loosePC[1],:,0],-1)
+        # A_stable = self.fields['amplitude'][c_stable,s1_stable,f_stable,0]
+        # #idx_loosePC = np.where(np.diff(self.status['activity'][...,2].astype('int'),1)==-1)
+        # A_instable = np.nanmax(self.fields['amplitude'][idx_loosePC[0],idx_loosePC[1],:,0],-1)
         # plt.hist(A_stable,np.linspace(0,40,51),alpha=0.5,density=True,cumulative=True,histtype='step',color=col_stable,label='stable')
         # plt.hist(A_instable,np.linspace(0,40,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='r',label='instable')
         # ax.set_xlabel('$\sigma$ [bins]',fontsize=14)
@@ -2244,8 +2341,8 @@ class cluster_analysis_plots(cluster_analysis):
         #plt.subplot(224)
         #plt.hist(Isec_stable,np.linspace(0,1,51),alpha=0.5,density=True,cumulative=True,histtype='step',color=col_stable)
         #plt.hist(Isec_stable,np.linspace(0,1,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='r')
-        #MI_all = cluster.stats['Isec_value']
-        #MI_all = MI_all[cluster.status['activity'][...,2]]
+        #MI_all = self.stats['Isec_value']
+        #MI_all = MI_all[self.status['activity'][...,2]]
         #plt.hist(MI_all.flat,np.linspace(0,1,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='k')
         #plt.xlabel('I/sec')
 
@@ -2257,8 +2354,8 @@ class cluster_analysis_plots(cluster_analysis):
         ##plt.hist(fr_relocate,np.linspace(0,3,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='b')
         #plt.hist(fr_instable,np.linspace(0,5,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='r',label='instable')
 
-        #fr_all = cluster.stats['firingrate']
-        #fr_all = fr_all[cluster.status['activity'][...,2]]
+        #fr_all = self.stats['firingrate']
+        #fr_all = fr_all[self.status['activity'][...,2]]
         ##a,b = bootstrap_data(lambda x : (np.cumsum(np.histogram(x,np.linspace(0,3,51))[0])/len(x),np.NaN),fr_all,1000)
         ##pl_dat.plot_with_confidence(ax,np.linspace(0,3,51)[:-1],a,b,col='r',ls='-')
         ##ax.hist(fr_all.flat,np.linspace(0,3,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='k')
@@ -2323,7 +2420,7 @@ class cluster_analysis_plots(cluster_analysis):
 
         plt.show(block=False)
         # print(remapping.sum(1))
-    #print(np.where(cluster.compare['inter_coding'][:,1]==0)[0])
+    #print(np.where(self.compare['inter_coding'][:,1]==0)[0])
     #print('search for cases, where the neuron loses its  coding ability -> lower MI / lower fr / ...?')
         
     def plot_neuron_examples(self, sv = False):
@@ -2347,17 +2444,17 @@ class cluster_analysis_plots(cluster_analysis):
                 
                 offset = 0
                 for i in tqdm(range(nSteps-1)):
-                    # idx_SNR = np.where((cluster.stats['SNR'][:,s] >= SNR_arr[i]) & (cluster.stats['SNR'][:,s] < SNR_arr[i+1]))
+                    # idx_SNR = np.where((self.stats['SNR'][:,s] >= SNR_arr[i]) & (self.stats['SNR'][:,s] < SNR_arr[i+1]))
                     idx_SNR = np.where((ld['SNR_comp'] >= SNR_arr[i]) & (ld['SNR_comp'] < SNR_arr[i+1]))
                     n_idx = len(idx_SNR[0])
                     if n_idx > 0:
                         for j in np.random.choice(n_idx,min(n_idx,3),replace=False):
                             # c = idx_SNR[0][j]
-                            # n = int(cluster.matching['IDs'][c,s])
+                            # n = int(self.matching['IDs'][c,s])
                             n = idx_SNR[0][j]
                             C = ld['C'][n,:]/ld['C'][n,:].max()
                             ax.plot(t_arr,-C+offset,linewidth=0.5)
-                            # ax.text(600,offset,'%.2f'%cluster.stats['SNR'][c,s])#'[%f,%f]'%(SNR_arr[i],SNR_arr[i+1]))
+                            # ax.text(600,offset,'%.2f'%self.stats['SNR'][c,s])#'[%f,%f]'%(SNR_arr[i],SNR_arr[i+1]))
                             offset += 1#= (nSteps-i)
 
                     offset += 1
@@ -2373,14 +2470,14 @@ class cluster_analysis_plots(cluster_analysis):
                 CNN_arr = np.linspace(0.,1.,nSteps)
                 acom = com(ld['A'],512,512)
                 for i in tqdm(range(nSteps-1)):
-                    # idx_CNN = np.where((cluster.stats['CNN'][:,s] >= CNN_arr[i]) & (cluster.stats['CNN'][:,s] < CNN_arr[i+1]))
+                    # idx_CNN = np.where((self.stats['CNN'][:,s] >= CNN_arr[i]) & (self.stats['CNN'][:,s] < CNN_arr[i+1]))
                     idx_CNN = np.where((ld['cnn_preds'] >= CNN_arr[i]) & (ld['cnn_preds'] < CNN_arr[i+1]) & ((ld['A']>0).sum(0)>50) & np.all(acom>10,1) & np.all(acom<500,1))
                     n_idx = len(idx_CNN[0])
                     # print(idx_CNN)
                     if n_idx > 0:
                         for j in np.random.choice(n_idx,min(n_idx,1),replace=False):
                             # c = idx_CNN[0][j]
-                            # n = int(cluster.matching['IDs'][c,s])
+                            # n = int(self.matching['IDs'][c,s])
                             n = idx_CNN[1][j]
                             A = ld['A'][:,n].reshape(512,512).toarray()
                             a_com = com(A.reshape(-1,1),512,512)
@@ -2397,10 +2494,10 @@ class cluster_analysis_plots(cluster_analysis):
                             x_lims = [x_ref-margin,x_ref+margin]
                             y_lims = [y_ref-margin,y_ref+margin]
                             # ax.plot(t_arr,C+nSteps-offset)
-                            # ax.text(600,nSteps-offset,'%.2f'%cluster.stats['SNR'][c,s])#'[%f,%f]'%(SNR_arr[i],SNR_arr[i+1]))
+                            # ax.text(600,nSteps-offset,'%.2f'%self.stats['SNR'][c,s])#'[%f,%f]'%(SNR_arr[i],SNR_arr[i+1]))
                             ax.set_xlim(x_lims)
                             ax.set_ylim(y_lims)
-                            # ax.text(x_ref,y_ref+5,'$CNN = %.3f$'%cluster.stats['CNN'][c,s],fontsize=8)
+                            # ax.text(x_ref,y_ref+5,'$CNN = %.3f$'%self.stats['CNN'][c,s],fontsize=8)
                             ax.text(x_ref+2,y_ref+12,'$%.3f$'%ld['cnn_preds'][n],fontsize=8)
                             self.pl_dat.remove_frame(ax)
                             ax.set_xticks([])
@@ -2423,9 +2520,9 @@ class cluster_analysis_plots(cluster_analysis):
                 if os.path.exists(pathLoad):
                     ld2 = load_dict_from_hdf5(pathLoad)
             
-                    # pathLoad = pathcat([cluster.params['pathMouse'],'Session%02d/results_redetect.mat'%(s)])
+                    # pathLoad = pathcat([self.params['pathMouse'],'Session%02d/results_redetect.mat'%(s)])
                     # ld1 = loadmat(pathLoad,variable_names=['A'])
-                    # pathLoad = pathcat([cluster.params['pathMouse'],'Session%02d/results_redetect.mat'%(s+1)])
+                    # pathLoad = pathcat([self.params['pathMouse'],'Session%02d/results_redetect.mat'%(s+1)])
                     # ld2 = loadmat(pathLoad,variable_names=['A'])
 
                     x_grid, y_grid = np.meshgrid(np.arange(0., self.params['dims'][0]).astype(np.float32), np.arange(0., self.params['dims'][1]).astype(np.float32))
@@ -2468,7 +2565,7 @@ class cluster_analysis_plots(cluster_analysis):
                             x_lims = [x_ref-margin,x_ref+margin]
                             y_lims = [y_ref-margin,y_ref+margin]
                             # ax.plot(t_arr,C+nSteps-offset)
-                            # ax.text(600,nSteps-offset,'%.2f'%cluster.stats['SNR'][c,s])#'[%f,%f]'%(SNR_arr[i],SNR_arr[i+1]))
+                            # ax.text(600,nSteps-offset,'%.2f'%self.stats['SNR'][c,s])#'[%f,%f]'%(SNR_arr[i],SNR_arr[i+1]))
                             ax.set_xlim(x_lims)
                             ax.set_ylim(y_lims)
                             ax.text(x_ref+2,y_ref+8,'$%.2f$'%self.matching['score'][c,s,0],fontsize=8)
@@ -2482,65 +2579,94 @@ class cluster_analysis_plots(cluster_analysis):
             if sv:
                 self.pl_dat.save_fig('neuron_matches_examples')
 
+
     def plot_pv_correlations(self):
         print('## plot population vector correlations etc')
 
         nSes = self.data['nSes']
         nC = self.data['nC']
+        nbin = self.data['nbin']
 
-        fmap = np.ma.masked_invalid(self.stats['firingmap'][self.status['clusters'],:,:])
-        print(fmap.shape)
+        def nangauss_filter(array,sigma,truncate):
 
-        if False:
-            di = 3
+            V=array.copy()
+            V[np.isnan(array)]=0
+            VV=sp.ndimage.gaussian_filter(V,sigma=sigma,truncate=truncate)
 
-            for ds in [1,2,3,5,10,20]:
-                session_bool = np.where(np.pad(cluster.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(cluster.status['sessions'][:],(0,0),constant_values=False))[0]
-                s_corr = np.zeros(nSes)*np.NaN
-                plt.figure(figsize=(3,5))
-                ax = plt.axes([0.1,0.6,0.85,0.35])
-                for s in tqdm(np.where(session_bool)[0]):
-                    corr = np.zeros(nbin)
-                    for i in range(nbin):
+            W=0*array.copy()+1
+            W[np.isnan(array)]=0
+            WW=sp.ndimage.gaussian_filter(W,sigma=sigma,truncate=truncate)
 
-                        idx = np.zeros(nbin,'bool')
-                        idx[max(0,i-di):min(nbin+1,i+di)] = True
+            return VV/WW
 
-                        idx_cells = cluster.status['activity'][cluster.status['clusters'],s,2]
-                        corr[i] = np.ma.corrcoef(fmap[idx_cells,s,:][:,idx].mean(-1),fmap[idx_cells,s+ds,:][:,idx].mean(-1))[0,1]
+        fmap = nangauss_filter(self.stats['firingmap'][self.status['clusters'],:,:],(0,0,2),5)
+        fmap = np.ma.masked_invalid(fmap)
+        
+        # fmap = sp.ndimage.gaussian_filter(fmap,2)
+
+        ## plotting population vector correlation of different ds, calculated for each session
+        di = 5
+
+        plt.figure(figsize=(3,5))
+        ax = plt.axes([0.1,0.6,0.85,0.35])
+        ax_corr = plt.axes([0.1,0.15,0.85,0.35])
+        
+        ds_arr = [1,2,3,5,10]
+        for s0,ds in enumerate(ds_arr):
+            
+            col = s0/len(ds_arr)
+            col =[col]*3
+
+            session_bool = np.where(np.pad(self.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(self.status['sessions'][:],(0,0),constant_values=False))[0]
+            s_corr = np.zeros(nSes)*np.NaN
+            for s in tqdm(np.where(session_bool)[0]):
+                corr = np.zeros(nbin)
+                for i in range(nbin):
+
+                    idx = np.zeros(nbin,'bool')
+                    idx[max(0,i-di):min(nbin+1,i+di)] = True
+
+                    idx_cells = self.status['activity'][self.status['clusters'],s,1]
+                    corr[i] = np.ma.corrcoef(fmap[idx_cells,s,:][:,idx].mean(-1),fmap[idx_cells,s+ds,:][:,idx].mean(-1))[0,1]
+
+                # print(corr)
+                if s in [10,20,40,60]:
+                    ax.plot(corr,color=col)
+
+                s_corr[s] = corr.mean()
 
 
-                    if s in [10,20,40,60]:
-                        ax.plot(corr)
+            ax_corr.plot(gauss_smooth(s_corr,1,mode='constant'),color=col, label='ds=%d'%ds)
+        
+        ax.set_ylim([-0.25,1.])
+        ax_corr.set_ylim([-0.25,1.])
+        ax_corr.legend()
+        # plt.title('ds=%d'%ds)
+        plt.show(block=False)
 
-                    s_corr[s] = corr.mean()
 
-                ax.set_ylim([-0.25,0.75])
-                ax = plt.axes([0.1,0.15,0.85,0.35])
-                ax.plot(gauss_smooth(s_corr,1,mode='constant'))
-                ax.set_ylim([-0.25,0.75])
-                plt.title('ds=%d'%ds)
-                plt.show(block=False)
+        ## plotting ds-dependence of population vector correlation
+        # fmap = gauss_smooth(self.stats['firingmap'],(0,0,2))
+        corr = np.zeros((nC,nSes,nSes))*np.NaN
+        for ds in tqdm(range(1,30)):
+            session_bool = np.where(np.pad(self.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(self.status['sessions'][:],(0,0),constant_values=False))[0]
+            for s in np.where(session_bool)[0]:
+                # for n 
+                for n in np.where(self.status['activity'][self.status['clusters'],s,1] & self.status['activity'][self.status['clusters'],s+ds,1])[0]:
+                    corr[n,s,ds] = np.corrcoef(fmap[n,s,:],fmap[n,s+ds,:])[0,1]
 
-        if True:
+        plt.figure(figsize=(7,5),dpi=self.pl_dat.sv_opt['dpi'])
+        plt.subplot(121)
+        im = plt.imshow(np.nanmean(corr,0),clim=[0,0.5])
+        plt.colorbar(im)
 
-            fmap = gauss_smooth(self.stats['firingmap'],(0,0,2))
-            corr = np.zeros((nC,nSes,nSes))*np.NaN
-            for ds in tqdm(range(1,30)):
-                session_bool = np.where(np.pad(self.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(self.status['sessions'][:],(0,0),constant_values=False))[0]
-                for s in np.where(session_bool)[0]:
-                    for n in np.where(self.status['activity'][:,s,2] & self.status['activity'][:,s+ds,2])[0]:
-                        corr[n,s,ds] = np.corrcoef(fmap[n,s,:],fmap[n,s+ds,:])[0,1]
+        plt.subplot(122)
+        plt.plot(np.nanmean(np.nanmean(corr,0),0))
+        plt.ylim([0,1])
+        plt.show(block=False)
+    
 
-            plt.figure(figsize=(7,5),dpi=self.pl_dat.sv_opt['dpi'])
-            plt.subplot(121)
-            im = plt.imshow(np.nanmean(corr,0),clim=[0,0.5])
-            plt.colorbar(im)
 
-            plt.subplot(122)
-            plt.plot(np.nanmean(np.nanmean(corr,0),0))
-            plt.ylim([0,1])
-            plt.show(block=False)
     
     def plot_example_draw(self, sv = False):
 
@@ -2593,13 +2719,13 @@ class cluster_analysis_plots(cluster_analysis):
             # print(trial_corr)
             # print(trial_corr.shape)
             idx_high_corr = np.where(trial_corr > 0.5)
-            # print(cluster.stats.keys())
+            # print(self.stats.keys())
             for c1,c2 in zip(idx_high_corr[0],idx_high_corr[1]):
                 # print('c: %d, %d'%(c1,c2))
-                # print(cluster.matching['com'][c1,s,:])
-                # print(cluster.matching['com'][c2,s,:])
-                # print(np.linalg.norm(cluster.matching['com'][c1,s,:]-cluster.matching['com'][c2,s,:]))
-                # if np.linalg.norm(cluster.matching['com'][c1,s,:]-cluster.matching['com'][c2,s,:])>10:
+                # print(self.matching['com'][c1,s,:])
+                # print(self.matching['com'][c2,s,:])
+                # print(np.linalg.norm(self.matching['com'][c1,s,:]-self.matching['com'][c2,s,:]))
+                # if np.linalg.norm(self.matching['com'][c1,s,:]-self.matching['com'][c2,s,:])>10:
                 high_corr[c1] += 1
                 high_corr[c2] += 1
 
@@ -2609,14 +2735,16 @@ class cluster_analysis_plots(cluster_analysis):
         plt.hist(high_corr,np.linspace(0,400,51))
         plt.show(block=False)
 
+
+
     def plot_sdep_stability(self, reprocess = False, sv =  False):
 
         print('get session-dependent stability')
 
         nSes = self.data['nSes']
 
-        s_bool = np.zeros(nSes,'bool')
-        s_bool[17:87] = True
+        s_bool = np.ones(nSes,'bool')
+        # s_bool[17:87] = True
         # s_bool[:] = True
         s_bool[~self.status['sessions']] = False
 
@@ -2636,18 +2764,18 @@ class cluster_analysis_plots(cluster_analysis):
         if (not ('field_stability' in self.stats.keys())):
             self.stats['field_stability'] = get_field_stability(self,SD=1.96)
 
-        # act_clusters = cluster.status['clusters']
+        # act_clusters = self.status['clusters']
         act_clusters = np.any(self.status['activity'][:,s_bool,1],1)
         r_stab = gauss_smooth(self.stats['field_stability_temp'],(0,1))#[act_clusters,:]
-        # act_stab = cluster.stats['act_stability_temp'][cluster.status['clusters'],:,1]
-        # act_stab = act_stab[cluster.status['clusters'],:]
-        act_stab = self.stats['act_stability_temp'][...,1]#[cluster.status['clusters'],:,1]
+        # act_stab = self.stats['act_stability_temp'][self.status['clusters'],:,1]
+        # act_stab = act_stab[self.status['clusters'],:]
+        act_stab = self.stats['act_stability_temp'][...,1]#[self.status['clusters'],:,1]
 
-        nC = self.status['activity'].shape[0]#cluster.status['clusters'].sum()
+        nC = self.status['activity'].shape[0]#self.status['clusters'].sum()
         nSes_good = s_bool.sum()
 
 
-        status = self.status['activity'][...,1]#[cluster.status['clusters'],:,1]
+        status = self.status['activity'][...,1]#[self.status['clusters'],:,1]
         status_dep = None
 
         dp_pos,p_pos = get_dp(status,status_dep=status_dep,status_session=s_bool,ds=1)
@@ -2781,7 +2909,7 @@ class cluster_analysis_plots(cluster_analysis):
         high_p = np.zeros(nSes)*np.NaN
 
         for i,s in enumerate(np.where(s_bool)[0]):
-            # act_s_range = np.any(cluster.status['activity'][:,s_arr[i]:s_arr[i+1],1],1)
+            # act_s_range = np.any(self.status['activity'][:,s_arr[i]:s_arr[i+1],1],1)
             c_act = self.status['activity'][:,s,1]
             p_pos_hist = act_stab[c_act,s]
             low_p[s] = (p_pos_hist<act_stab_thr[0]).sum()/c_act.sum()
@@ -2805,7 +2933,7 @@ class cluster_analysis_plots(cluster_analysis):
 
         for i,s in enumerate(np.where(s_bool)[0]):
             # col = next(color_act)
-            # act_s_range = np.any(cluster.status['activity'][:,s_arr[i]:s_arr[i+1],1],1)
+            # act_s_range = np.any(self.status['activity'][:,s_arr[i]:s_arr[i+1],1],1)
             c_act = self.status['activity'][:,s,1]
             p_pos_hist = r_stab[c_act,s]
             low_p[s] = (p_pos_hist<r_stab_thr[0]).sum()/c_act.sum()
@@ -2968,66 +3096,66 @@ class cluster_analysis_plots(cluster_analysis):
     
 
         status_La = np.zeros((nC,nSes,2),'int')
-        status_Lb = np.zeros_like(cluster.status['activity'][...,2],'int')
+        status_Lb = np.zeros_like(self.status['activity'][...,2],'int')
 
         highCode_thr = 0.5
         IPI_La = np.zeros(nSes)
         IPI_Lb = np.zeros(nSes)
         La_highCode = np.zeros(nSes)
 
-        IPI_La_start = np.zeros_like(cluster.status['activity'][...,1],'bool')
-        IPI_Lb_start = np.zeros_like(cluster.status['activity'][...,2],'bool')
+        IPI_La_start = np.zeros_like(self.status['activity'][...,1],'bool')
+        IPI_Lb_start = np.zeros_like(self.status['activity'][...,2],'bool')
 
-        idx_fields = np.where(cluster.status_fields)
+        idx_fields = np.where(self.status_fields)
 
         for c in range(nC):
             s0_act = 0
             s0_code = 0
             inAct = False
             inCode = False
-            for s in np.where(cluster.status['sessions'])[0]:
+            for s in np.where(self.status['sessions'])[0]:
                 if inAct:
-                    if ~cluster.status['activity'][c,s,1]:
-                        La = cluster.status['sessions'][s0_act:s].sum()
+                    if ~self.status['activity'][c,s,1]:
+                        La = self.status['sessions'][s0_act:s].sum()
                         status_La[c,s0_act:s,0] = La
-                        status_La[c,s0_act:s,1] = cluster.status['activity'][c,s0_act:s,2].sum()
-                        if (cluster.status['activity'][c,s0_act:s,2].sum() / La)>highCode_thr:
+                        status_La[c,s0_act:s,1] = self.status['activity'][c,s0_act:s,2].sum()
+                        if (self.status['activity'][c,s0_act:s,2].sum() / La)>highCode_thr:
                             La_highCode[La] += 1
                         IPI_La[La] += 1
                         inAct=False
                 else:
-                    if cluster.status['activity'][c,s,1]:
+                    if self.status['activity'][c,s,1]:
                         s0_act = s
                         inAct = True
                         IPI_La_start[c,s] = True
 
                 if inCode:
-                    if ~cluster.status['activity'][c,s,2]:
-                        Lb = cluster.status['sessions'][s0_code:s].sum()
+                    if ~self.status['activity'][c,s,2]:
+                        Lb = self.status['sessions'][s0_code:s].sum()
                         status_Lb[c,s0_code:s] = Lb
                         IPI_Lb[Lb] += 1
                         inCode=False
                 else:
-                    if cluster.status['activity'][c,s,2]:
+                    if self.status['activity'][c,s,2]:
                         s0_code = s
                         inCode = True
                         IPI_Lb_start[c,s] = True
 
             if inAct:
-                La = cluster.status['sessions'][s0_act:s+1].sum()
+                La = self.status['sessions'][s0_act:s+1].sum()
                 status_La[c,s0_act:s+1,0] = La
-                status_La[c,s0_act:s+1,1] = cluster.status['activity'][c,s0_act:s+1,2].sum()
-                if (cluster.status['activity'][c,s0_act:s,2].sum() / La)>highCode_thr:
+                status_La[c,s0_act:s+1,1] = self.status['activity'][c,s0_act:s+1,2].sum()
+                if (self.status['activity'][c,s0_act:s,2].sum() / La)>highCode_thr:
                     La_highCode[La] += 1
                 IPI_La[La] += 1
             if inCode:
-                Lb = cluster.status['sessions'][s0_code:s+1].sum()
+                Lb = self.status['sessions'][s0_code:s+1].sum()
                 status_Lb[c,s0_code:s+1] = Lb
                 IPI_Lb[Lb] += 1
 
-        status_La[:,~cluster.status['sessions'],:] = 0
-        status_Lb[:,~cluster.status['sessions']] = 0
-        # L_code = status_La[cluster.status['activity'][...,2],0]
+        status_La[:,~self.status['sessions'],:] = 0
+        status_Lb[:,~self.status['sessions']] = 0
+        # L_code = status_La[self.status['activity'][...,2],0]
 
 
         status, status_dep = get_status_arr(cluster)
@@ -3046,17 +3174,17 @@ class cluster_analysis_plots(cluster_analysis):
         # color_act = iter(plt.cm.get_cmap('Greys')(np.linspace(0,1,n_int)))
         # for i in range(n_int):
         #     col = next(color_field)
-        #     ax.hist(cluster.stats['field_stability'][cluster.status['clusters'],s_arr[i]:s_arr[i+1]].flat,np.linspace(0,1,51),cumulative=True,density=True,histtype='step',color=col)
+        #     ax.hist(self.stats['field_stability'][self.status['clusters'],s_arr[i]:s_arr[i+1]].flat,np.linspace(0,1,51),cumulative=True,density=True,histtype='step',color=col)
         #
-        #     fstab_mean[i,0] = np.nanmean(cluster.stats['field_stability'][cluster.status['clusters'],s_arr[i]:s_arr[i+1]])
-        #     fstab_mean[i,1] = np.nanstd(cluster.stats['field_stability'][cluster.status['clusters'],s_arr[i]:s_arr[i+1]])
+        #     fstab_mean[i,0] = np.nanmean(self.stats['field_stability'][self.status['clusters'],s_arr[i]:s_arr[i+1]])
+        #     fstab_mean[i,1] = np.nanstd(self.stats['field_stability'][self.status['clusters'],s_arr[i]:s_arr[i+1]])
         #
         #
         #     col = next(color_act)
-        #     ax.hist(cluster.stats['act_stability'][cluster.status['clusters'],s_arr[i]:s_arr[i+1]].flat,np.linspace(0,1,51),cumulative=True,density=True,histtype='step',color=col)
+        #     ax.hist(self.stats['act_stability'][self.status['clusters'],s_arr[i]:s_arr[i+1]].flat,np.linspace(0,1,51),cumulative=True,density=True,histtype='step',color=col)
         #
-        #     astab_mean[i,0] = np.nanmean(cluster.stats['act_stability'][cluster.status['clusters'],s_arr[i]:s_arr[i+1]])
-        #     astab_mean[i,1] = np.nanstd(cluster.stats['act_stability'][cluster.status['clusters'],s_arr[i]:s_arr[i+1]])
+        #     astab_mean[i,0] = np.nanmean(self.stats['act_stability'][self.status['clusters'],s_arr[i]:s_arr[i+1]])
+        #     astab_mean[i,1] = np.nanstd(self.stats['act_stability'][self.status['clusters'],s_arr[i]:s_arr[i+1]])
         # ax = plt.subplot(222)
         # pl_dat.plot_with_confidence(ax,np.arange(n_int)-0.1,fstab_mean[:,0],fstab_mean[:,1],col='r')
         # pl_dat.plot_with_confidence(ax,np.arange(n_int)+0.1,astab_mean[:,0],astab_mean[:,1],col='k')
@@ -3066,32 +3194,32 @@ class cluster_analysis_plots(cluster_analysis):
         fig = plt.figure(figsize=(7,5),dpi=pl_dat.sv_opt['dpi'])
 
         ax = plt.subplot(331)
-        ax.plot(cluster.status['activity'][...,2].sum(0),'k.',markersize=1)
-        # ax.hist(np.nanmax(cluster.stats['field_stability'],1),np.linspace(0,2,101))
+        ax.plot(self.status['activity'][...,2].sum(0),'k.',markersize=1)
+        # ax.hist(np.nanmax(self.stats['field_stability'],1),np.linspace(0,2,101))
 
         ax = plt.subplot(332)
-        idx_med = ((cluster.stats['field_stability'] > 0.5)[...,np.newaxis] & (cluster.status_fields))
-        idx_high = ((cluster.stats['field_stability'] > 0.9)[...,np.newaxis] & (cluster.status_fields))
-        ax.hist(cluster.fields['location'][idx_med,0],np.linspace(0,100,101),color='tab:blue',density=True,alpha=0.5)
-        ax.hist(cluster.fields['location'][idx_high,0],np.linspace(0,100,101),color='tab:red',density=True,alpha=0.5)
-        # ax.scatter(np.nanmax(field_stability,1)+0.02*np.random.rand(nC),cluster.stats['p_post_c']['code']['code'][:,1,0,0]+0.02*np.random.rand(nC),s=cluster.status['activity'][...,2].sum(1)/10,c='k',edgecolor='none')
+        idx_med = ((self.stats['field_stability'] > 0.5)[...,np.newaxis] & (self.status_fields))
+        idx_high = ((self.stats['field_stability'] > 0.9)[...,np.newaxis] & (self.status_fields))
+        ax.hist(self.fields['location'][idx_med,0],np.linspace(0,100,101),color='tab:blue',density=True,alpha=0.5)
+        ax.hist(self.fields['location'][idx_high,0],np.linspace(0,100,101),color='tab:red',density=True,alpha=0.5)
+        # ax.scatter(np.nanmax(field_stability,1)+0.02*np.random.rand(nC),self.stats['p_post_c']['code']['code'][:,1,0,0]+0.02*np.random.rand(nC),s=self.status['activity'][...,2].sum(1)/10,c='k',edgecolor='none')
 
         ax = plt.subplot(333)
-        ax.plot(np.nanmean(cluster.stats['field_stability'],0),'r')
-        ax.plot(np.nanmean(cluster.stats['act_stability'],0),'k')
+        ax.plot(np.nanmean(self.stats['field_stability'],0),'r')
+        ax.plot(np.nanmean(self.stats['act_stability'],0),'k')
 
         ax = plt.subplot(334)
-        ax.plot((cluster.stats['field_stability']>0.5).sum(0)/cluster.status['activity'][...,2].sum(0),'r')
-        ax.plot((cluster.stats['act_stability'][...,1]>0.5).sum(0)/cluster.status['activity'][...,1].sum(0),'k')
+        ax.plot((self.stats['field_stability']>0.5).sum(0)/self.status['activity'][...,2].sum(0),'r')
+        ax.plot((self.stats['act_stability'][...,1]>0.5).sum(0)/self.status['activity'][...,1].sum(0),'k')
 
         ax = plt.subplot(335)
         for thr in np.linspace(0,1,51):
-            ax.plot(thr,np.any(cluster.stats['field_stability']>thr,1).sum(),'k.',markersize=1)
+            ax.plot(thr,np.any(self.stats['field_stability']>thr,1).sum(),'k.',markersize=1)
 
         ax = plt.subplot(336)
         La_mean = np.zeros((nSes,3))*np.NaN
         Lb_mean = np.zeros((nSes,3))*np.NaN
-        for s in np.where(cluster.status['sessions'])[0]:
+        for s in np.where(self.status['sessions'])[0]:
             La_mean[s,0] = status_La[status_La[:,s,0]>0,s,0].mean()
             La_mean[s,1:] = np.percentile(status_La[status_La[:,s,0]>0,s,0],[5,95])
 
@@ -3109,10 +3237,10 @@ class cluster_analysis_plots(cluster_analysis):
         # ax.plot(status['stable'][:,:,3].sum(0),'r',linewidth=0.5)
 
         ax = plt.subplot(338)
-        ax.plot(cluster.stats['p_post_s']['code']['stable'][:,1,0])
+        ax.plot(self.stats['p_post_s']['code']['stable'][:,1,0])
 
         ax = plt.subplot(339)
-        ax.hist(status['stable'][cluster.status['clusters'],:,1].sum(1),np.linspace(0,100,101))
+        ax.hist(status['stable'][self.status['clusters'],:,1].sum(1),np.linspace(0,100,101))
 
 
 
@@ -3388,8 +3516,8 @@ class cluster_analysis_plots(cluster_analysis):
                 coding_s1_end = np.any(self.fields['trial_act'][:,s,:,t_end:],-1) & self.status_fields[:,s,:]
 
                 ### get first dt trials and last dt trials
-                t_start = self.behavior['trial_ct'][s+1]#min(cluster.behavior['trial_ct'][s+1],dt)
-                t_end = 0#max(0,cluster.behavior['trial_ct'][s+1]-dt)
+                t_start = self.behavior['trial_ct'][s+1]#min(self.behavior['trial_ct'][s+1],dt)
+                t_end = 0#max(0,self.behavior['trial_ct'][s+1]-dt)
                 coding_s2_start = np.any(self.fields['trial_act'][:,s+1,:,:t_start],-1) & self.status_fields[:,s+1,:]
                 coding_s2_end = np.any(self.fields['trial_act'][:,s+1,:,t_end:],-1) & self.status_fields[:,s+1,:]
 
@@ -3611,6 +3739,628 @@ class cluster_analysis_plots(cluster_analysis):
 
 
 
+    def plot_parameter_dependent_neuron_numbers(self):
+
+        # need:
+        # neurons detected:   SNR, rval, CNN, (p_m) <- stats
+        # place fields:       Bayes_factor, reliability, A0, A, pmass <- fields
+        print('### plot test of thresholds for neuron number ###')
+
+        nSes = self.data['nSes']
+        
+        fig = plt.figure(figsize=(7,2.5),dpi=300)
+        ax_SNR = plt.axes([0.125,0.2,0.225,0.65])
+        ax_rval = plt.axes([0.4,0.2,0.225,0.65])
+        ax_pm = plt.axes([0.675,0.2,0.225,0.65])
+        # self.pl_dat.add_number(fig,ax,order=1)
+
+
+        def calculate_neuron_numbers(ax,key,vals,val_thr):
+            ## method to calculate and plot neuron and PC numbers 
+            ## for different parameter thresholds
+            
+            width = np.diff(vals)[0]*0.4
+            nROI = np.zeros((len(vals),nSes))
+            nPC = np.zeros((len(vals),nSes))
+
+            ## iterate through parameter values
+            for i,val in enumerate(vals):
+                
+                thresholds[key+'_thr'] = val
+                
+                self.update_status(**thresholds)
+                nROI[i,:] = (self.status['activity'][...,1]).sum(axis=0)
+                nPC[i,:] = (self.status['activity'][...,2]).sum(axis=0)
+
+                ax[0].scatter(val-width/2 + width*np.random.rand(nSes)[self.status['sessions']],nROI[i,self.status['sessions']],s=2,c=[[0.8,0.8,0.8]])
+                ax[0].scatter(val-width/2 + width*np.random.rand(nSes)[self.status['sessions']],nPC[i,self.status['sessions']],s=2,c=[[0.8,0.8,1]])
+
+            ax[0].plot(vals,nROI[:,self.status['sessions']].mean(1),'k^',markersize=4,markeredgewidth=0.5,label='neurons')#,label='neurons ($p_m\geq0.05$)')
+            ax[0].plot(vals,nPC[:,self.status['sessions']].mean(1),'^',color='tab:blue',markersize=4,markeredgewidth=0.5,label='PCs')
+
+            self.pl_dat.remove_frame(ax[0],['top'])
+            ax[0].axvline(val_thr,color='k',linestyle='--')
+            ax[0].legend(fontsize=10,bbox_to_anchor=[0.1,1.15],loc='upper left')
+            
+            ax[1].plot(vals,nPC[:,self.status['sessions']].mean(1)/nROI[:,self.status['sessions']].mean(1),'r-',linewidth=0.5)
+            
+            ax[1].set_ylim([0,0.54])
+            self.pl_dat.remove_frame(ax[1],['top'])
+
+
+
+        thresholds = {
+            'SNR_thr': 0.5,
+            'rval_thr': 0.5,
+            'CNN_thr': 0.6,
+
+            'A0_thr': 1,
+            'A_thr': 3,
+            'pm_thr': 0.95,
+            'Bayes_thr': 10,
+            'reliability_thr': 0.1,
+        }
+
+        ylim=[0,500]
+        ax_SNR = [ax_SNR,ax_SNR.twinx()]
+        calculate_neuron_numbers(ax_SNR,'SNR',np.linspace(1,10,10),3.)
+        thresholds['SNR_thr'] = 3.
+        plt.setp(ax_SNR[0],
+            ylim=ylim,
+            xlabel=r'$\Theta_{SNR}$',
+            ylabel='# neurons'
+        )
+        # plt.setp(ax_SNR[1],yticklabels=[])
+
+        ax_rval = [ax_rval,ax_rval.twinx()]
+        calculate_neuron_numbers(ax_rval,'rval',np.linspace(-1,1,11),0.0)
+        thresholds['rval_thr'] = 0.0
+        plt.setp(ax_rval[0],
+            ylim=ylim,
+            yticklabels=[],
+            xlabel=r'$\Theta_{r}$',
+        )
+        plt.setp(ax_SNR[1],yticklabels=[])
+
+        ax_pm = [ax_pm,ax_pm.twinx()]
+        calculate_neuron_numbers(ax_pm,'pm',np.linspace(0,1,11),0.95)
+        thresholds['pm_thr'] = 0.95
+        plt.setp(ax_pm[0],
+            ylim=ylim,
+            yticklabels=[],
+            xlabel=r'$\Theta_{p^*}$',
+        )
+        plt.setp(ax_pm[1],
+            ylabel='% place cells'
+        )
+
+        plt.tight_layout()
+        plt.show(block=False)
+
+        # if sv:
+        #     pl_dat.save_fig('neuronNumbers_test')
+        # return
+
+        print('whats with MI of place cells, only?')
+        ### get SNR dependence of detected neurons
+        # idx_other = (self.stats['r_values'] > 0) & (self.matching['score'][...,0]>0.05)
+        # idx_other_certain = (self.stats['r_values'] > 0) & (self.matching['score'][...,0]>0.95)
+        SNR_arr = np.linspace(2,20,5)
+        MI = np.zeros(len(SNR_arr))
+        # nPC = np.zeros(SNR_arr.shape + (nSes,2))
+        plt.figure(figsize=(4,2.5))
+        width = 0.6
+        ax = plt.axes([0.2,0.2,0.65,0.65])
+        for i,SNR_thr in enumerate(SNR_arr):
+            idx = (self.stats['SNR_comp'] >= (SNR_thr-0.5)) & (self.stats['SNR_comp'] < (SNR_thr+0.5)) & ~np.isnan(self.stats['MI_value'])# & idx_other
+            # print(self.stats['MI_value'][idx])
+            MI[i] = np.nanmean(self.stats['MI_value'][idx],axis=0)
+            # idx = (self.stats['SNR_comp'] >= (SNR_thr-0.5)) & (self.stats['SNR_comp'] < (SNR_thr+0.5)) & idx_other_certain
+            # MI[i,1] = self.stats['MI_value'][idx].mean(0)
+
+            ax.boxplot(self.stats['MI_value'][idx],positions=[SNR_thr],widths=width,whis=[5,95],notch=True,bootstrap=100,flierprops=dict(marker='.',markeredgecolor='None',markerfacecolor=[0.5,0.5,0.5],markersize=2))
+
+        ax.plot(SNR_arr,MI,'k^',markersize=5,label='neurons')
+
+        # ax.set_ylim([0,0.6])
+        ax.set_xlabel('$\Theta_{SNR}$')
+        ax.set_ylabel('MI')
+        ax.legend(fontsize=10)
+
+        plt.tight_layout()
+        plt.show(block=False)
+
+        # if sv:
+        #     pl_dat.save_fig('MI_SNR')
+
+
+    def plot_hierarchy_interaction(self):
+
+        print('### plot interaction of different dynamical hierarchies ###')
+
+        nSes = self.data['nSes']
+        nC = self.data['nC']
+        nbin = self.data['nbin']
+
+        SD = 1
+        sig_theta = self.stability['all']['mean'][0,2]
+        ### find, if coding sessions usually belong to a period of longer activity
+        status_La = np.zeros((nC,nSes,2),'int')
+        status_Lb = np.zeros_like(self.status['activity'][...,2],'int')
+
+        highCode_thr = 0.5
+        IPI_La = np.zeros(nSes)
+        IPI_Lb = np.zeros(nSes)
+        La_highCode = np.zeros(nSes)
+
+        IPI_La_start = np.zeros_like(self.status['activity'][...,1],'bool')
+        IPI_Lb_start = np.zeros_like(self.status['activity'][...,2],'bool')
+
+        idx_fields = np.where(self.status_fields)
+
+
+        for c in range(nC):
+            s0_act = 0
+            s0_code = 0
+            inAct = False
+            inCode = False
+            for s in np.where(self.status['sessions'])[0]:
+                if inAct:
+                    if ~self.status['activity'][c,s,1]:
+                        La = self.status['sessions'][s0_act:s].sum()
+                        status_La[c,s0_act:s,0] = La
+                        status_La[c,s0_act:s,1] = self.status['activity'][c,s0_act:s,2].sum()
+                        if (self.status['activity'][c,s0_act:s,2].sum() / La)>highCode_thr:
+                            La_highCode[La] += 1
+                        IPI_La[La] += 1
+                        inAct=False
+                else:
+                    if self.status['activity'][c,s,1]:
+                        s0_act = s
+                        inAct = True
+                        IPI_La_start[c,s] = True
+
+                if inCode:
+                    if ~self.status['activity'][c,s,2]:
+                        Lb = self.status['sessions'][s0_code:s].sum()
+                        status_Lb[c,s0_code:s] = Lb
+                        IPI_Lb[Lb] += 1
+                        inCode=False
+                else:
+                    if self.status['activity'][c,s,2]:
+                        s0_code = s
+                        inCode = True
+                        IPI_Lb_start[c,s] = True
+
+            if inAct:
+                La = self.status['sessions'][s0_act:s+1].sum()
+                status_La[c,s0_act:s+1,0] = La
+                status_La[c,s0_act:s+1,1] = self.status['activity'][c,s0_act:s+1,2].sum()
+                if (self.status['activity'][c,s0_act:s,2].sum() / La)>highCode_thr:
+                    La_highCode[La] += 1
+                IPI_La[La] += 1
+            if inCode:
+                Lb = self.status['sessions'][s0_code:s+1].sum()
+                status_Lb[c,s0_code:s+1] = Lb
+                IPI_Lb[Lb] += 1
+
+
+
+
+        status_La[:,~self.status['sessions'],:] = 0
+        status_Lb[:,~self.status['sessions']] = 0
+        L_code = status_La[self.status['activity'][...,2],0]
+
+
+        mean_La = np.zeros((nSes,2))*np.NaN
+        mean_Lb = np.zeros((nSes,2))*np.NaN
+        for s in np.where(self.status['sessions'])[0]:
+            mean_La[s,0] = np.nanmean(status_La[status_La[:,s,0]>0,s,0])
+            mean_La[s,1] = np.nanstd(status_La[status_La[:,s,0]>0,s,0])
+
+            mean_Lb[s,0] = np.nanmean(status_Lb[status_Lb[:,s]>0,s])
+            mean_Lb[s,1] = np.nanstd(status_Lb[status_Lb[:,s]>0,s])
+
+
+        plt.figure()
+        ax = plt.subplot(111)
+        self.pl_dat.plot_with_confidence(ax,np.arange(nSes),mean_La[:,0],mean_La[:,1],'k')
+        self.pl_dat.plot_with_confidence(ax,np.arange(nSes),mean_Lb[:,0],mean_Lb[:,1],'r')
+        plt.show(block=False)
+
+        status_stable = np.zeros_like(self.status['activity'][...,2],'int')
+        for c in range(nC):
+            for s in np.where(self.status['sessions'])[0]:
+                if self.status['activity'][c,s,2]:
+                    ds_ref = np.inf
+                    idxes = (idx_fields[0]==c) & (idx_fields[1]<s)
+                    idx_s = idx_fields[1][idxes]
+
+                    for f in np.where(self.status_fields[c,s,:])[0]:
+                        dLoc = np.abs(np.mod(self.fields['location'][c,s,f,0] - self.fields['location'][c,idx_fields[1][idxes],idx_fields[2][idxes],0]+nbin/2,nbin)-nbin/2)
+
+                        stable_s = idx_s[np.where(dLoc<(SD*sig_theta))[0]]
+                        if len(stable_s)>0:
+                            ds_ref = np.min(s-stable_s)
+                            status_stable[c,s] = min(s-stable_s[-1],ds_ref)
+
+
+
+        # print(p_pre['stable_code'][:,ds,0,:])
+        # res = sstats.ttest_ind_from_stats(np.nanmean(p_pre[:,0,0]),np.nanstd(p_pre[:,0,0]),(~np.isnan(p_pre[:,0,0])).sum(),np.nanmean(p_pre[:,1,0]),np.nanstd(p_pre[:,1,0]),(~np.isnan(p_pre[:,1,0])).sum(),equal_var=True)
+        # print(res)
+        # res = sstats.ttest_ind_from_stats(np.nanmean(p_pre[:,0,1]),np.nanstd(p_pre[:,0,1]),(~np.isnan(p_pre[:,0,1])).sum(),np.nanmean(p_pre[:,1,1]),np.nanstd(p_pre[:,1,1]),(~np.isnan(p_pre[:,1,1])).sum(),equal_var=True)
+        # print(res)
+
+        # print('sessions before and after coding are more probable to be active')
+
+        # res = sstats.ttest_ind_from_stats(np.nanmean(p_pre[:,0,0]),np.nanstd(p_pre[:,0,0]),(~np.isnan(p_pre[:,1,1])).sum(),np.nanmean(p_pre[:,1,1]),np.nanstd(p_pre[:,1,1]),(~np.isnan(p_pre[:,1,1])).sum(),equal_var=True)
+        # print(res)
+        # print(p_post)
+
+        fig = plt.figure(figsize=(7,6),dpi=self.pl_dat.sv_opt['dpi'])
+
+        plt.figtext(0.15,0.8,'activation',fontsize=14)
+
+        ax = plt.axes([0.1,0.5,0.08,0.15])
+
+        ax = plt.axes([0.4,0.8,0.175,0.15])
+        print(IPI_La)
+        print(IPI_La.shape)
+        La_sessions = IPI_La*np.arange(len(IPI_La))
+        count = np.zeros(nSes)
+        for item in Counter(status_La[self.status['activity'][...,2],0]).items():
+            count[item[0]] = item[1]
+
+        nAct = self.status['activity'][...,1].sum(1)
+        nPC = self.status['activity'][...,2].sum(1)
+        rate = nPC/nAct
+        mean_r = np.zeros((nSes,3))*np.NaN
+        tmp = []
+        print('get CI from bootstrapping')
+        for i in range(1,nSes):
+            if np.any(nAct==i):
+                mean_r[i,0] = rate[nAct==i].mean()
+                mean_r[i,1:] = np.percentile(rate[nAct==i],[15.8,84.1])
+
+        c_pa = self.status['activity'][...,1].sum(1)/self.status['sessions'].sum()
+        c_pb = self.status['activity'][...,2].sum(1)/self.status['activity'][...,1].sum(1)
+
+        # print(c_pb[self.status['clusters']])
+        y0,res,rank,tmp = np.linalg.lstsq(self.status['activity'][self.status['clusters'],:,1],c_pb[self.status['clusters']])
+        # print(y0)
+
+        # ax.plot(c_pb[self.status['clusters']])
+        # ax.plot(self.status['activity'][...,1].sum(1)+0.5*np.random.rand(nC),c_pb+0.01*np.random.rand(nC),'r.',markersize=1.5,markeredgecolor='none')
+        pb = np.nanmean(self.status['activity'][self.status['clusters'],:,2].sum(0)/self.status['activity'][self.status['clusters'],:,1].sum(0))
+
+
+        ax.plot([0,80],[pb,pb],'k--')
+        ax.plot(gauss_smooth(count[:len(IPI_La)]/La_sessions,1),label='$p(\\beta^+| \in \mathcal{L}_{\\alpha})$')
+        self.pl_dat.plot_with_confidence(ax,range(nSes),mean_r[:,0],mean_r[:,1:].T,col='r',label='$p(\\beta^+| \in N_{\\alpha})$')
+
+        ax.set_xlim([0,70])
+        ax.set_ylim([0,0.5])
+        ax.set_ylabel('p')
+        ax.set_xlabel('$N_{\\alpha} / \mathcal{L}_{\\alpha}$')
+        ax.legend(fontsize=8,loc='upper right',bbox_to_anchor=[1.2,1.3])
+        self.pl_dat.remove_frame(ax,['top','right'])
+        # plt.hist(status_La[self.status['activity'][...,2],0],np.linspace(0,80,81),color='tab:blue',alpha=0.5,density=True,cumulative=True,histtype='step')
+        # plt.hist(status_La[self.status['activity'][...,1]&(~self.status['activity'][...,2]),0],np.linspace(0,80,81),color='tab:red',alpha=0.5,density=True,cumulative=True,histtype='step')
+
+        # res = sstats.f_oneway(*tmp)
+        # print(res)
+
+        # ax.plot(nAct+0.7*np.random.rand(nC),nPC/nAct+0.03*np.random.rand(nC),'k.',markersize=1,markeredgecolor='none')
+        # ax.plot(range(nSes),mean_r,'r-')
+        # ax = plt.axes([0.7,0.7,0.25,0.25])
+
+        plt.figtext(0.45,0.65,'coding',fontsize=14)
+        plt.figtext(0.75,0.25,'  field \nstability',fontsize=14)
+        #
+        # plt.show(block=False)
+
+        ### coding -> activity
+
+
+        p_rec = {'all':       np.zeros(nSes)*np.NaN,
+                  'cont':       np.zeros(nSes)*np.NaN,
+                  'mix':        np.zeros(nSes)*np.NaN,
+                  'discont':    np.zeros(nSes)*np.NaN,
+                  'silent_mix': np.zeros(nSes)*np.NaN,
+                  'silent':     np.zeros(nSes)*np.NaN}
+
+        key_arr = ['all','cont','mix','discont','silent_mix','silent']
+        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(self.compare['pointer'].col,(nSes,nSes,5,5))
+        Ds = s2_shifts-s1_shifts
+
+        ### coding -> field stability
+        for ds in range(1,nSes):
+            session_bool = np.where(np.pad(self.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(self.status['sessions'][:],(0,0),constant_values=False))[0]
+
+            # for s1 in session_bool:
+            idx_ds = np.where(Ds==ds)[0]
+
+            idx_shifts = self.compare['pointer'].data[idx_ds].astype('int')-1
+            shifts = self.compare['shifts'][idx_shifts]
+
+            for pop in key_arr:
+
+                if pop=='all':
+                    idxes = np.ones(len(idx_ds),'bool')
+                elif pop=='cont':
+                    idxes = self.compare['inter_coding'][idx_ds,1]==1
+                elif pop=='mix':
+                    idxes = ((self.compare['inter_coding'][idx_ds,1]>0) & (self.compare['inter_coding'][idx_ds,1]<1)) & (self.compare['inter_active'][idx_ds,1]==1)
+                elif pop=='discont':
+                    idxes = (self.compare['inter_coding'][idx_ds,1]==0) & (self.compare['inter_active'][idx_ds,1]==1)
+                # elif pop=='silent_mix':
+                    # idxes =(self.compare['inter_active'][idx_ds,1]>0) & (self.compare['inter_active'][idx_ds,1]<1)
+                elif pop=='silent':
+                    idxes = self.compare['inter_active'][idx_ds,1]<1
+
+                N_data = idxes.sum()
+                N_stable = (np.abs(shifts[idxes])<(SD*sig_theta)).sum()
+
+                p_rec[pop][ds] = N_stable/N_data
+
+
+
+
+        ax = plt.axes([0.7,0.5,0.25,0.15])
+
+        maxSes = 10
+        col_arr = [[0.5,0.5,1],[0.5,0.5,0.5],[1,0.5,0.5],[0.5,1,0.5]]
+        label_arr = ['continuous','mixed','non-coding','silent']
+        # key_arr = ['cont','mix','discont','silent']
+        key_arr = ['cont','mix','discont','silent']
+
+        w_bar = 0.2
+        nKey = len(key_arr)
+        offset_bar = ((nKey+1)%2)*w_bar/2 + ((nKey-1)//2)*w_bar
+
+        for i,key in enumerate(key_arr):
+            # ax.bar(np.arange(1,maxSes+1)-offset_bar+i*w_bar,self.stability[key]['mean'][:maxSes,1],width=w_bar,facecolor=col_arr[i],edgecolor='k',label=label_arr[i])
+            # ax.errorbar(np.arange(1,maxSes+1)-offset_bar+i*w_bar,self.stability[key]['mean'][:maxSes,1],self.stability[key]['std'][:maxSes,1],fmt='none',ecolor='r')
+            ax.bar(np.arange(maxSes)-offset_bar+i*w_bar,p_rec[key][:maxSes],width=w_bar,facecolor=col_arr[i],edgecolor='k',label=label_arr[i])
+            # ax.errorbar(np.arange(1,maxSes+1)-offset_bar+i*w_bar,p_rec[key][:maxSes],self.stability[key]['std'][:maxSes,1],fmt='none',ecolor='r')
+        p_rec_chance = (2*SD*sig_theta) / 100
+        ax.plot([0.5,maxSes+0.5],[p_rec_chance,p_rec_chance],'--',color=[0.5,0.5,0.5])
+        ax.set_xlabel('session difference $\Delta s$')
+        ax.set_ylabel('$p(\\gamma_{\Delta s}^+)$')
+        ax.set_xlim([0.5,maxSes-0.5])
+        ax.set_ylim([0,1.1])
+        ax.legend(loc='upper right',bbox_to_anchor=[0.7,1.25],fontsize=8,ncol=2)
+        self.pl_dat.remove_frame(ax,['top','right'])
+
+        # ax_sig = ax.twinx()
+        # for j,p in enumerate(key_arr):
+        #     pl_dat.plot_with_confidence(ax_sig,range(1,nSes+1),self.stability[p]['mean'][:,2],self.stability[p]['CI'][:,:,2].T,col=col_arr[j])
+
+        # ax_sig.set_ylim([0,100/(2*SD)])
+        # pl_dat.remove_frame(ax_sig,['top'])
+        # plt.show(block=False)
+
+
+        ### field stability -> coding
+        print('find neurons, which are stable and get statistics of reactivation, recoding, enhanced prob of coding, ...')
+
+        ### activity -> field stability
+        ax = plt.axes([0.7,0.8,0.25,0.15])
+        # maxSes = 6
+        col_arr = [[1,0.5,0.5],[0.5,1,0.5]]
+        label_arr = ['non-coding','silent']
+        # key_arr = ['cont','mix','discont','silent']
+        key_arr = ['discont','silent']
+
+        w_bar = 0.2
+        nKey = len(key_arr)
+        offset_bar = ((nKey+1)%2)*w_bar/2 + ((nKey-1)//2)*w_bar
+        offset_bar = 0.1
+        for i,key in enumerate(key_arr):
+            # ax.bar(np.arange(1,maxSes+1)-offset_bar+i*w_bar,self.stability[key]['mean'][:maxSes,1],width=w_bar,facecolor=col_arr[i],edgecolor='k',label=label_arr[i])
+            # ax.errorbar(np.arange(1,maxSes+1)-offset_bar+i*w_bar,self.stability[key]['mean'][:maxSes,1],self.stability[key]['std'][:maxSes,1],fmt='none',ecolor='r')
+            ax.bar(np.arange(maxSes)-offset_bar+i*w_bar,p_rec[key][:maxSes],width=w_bar,facecolor=col_arr[i],edgecolor='k',label=label_arr[i])
+
+        ax.plot([0.5,maxSes+0.5],[p_rec_chance,p_rec_chance],'--',color=[0.5,0.5,0.5])
+        ax.set_xlabel('session difference $\Delta s$')
+        ax.set_ylabel('$p(\\gamma_{\Delta s}^+)$')
+        ax.set_ylim([0,1.1])
+        ax.set_xlim([0.5,maxSes-0.5])
+        ax.legend(loc='upper right',bbox_to_anchor=[0.7,1.25],fontsize=8)
+        self.pl_dat.remove_frame(ax,['top','right'])
+
+        # ax_sig = ax.twinx()
+        # for j,p in enumerate(key_arr):
+        #     pl_dat.plot_with_confidence(ax_sig,range(nSes),self.stability[p]['mean'][:,2],self.stability[p]['CI'][:,:,2].T,col=col_arr[j])
+        # ax_sig.set_ylim([0,100/(2*SD)])
+        # pl_dat.remove_frame(ax_sig,['top'])
+
+        plt.tight_layout
+        plt.show(block=False)
+
+        # if sv:
+        #     self.pl_dat.save_fig('dynamics_interaction')
+
+        # plt.figure()
+        # for ds in range(1,ds_max):
+        #     plt.hist(N_stable[:,ds],np.linspace(0,30,31),alpha=0.5,histtype='step',color=[0.2*ds,0.2*ds,0.2*ds],cumulative=True,density=True)
+        # plt.show(block=False) 
+
+
+
+    def plot_transition_probs(self,N_bs=100):
+
+        plt.figure(figsize=(7,3),dpi=self.pl_dat.sv_opt['dpi'])
+        ds_max = 7
+
+
+        def plot_transitions(ax,state_pre,state_post,state_ref,label_str):
+
+            ## probability of being active after coding
+            ax[0].axhline(np.nanmean(self.stats['p_post_s'][state_post][state_ref][self.status['sessions'],1,0],0),color='k',ls='--',lw=0.5)
+    
+            p_bs = np.zeros((2,2))
+            for p_key,sign,col in zip(['p_pre_s','p_post_s'],['-','+'],['tab:blue','tab:red']):
+                p_bs[0,0],p_bs[0,1] = bootstrap_data(np.nanmean,self.stats[p_key][state_pre][state_post][self.status['sessions'],1,0],N_bs)
+                p_bs[1,0],p_bs[1,1] = bootstrap_data(np.nanmean,self.stats[p_key][state_pre][state_post][self.status['sessions'],1,1],N_bs)
+                ax[0].errorbar([1,2],p_bs[:,0],p_bs[:,1],fmt='-',color=col,linewidth=0.5,label=label_str(sign,1,'\Delta s'))
+
+            plt.setp(ax[0],
+                xticks=[1,2],
+                xticklabels=['$\\beta^+$','$\\beta^-$'],
+                yticks=np.linspace(0,1,3),
+                ylim=[0,1],
+                ylabel='$p$'
+            )
+            self.pl_dat.remove_frame(ax[0],['top','right'])
+            # ax.legend(fontsize=8,loc='lower left')
+
+            if len(ax)>2:
+                ax[2].axhline(np.nanmean(self.stats['p_post_s']['code']['act'][self.status['sessions'],1,0],0),color='k',ls='--',linewidth=0.5)
+                p_bs = np.full((ds_max,2,2),np.NaN)
+
+                for p_key,sign,col in zip(['p_pre_s','p_post_s'],['-','+'],['tab:blue','tab:red']):
+                    for ds in range(1,ds_max):
+                        # # p_pre_bs[ds,0,:] = bootstrap_data(np.nanmean,p_pre['stable_act'][:,ds,0,0,0],N_bs)
+                        # # p_pre_bs[ds,1,:] = bootstrap_data(np.nanmean,p_pre['stable_act'][:,ds,1,0,0],N_bs)
+                        # p_pre_bs[ds,0,0],p_pre_bs[ds,0,1] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['act'][self.status['sessions'],ds,0,1],N_bs)
+                        # p_pre_bs[ds,1,0],p_pre_bs[ds,1,1] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['act'][self.status['sessions'],ds,1,1],N_bs)
+
+                        p_bs[ds,0,0],p_bs[ds,0,1] = bootstrap_data(np.nanmean,self.stats[p_key][state_pre][state_post][self.status['sessions'],ds,0],N_bs)
+                        p_bs[ds,1,0],p_bs[ds,1,1] = bootstrap_data(np.nanmean,self.stats[p_key][state_pre][state_post][self.status['sessions'],ds,1],N_bs)
+                    ax[2].errorbar(range(ds_max),p_bs[:,0,0],p_bs[:,0,1],fmt='-',color=col,linewidth=0.5,label=label_str(sign,'\Delta s',1))
+
+                # ax.errorbar(range(ds_max),p_pre_bs[:,0,0],p_pre_bs[:,0,1],fmt='-',color='tab:blue',linewidth=0.5,label='$p(\\alpha_{s-1}^+|\\gamma_{\Delta s,s}^{+})$')
+                self.pl_dat.remove_frame(ax[2],['top','right'])
+                plt.setp(ax[2],
+                    yticks=np.linspace(0,1,3),
+                    ylim=[0,1],
+                    xticklabels=[],
+                )
+                # ax.set_xlabel('$\Delta s$')
+                ax[2].legend(fontsize=8,loc='lower right',bbox_to_anchor=[1.4,0])
+
+
+
+
+            ax[1].axhline(np.nanmean(self.stats['p_post_s'][state_ref][state_post][self.status['sessions'],1,0],0),c='k',ls='--',lw=0.5)
+
+            p_bs = np.full((ds_max,2,2),np.NaN)
+            
+            for p_key,sign,col in zip(['p_pre_s','p_post_s'],['-','+'],['tab:blue','tab:red']):
+
+                for ds in range(1,ds_max):
+                    p_bs[ds,0,0],p_bs[ds,0,1] = bootstrap_data(np.nanmean,self.stats[p_key][state_pre][state_post][self.status['sessions'],ds,0],N_bs)
+                    p_bs[ds,1,0],p_bs[ds,1,1] = bootstrap_data(np.nanmean,self.stats[p_key][state_pre][state_post][self.status['sessions'],ds,1],N_bs)
+
+                ax[1].errorbar(range(ds_max),p_bs[:,0,0],p_bs[:,0,1],fmt='-',color=col,linewidth=0.5,label=label_str(sign,1,'\Delta s'))
+
+            plt.setp(ax[1],
+                yticks=[],
+                ylim=[0,1],         
+            )
+            self.pl_dat.remove_frame(ax[1],['top','left','right'])
+            # ax.set_xlabel('$\Delta s$')
+            ax[1].legend(fontsize=8,loc='lower right',bbox_to_anchor=[1.4,0])
+
+
+
+
+
+        ax1 = plt.axes([0.1,0.15,0.08,0.35])
+        ax2 = plt.axes([0.2,0.15,0.125,0.35])
+        plot_transitions(
+            [ax1,ax2],
+            'code','act',state_ref='act',
+            label_str = lambda sign, ds, ds2 : '$p(\\alpha_{s%s%s}^+|\\beta_s^{\pm})$'%(sign,ds)
+        )
+
+        ax1 = plt.axes([0.4,0.15,0.08,0.35])
+        ax2 = plt.axes([0.5,0.6,0.125,0.35])
+        ax3 = plt.axes([0.5,0.15,0.125,0.35])
+        plot_transitions(
+            [ax1,ax2,ax3],
+            'stable','act',state_ref='code',
+            label_str = lambda sign, ds, ds2 : '$p(\\alpha_{s%s%s}^+|\\gamma_{%s,s}^{\pm})$'%(sign,ds,ds2)
+        )
+
+        ax1 = plt.axes([0.7,0.15,0.08,0.35])
+        ax2 = plt.axes([0.8,0.6,0.125,0.35])
+        ax3 = plt.axes([0.8,0.15,0.125,0.35])
+        plot_transitions(
+            [ax1,ax2,ax3],
+            'stable','code',state_ref='code',
+            label_str = lambda sign, ds, ds2 : '$p(\\beta_{s%s%s}^+|\\gamma_{%s,s}^{\pm})$'%(sign,ds,ds2)
+        )
+
+        return
+
+
+        ### field stability -> activity
+        # p(a_s+1|gamma_s,s-ds)
+
+        ax.plot([0.75,2.25],[np.nanmean(self.stats['p_post_s']['code']['act'][self.status['sessions'],1,0],0),np.nanmean(self.stats['p_post_s']['code']['act'][:,1,0],0)],'--',color='k',linewidth=0.5)
+
+        # # p_bs[0,:] = bootstrap_data(np.nanmean,p_pre['stable_act'][:,1,0,0,0],N_bs)
+        # # p_bs[1,:] = bootstrap_data(np.nanmean,p_pre['stable_act'][:,1,1,0,0],N_bs)
+        # p_bs[0,:] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['act'][self.status['sessions'],1,0,0],N_bs)
+        # p_bs[1,:] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['act'][self.status['sessions'],1,1,0],N_bs)
+        # ax.errorbar([1,2],p_bs[:,0],p_bs[:,1],fmt='-',color='tab:blue',linewidth=0.5,label='$p(\\alpha_{s-1}^+|\\gamma_{\Delta s,s}^{\pm})$')
+
+        p_bs[0,0],p_bs[0,1] = bootstrap_data(np.nanmean,self.stats['p_post_s']['stable']['act'][self.status['sessions'],1,0],N_bs)
+        p_bs[1,0],p_bs[1,1] = bootstrap_data(np.nanmean,self.stats['p_post_s']['stable']['act'][self.status['sessions'],1,1],N_bs)
+        ax.errorbar([1,2],p_bs[:,0],p_bs[:,1],fmt='-',color='tab:red',linewidth=0.5,label='$p(\\alpha_{s+1}^+|\\gamma_{\Delta s,s}^{\pm})$')
+
+        ax.set_xticks([1,2])
+        ax.set_xticklabels(['$\\gamma_{1}^+$','$\\gamma_{1}^-$'])
+        ax.set_ylim([0,1])
+        ax.set_yticks(np.linspace(0,1,3))
+        ax.set_ylabel('p')
+        self.pl_dat.remove_frame(ax,['top','right'])
+
+        ax = plt.axes([0.5,0.6,0.125,0.35])
+        ax.plot([0,ds_max+0.5],[np.nanmean(self.stats['p_post_s']['code']['act'][self.status['sessions'],1,0],0),np.nanmean(self.stats['p_post_s']['code']['act'][self.status['sessions'],1,0],0)],'--',color='k',linewidth=0.5)
+        p_pre_bs = np.zeros((ds_max,2,2))*np.NaN
+        p_post_bs = np.zeros((ds_max,2,2))*np.NaN
+        for ds in range(1,ds_max):
+            # # p_pre_bs[ds,0,:] = bootstrap_data(np.nanmean,p_pre['stable_act'][:,ds,0,0,0],N_bs)
+            # # p_pre_bs[ds,1,:] = bootstrap_data(np.nanmean,p_pre['stable_act'][:,ds,1,0,0],N_bs)
+            # p_pre_bs[ds,0,0],p_pre_bs[ds,0,1] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['act'][self.status['sessions'],ds,0,1],N_bs)
+            # p_pre_bs[ds,1,0],p_pre_bs[ds,1,1] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['act'][self.status['sessions'],ds,1,1],N_bs)
+
+            p_post_bs[ds,0,0],p_post_bs[ds,0,1] = bootstrap_data(np.nanmean,self.stats['p_post_s']['stable']['act'][self.status['sessions'],ds,0],N_bs)
+            p_post_bs[ds,1,0],p_post_bs[ds,1,1] = bootstrap_data(np.nanmean,self.stats['p_post_s']['stable']['act'][self.status['sessions'],ds,1],N_bs)
+
+        # ax.errorbar(range(ds_max),p_pre_bs[:,0,0],p_pre_bs[:,0,1],fmt='-',color='tab:blue',linewidth=0.5,label='$p(\\alpha_{s-1}^+|\\gamma_{\Delta s,s}^{+})$')
+        ax.errorbar(range(ds_max),p_post_bs[:,0,0],p_post_bs[:,0,1],fmt='-',color='tab:red',linewidth=0.5,label='$p(\\alpha_{s+1}^+|\\gamma_{\Delta s,s}^{+})$')
+        self.pl_dat.remove_frame(ax,['top','right'])
+        ax.set_yticks(np.linspace(0,1,3))
+        ax.set_ylim([0,1])
+        ax.set_xticklabels([])
+        # ax.set_xlabel('$\Delta s$')
+        ax.legend(fontsize=8,loc='lower right',bbox_to_anchor=[1.4,0])
+
+        ax = plt.axes([0.5,0.15,0.125,0.35])
+        ax.plot([0,ds_max+0.5],[np.nanmean(self.stats['p_post_s']['code']['act'][self.status['sessions'],1,0],0),np.nanmean(self.stats['p_post_s']['code']['act'][self.status['sessions'],1,0],0)],'--',color='k',linewidth=0.5)
+        p_pre_bs = np.zeros((ds_max,2,2))*np.NaN
+        p_post_bs = np.zeros((ds_max,2,2))*np.NaN
+        for ds in range(1,ds_max):
+            # # p_pre_bs[ds,0,:] = bootstrap_data(np.nanmean,p_pre['stable_act'][:,ds,0,1,0],N_bs)
+            # # p_pre_bs[ds,1,:] = bootstrap_data(np.nanmean,p_pre['stable_act'][:,ds,1,1,0],N_bs)
+            # p_pre_bs[ds,0,:] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['act'][self.status['sessions'],ds,0,0],N_bs)
+            # p_pre_bs[ds,1,:] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['act'][self.status['sessions'],ds,1,0],N_bs)
+
+            p_post_bs[ds,0,0],p_post_bs[ds,0,1] = bootstrap_data(np.nanmean,self.stats['p_post_s']['stable']['act'][self.status['sessions'],ds,0],N_bs)
+            p_post_bs[ds,1,0],p_post_bs[ds,1,1] = bootstrap_data(np.nanmean,self.stats['p_post_s']['stable']['act'][self.status['sessions'],ds,1],N_bs)
+
+        # ax.errorbar(range(ds_max),p_pre_bs[:,0,0],p_pre_bs[:,0,1],fmt='-',color='tab:blue',linewidth=0.5,label='$p(\\alpha_{s-\Delta s}^+|\\gamma_{1,s}^{+})$')
+        ax.errorbar(range(ds_max),p_post_bs[:,0,0],p_post_bs[:,0,1],fmt='-',color='tab:red',linewidth=0.5,label='$p(\\alpha_{s+\Delta s}^+|\\gamma_{1,s}^{+})$')
+        self.pl_dat.remove_frame(ax,['top','left','right'])
+        ax.set_yticks([])
+        ax.set_ylim([0,1])
+        ax.set_xlabel('$\Delta s$')
+        ax.legend(fontsize=8,loc='lower right')
 
 
 
@@ -3619,6 +4369,350 @@ class cluster_analysis_plots(cluster_analysis):
 
 
 
+
+        ax = plt.axes([0.7,0.15,0.08,0.35])
+        ax.plot([0.75,2.25],[np.nanmean(self.stats['p_post_s']['code']['code'][self.status['sessions'],1,0],0),np.nanmean(self.stats['p_post_s']['code']['code'][self.status['sessions'],1,0],0)],'--',color='k',linewidth=0.5)
+        # # p_bs[0,:] = bootstrap_data(np.nanmean,p_pre['stable_code'][:,1,0,0,0],N_bs)
+        # # p_bs[1,:] = bootstrap_data(np.nanmean,p_pre['stable_code'][:,1,1,0,0],N_bs)
+        # p_bs[0,:] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['code'][self.status['sessions'],1,0,0],N_bs)
+        # p_bs[1,:] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['code'][self.status['sessions'],1,1,0],N_bs)
+        # ax.errorbar([1,2],p_bs[:,0],p_bs[:,1],fmt='-',color='tab:blue',linewidth=0.5,label='$p(\\beta_{s-1}^+|\\gamma_{\Delta s,s}^{\pm})$')
+
+        p_bs[0,0],p_bs[0,1] = bootstrap_data(np.nanmean,self.stats['p_post_s']['stable']['code'][self.status['sessions'],1,0],N_bs)
+        p_bs[1,0],p_bs[1,1] = bootstrap_data(np.nanmean,self.stats['p_post_s']['stable']['code'][self.status['sessions'],1,1],N_bs)
+        ax.errorbar([1,2],p_bs[:,0],p_bs[:,1],fmt='-',color='tab:red',linewidth=0.5,label='$p(\\beta_{s+1}^+|\\gamma_{\Delta s,s}^{\pm})$')
+
+        ax.set_xticks([1,2])
+        ax.set_xticklabels(['$\\gamma_{1}^+$','$\\gamma_{1}^-$'])
+        ax.set_ylim([0,1])
+        ax.set_yticks(np.linspace(0,1,3))
+        self.pl_dat.remove_frame(ax,['top','right'])
+
+
+        ax = plt.axes([0.8,0.6,0.125,0.35])
+        ax.plot([0,ds_max+0.5],[np.nanmean(self.stats['p_post_s']['code']['code'][self.status['sessions'],1,0],0),np.nanmean(self.stats['p_post_s']['code']['code'][self.status['sessions'],1,0],0)],'--',color='k',linewidth=0.5)
+        for ds in range(1,ds_max):
+            # # p_pre_bs[ds,0,:] = bootstrap_data(np.nanmean,p_pre['stable_code'][:,ds,0,0,0],N_bs)
+            # # p_pre_bs[ds,1,:] = bootstrap_data(np.nanmean,p_pre['stable_code'][:,ds,1,0,0],N_bs)
+            # p_pre_bs[ds,0,:] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['code'][self.status['sessions'],ds,0,1],N_bs)
+            # p_pre_bs[ds,1,:] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['code'][self.status['sessions'],ds,1,1],N_bs)
+
+            p_post_bs[ds,0,0],p_post_bs[ds,0,1] = bootstrap_data(np.nanmean,self.stats['p_post_s']['stable']['code'][self.status['sessions'],ds,0],N_bs)
+            p_post_bs[ds,1,0],p_post_bs[ds,1,1] = bootstrap_data(np.nanmean,self.stats['p_post_s']['stable']['code'][self.status['sessions'],ds,1],N_bs)
+
+        # ax.errorbar(range(ds_max),p_pre_bs[:,0,0],p_pre_bs[:,0,1],fmt='-',color='tab:blue',linewidth=0.5,label='$p(\\beta_{s-1}^+|\\gamma_{\Delta s,s}^{+})$')
+        ax.errorbar(range(ds_max),p_post_bs[:,0,0],p_post_bs[:,0,1],fmt='-',color='tab:red',linewidth=0.5,label='$p(\\beta_{s+1}^+|\\gamma_{\Delta s,s}^{+})$')
+        # ax.set_xlabel('$\Delta s$')
+        ax.set_ylim([0,1])
+        ax.legend(fontsize=8,loc='upper right',bbox_to_anchor=[1.4,1.1])
+
+        ax.set_xticklabels([])
+        self.pl_dat.remove_frame(ax,['top','right'])
+        ax.set_yticks(np.linspace(0,1,3))
+
+
+        ax = plt.axes([0.8,0.15,0.125,0.35])
+        ax.plot([0,ds_max+0.5],[np.nanmean(self.stats['p_post_s']['code']['code'][self.status['sessions'],1,0],0),np.nanmean(self.stats['p_post_s']['code']['code'][self.status['sessions'],1,0],0)],'--',color='k',linewidth=0.5)
+        for ds in range(1,ds_max):
+            # # p_pre_bs[ds,0,:] = bootstrap_data(np.nanmean,p_pre['stable_code'][:,ds,0,1,0],N_bs)
+            # # p_pre_bs[ds,1,:] = bootstrap_data(np.nanmean,p_pre['stable_code'][:,ds,1,1,0],N_bs)
+            # p_pre_bs[ds,0,:] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['code'][self.status['sessions'],ds,0,0],N_bs)
+            # p_pre_bs[ds,1,:] = bootstrap_data(np.nanmean,self.stats['p_pre_s']['stable']['code'][self.status['sessions'],ds,1,0],N_bs)
+
+            p_post_bs[ds,0,0],p_post_bs[ds,0,1] = bootstrap_data(np.nanmean,self.stats['p_post_s']['stable']['code'][self.status['sessions'],ds,0],N_bs)
+            p_post_bs[ds,1,0],p_post_bs[ds,1,1] = bootstrap_data(np.nanmean,self.stats['p_post_s']['stable']['code'][self.status['sessions'],ds,1],N_bs)
+
+        # ax.errorbar(range(ds_max),p_pre_bs[:,0,0],p_pre_bs[:,0,1],fmt='-',color='tab:blue',linewidth=0.5,label='$p(\\beta_{s-\Delta s}^+|\\gamma_{1,s}^{+})$')
+        ax.errorbar(range(ds_max),p_post_bs[:,0,0],p_post_bs[:,0,1],fmt='-',color='tab:red',linewidth=0.5,label='$p(\\beta_{s+\Delta s}^+|\\gamma_{1,s}^{+})$')
+        ax.set_xlabel('$\Delta s$')
+        ax.set_ylim([0,1])
+        ax.legend(fontsize=8,loc='upper right',bbox_to_anchor=[1.4,1.1])
+
+        self.pl_dat.remove_frame(ax,['top','left','right'])
+        ax.set_yticks([])
+
+        plt.show(block=False)
+
+
+    def plot_timedependent_transition_probs(self):
+
+
+        print('### plot time-dependent probabilities ###')
+
+        nSes = self.data['nSes']
+        nbin = self.data['nbin']
+
+        SD = 1.96
+        if nSes>50:
+            s_arr = np.array([0,5,17,30,87])
+        # s_arr = np.array([0,16,60,87,96,107])
+        else:
+            s_arr = np.array([0,5,10,15,20])
+        # s_arr += np.where(self.status['sessions'])[0][0]
+
+        n_int = len(s_arr)-1
+
+        # status_arr = ['act','code','stable']
+        # p_post = np.zeros((4,n_int,3,3,2))
+        # suffix_arr = ['','_RW','_GT','_nRnG']
+        # for k in range(n_int):
+
+        #     for j,key in enumerate(status_arr):
+        #         for i,key2 in enumerate(status_arr):
+        #             for l,sf in enumerate(suffix_arr):
+        #                 p_post[l,k,j,i,0] = np.nanmean(self.stats['p_post%s_s'%sf][key][key2][s_arr[k]:s_arr[k+1],1,0])
+        #                 p_post[l,k,j,i,1] = np.nanstd(self.stats['p_post%s_s'%sf][key][key2][s_arr[k]:s_arr[k+1],1,0])
+
+
+        plt.figure(figsize=(7,5),dpi=300)
+
+        label_arr = ['RW','GT','nRnG']
+        ax = plt.axes([0.1,0.8,0.225,0.175])
+        ax.plot(gauss_smooth(self.stats['p_post_s']['act']['stable'][:,1,0],1),'k')
+        ax.plot(gauss_smooth(self.stats['p_post_s']['code']['stable'][:,1,0],1),'r')
+        ax.plot(gauss_smooth(self.stats['p_post_s']['stable']['stable'][:,1,0],1),'b')
+        ax.set_ylim([0.,1])
+        ax.set_xlim([0,np.where(self.status['sessions'])[0][-1]])
+        ax.set_xlabel('session')
+        ax.set_ylabel('$p(\\gamma_{s+1}^+|\cdot^+)$')
+
+        self.pl_dat.remove_frame(ax,['top','right'])
+
+        status_key = ['alpha','beta','gamma']
+
+        ## plotting location-dependent transition rates
+        # # col_arr = []
+        # idx = 1
+        # for l,sf in enumerate(suffix_arr[1:]):
+        #     ax2 = plt.axes([0.1+0.125*l,0.55,0.075,0.1])
+        #     for j in range(len(s_arr)-1):
+        #         ax.plot([s_arr[j],s_arr[j]],[0,2],'--',color=[0.5,0.5,0.5],linewidth=0.5,zorder=0)
+        #         ax2.errorbar(np.arange(n_int),p_post[0,:,idx,2,0],p_post[l+1,:,idx,2,1],fmt='o',mec=[0.6,0.6,0.6],linewidth=0.5,markersize=1)
+        #         ax2.errorbar(np.arange(n_int),p_post[l+1,:,idx,2,0],p_post[l+1,:,idx,2,1],fmt='ko',linewidth=0.5,markersize=2)
+        #     ax2.set_xticks(np.arange(n_int))
+        #     ax2.set_xticklabels(['s%d-%d'%(s_arr[j]+1,s_arr[j+1]) for j in range(n_int)],rotation=60,fontsize=8)
+        #     ax2.set_ylim([0,1.05])
+        #     pl_dat.remove_frame(ax2,['top','right'])
+        #     ax2.set_title(label_arr[l])
+        #     if l==0:
+        #         ax2.set_ylabel('$p(\\gamma_{s+1}^+|\\%s_s^+)$'%status_key[idx])
+        #     else:
+        #         ax2.set_yticklabels([])
+        # pl_dat.remove_frame(ax2,['top','right'])
+
+        ax = plt.axes([0.6,0.8,0.225,0.175])
+        ax.plot(gauss_smooth(self.stats['p_post_s']['act']['act'][:,1,0],1),'k')
+        ax.plot(gauss_smooth(self.stats['p_post_s']['code']['act'][:,1,0],1),'r')
+        ax.plot(gauss_smooth(self.stats['p_post_s']['stable']['act'][:,1,0],1),'b')
+        ax.set_ylim([0.5,1])
+        ax.set_xlim([0,np.where(self.status['sessions'])[0][-1]])
+        ax.set_xlabel('session')
+        ax.set_ylabel('$p(\\alpha_{s+1}^+|\cdot^+)$')
+        self.pl_dat.remove_frame(ax,['top','right'])
+
+
+        ## plotting location dependent transition-rates
+        # idx = 1
+        # for l,sf in enumerate(suffix_arr[1:]):
+        #     ax2 = plt.axes([0.6+0.125*l,0.55,0.075,0.1])
+        #     for j in range(len(s_arr)-1):
+        #         # if np.any(self.session_data['RW_pos'])
+        #         ax.plot([s_arr[j],s_arr[j]],[0,2],'--',color=[0.5,0.5,0.5],linewidth=0.5,zorder=0)
+        #         ax2.errorbar(np.arange(n_int),p_post[0,:,idx,0,0],p_post[0,:,idx,0,1],fmt='o',mec=[0.6,0.6,0.6],linewidth=0.5,markersize=1)
+        #         ax2.errorbar(np.arange(n_int),p_post[l+1,:,idx,0,0],p_post[l+1,:,idx,0,1],fmt='ko',linewidth=0.5,markersize=2)
+        #     ax2.set_ylim([0,1.05])
+        #     ax2.set_xticks(np.arange(n_int))
+        #     ax2.set_xticklabels(['s%d-%d'%(s_arr[j]+1,s_arr[j+1]) for j in range(n_int)],rotation=60,fontsize=8)
+        #     pl_dat.remove_frame(ax2,['top','right'])
+        #     ax2.set_title(label_arr[l])
+        #     if l==0:
+        #         ax2.set_ylabel('$p(\\alpha_{s+1}^+|\\%s_s^+)$'%status_key[idx])
+        #     else:
+        #         ax2.set_yticklabels([])
+        # pl_dat.remove_frame(ax2,['top','right'])
+
+        ds_max = 11
+        p_rec_loc = np.zeros((n_int,nbin,ds_max))*np.NaN
+        N_rec_loc = np.zeros((n_int,nbin,ds_max))
+
+        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(self.compare['pointer'].col,(nSes,nSes,self.params['field_count_max'],self.params['field_count_max']))
+        c_shifts = self.compare['pointer'].row
+
+        sig_theta = self.stability['all']['mean'][0,2]
+        di = 3
+
+        for ds in range(ds_max):
+            Ds = s2_shifts-s1_shifts
+            idx = np.where(Ds==ds)[0]
+            idx_shifts = self.compare['pointer'].data[idx].astype('int')-1
+            shifts = self.compare['shifts'][idx_shifts]
+
+            s = s1_shifts[idx]
+            f = f1[idx]
+            c = c_shifts[idx]
+            loc_shifts = np.round(self.fields['location'][c,s,f,0]).astype('int')
+
+            for j in range(len(s_arr)-1):
+                for i in range(nbin):
+                    i_min = max(0,i-di)
+                    i_max = min(nbin,i+di)
+                    idx_loc = (loc_shifts>=i_min) & (loc_shifts<i_max) & ((s>=s_arr[j]) & (s<s_arr[j+1]))
+
+                    shifts_loc = shifts[idx_loc]
+                    N_data = len(shifts_loc)
+                    N_stable = (np.abs(shifts_loc)<(SD*sig_theta)).sum()
+
+                    p_rec_loc[j,i,ds] = N_stable/N_data
+                    N_rec_loc[j,i,ds] = N_stable
+
+        p_act_loc = np.zeros((nSes,nbin,ds_max))*np.NaN
+        N_act_loc = np.zeros((nSes,nbin,ds_max))
+        for s in np.where(self.status['sessions'])[0]:
+            for ds in range(min(nSes-s,ds_max)):
+                if self.status['sessions'][s+ds]:
+                    loc = self.fields['location'][:,s,:]
+
+                    for i in range(nbin):
+                        i_min = max(0,i-di)
+                        i_max = min(nbin,i+di)
+                        idx_loc = np.where((i_min<=loc) & (loc<i_max))
+                        p_act_loc[s,i,ds] = self.status['activity'][idx_loc[0],s+ds,1].mean()
+                        N_act_loc[s,i,ds] = self.status['activity'][idx_loc[0],s+ds,1].sum()
+
+        props = dict(boxstyle='round', facecolor='w', alpha=0.8)
+
+        for j in range(n_int):
+            ax_im = plt.axes([0.1+0.2*j,0.25,0.15,0.1])
+            im = ax_im.imshow(gauss_smooth(p_rec_loc[j,...],(1,0)),clim=[0.25,0.75],interpolation='None',origin='lower',aspect='auto')
+            ax_im.set_xlim([0.5,10.5])
+            ax_im.set_xticklabels([1,5,10])
+            ax_im.text(x=0.5,y=110,s='Sessions %d-%d'%(s_arr[j]+1,s_arr[j+1]),ha='left',va='bottom',bbox=props,fontsize=8)
+            ax_im.set_ylim([0,100])
+            ax_im.set_xticks([])
+            if j == 0:
+                ax_im.set_ylabel('pos.')
+            else:
+                ax_im.set_yticklabels([])
+            if j == (n_int-1):
+                cb = plt.colorbar(im)
+                cb.set_label('$p(\\gamma_{\Delta s}^+|\\beta^+)$',fontsize=8)
+            # else:
+                # ax_im.set_xlabel('$\Delta s$ [sessions]')
+
+            p_act_range = np.nanmean(p_act_loc[s_arr[j]:s_arr[j+1],...],0)
+            ax_im = plt.axes([0.1+0.2*j,0.1,0.15,0.1])
+            im = ax_im.imshow(gauss_smooth(p_act_range,(1,0)),clim=[0.25,0.75],interpolation='None',origin='lower',aspect='auto')
+            ax_im.set_xlim([0.5,10])
+            ax_im.set_xticks([1,5,10])
+            ax_im.set_ylim([0,100])
+            # ax_im.text(x=6,y=107,s='Sessions %d-%d'%(s_arr[j]+1,s_arr[j+1]),ha='left',va='bottom',bbox=props,fontsize=8)
+            if j == 0:
+                ax_im.set_ylabel('pos.')
+            else:
+                ax_im.set_yticklabels([])
+            if j == (n_int-1):
+                cb = plt.colorbar(im)
+                cb.set_label('$p(\\alpha_{\Delta s}^+|\\beta^+)$',fontsize=8)
+            ax_im.set_xlabel('$\Delta s$')
+
+        ax_rec = plt.axes([0.375,0.8,0.1,0.175])
+        ax_rec.plot([0,n_int],[0.2,0.2],color=[0.5,0.5,0.5],linestyle='--',linewidth=0.5,zorder=0)
+        ax_rec.set_ylim([0,1])
+    
+        # ax_act = plt.axes([0.875,0.8,0.1,0.175])
+        # ax_act.plot([0,n_int],[0.2,0.2],color=[0.5,0.5,0.5],linestyle='--',linewidth=0.5,zorder=0)
+        # ax_act.set_ylim([0,1])
+
+        # for j in range(n_int):
+        #     RW_pos = self.session_data['RW_pos'][s_arr[j],:].astype('int')
+        #     GT_pos = self.session_data['GT_pos'][s_arr[j],:].astype('int')
+        #     N_all = N_rec_loc[j,:,1].sum()
+        #     N_RW = N_rec_loc[j,RW_pos[0]:RW_pos[1],1].sum()
+        #     N_GT = N_rec_loc[j,GT_pos[0]:GT_pos[1],1].sum()
+
+        #     ax_rec.plot(j,N_RW/N_all,'o',color='tab:red',markersize=2)
+        #     ax_rec.plot(j,N_GT/N_all,'o',color='tab:green',markersize=2)
+        #     ax_rec.plot(j,(N_all-N_RW-N_GT)/N_all,'o',color='tab:blue',markersize=2)
+
+        #     N_all = N_act_loc[s_arr[j]:s_arr[j+1],:,1].sum(axis=(0,1))
+        #     N_RW = N_act_loc[s_arr[j]:s_arr[j+1],RW_pos[0]:RW_pos[1],1].sum(axis=(0,1))
+        #     N_GT = N_act_loc[s_arr[j]:s_arr[j+1],GT_pos[0]:GT_pos[1],1].sum(axis=(0,1))
+
+        #     ax_act.plot(j,N_RW/N_all,'o',color='tab:red',markersize=2)
+        #     ax_act.plot(j,N_GT/N_all,'o',color='tab:green',markersize=2)
+        #     ax_act.plot(j,(N_all-N_RW-N_GT)/N_all,'o',color='tab:blue',markersize=2)
+
+        # pl_dat.remove_frame(ax_rec,['top','right'])
+        # pl_dat.remove_frame(ax_act,['top','right'])
+
+        # ax_rec.set_xticks(np.arange(n_int))
+        # ax_rec.set_xticklabels(['s%d-%d'%(s_arr[j]+1,s_arr[j+1]) for j in range(n_int)],rotation=60,fontsize=8)
+        # ax_act.set_xticks(np.arange(n_int))
+        # ax_act.set_xticklabels(['s%d-%d'%(s_arr[j]+1,s_arr[j+1]) for j in range(n_int)],rotation=60,fontsize=8)
+
+
+
+        # ax.set_xlabel('session')
+        plt.show(block=False)
+
+        # if sv:
+        #     self.pl_dat.save_fig('timedep_dynamics')
+
+    def plot_performancedependent_statistics(self):
+
+
+        print('### plot performance-dependent statistics ###')
+        print('### this needs some work!!! ###')
+
+        nSes = self.data['nSes']
+
+        RW_reception = np.zeros(nSes)*np.NaN
+        slowing = np.zeros(nSes)*np.NaN
+        for s in range(nSes):
+            if s in self.behavior['performance'].keys():
+                RW_reception[s] = self.behavior['performance'][s]['RW_reception'].mean()
+                slowing[s] = self.behavior['performance'][s]['slowDown'].mean()
+
+        perf = slowing#self.sessions['time_active']/600
+        plt.figure(figsize=(7,5),dpi=300)
+        ax = plt.axes([0.1,0.7,0.15,0.25])
+        ax.plot(RW_reception)
+        ax.set_ylim([0,1])
+        ax = plt.axes([0.3,0.7,0.15,0.25])
+        ax.plot(slowing)
+        ax.set_ylim([0,1])
+        ax = plt.axes([0.5,0.7,0.15,0.25])
+        ax.plot(RW_reception,slowing,'k.',markersize=2)
+        ax.set_ylim([0,1])
+        ax = plt.axes([0.7,0.7,0.15,0.25])
+        ax.plot(RW_reception,self.status['activity'][...,2].sum(0),'k.',markersize=2)
+        ax.plot(slowing,self.status['activity'][...,2].sum(0),'r.',markersize=2)
+        ax.plot(perf,self.status['activity'][...,2].sum(0),'b.',markersize=2)
+        # ax.set_ylim([0,1])
+
+        ds = 1
+        ax = plt.axes([0.1,0.1,0.25,0.35])
+        ax.plot(perf[ds:],self.stats['p_post_s']['stable']['stable'][:nSes-ds,1,0],'k.',markersize=2)
+        ax.plot(perf[ds:],self.stats['p_post_s']['stable']['code'][:nSes-ds,1,0],'r.',markersize=2)
+        ax.plot(perf[ds:],self.stats['p_post_s']['stable']['act'][:nSes-ds,1,0],'b.',markersize=2)
+        ax.set_xlim([0,1])
+        ax.set_ylim([0,1])
+
+        ax = plt.axes([0.4,0.1,0.25,0.35])
+        ax.plot(perf[ds:],self.stats['p_post_s']['code']['stable'][:nSes-ds,1,0],'k.',markersize=2)
+        ax.plot(perf[ds:],self.stats['p_post_s']['code']['code'][:nSes-ds,1,0],'r.',markersize=2)
+        ax.plot(perf[ds:],self.stats['p_post_s']['code']['act'][:nSes-ds,1,0],'b.',markersize=2)
+        ax.set_xlim([0,1])
+        ax.set_ylim([0,1])
+
+        ax = plt.axes([0.7,0.1,0.25,0.35])
+        ax.plot(perf[ds:],self.stats['p_post_s']['act']['stable'][:nSes-ds,1,0],'k.',markersize=2)
+        ax.plot(perf[ds:],self.stats['p_post_s']['act']['code'][:nSes-ds,1,0],'r.',markersize=2)
+        ax.plot(perf[ds:],self.stats['p_post_s']['act']['act'][:nSes-ds,1,0],'b.',markersize=2)
+        ax.set_xlim([0,1])
+        ax.set_ylim([0,1])
+
+        plt.show(block=False)
 
 
 
@@ -3788,44 +4882,6 @@ def bootstrap_shifts(fun,shifts,N_bs,nbin):
   return p, p_CI, p_std, shift_distr_bs
 
 
-def get_shift_distr(ds,compare,para):
-
-  nSes,nbin,N_bs,idx_celltype = para
-  L_track=100
-  p = {'all':{},
-        'cont':{},
-        'mix':{},
-        'discont':{},
-        'silent_mix':{},
-        'silent':{}}
-
-  s1_shifts,s2_shifts,f1,f2 = np.unravel_index(compare['pointer'].col,(nSes,nSes,5,5))
-  #print(idx_celltype)
-  Ds = s2_shifts-s1_shifts
-  idx_ds = np.where((Ds==ds) & idx_celltype)[0]
-  N_data = len(idx_ds)
-
-  idx_shifts = compare['pointer'].data[idx_ds].astype('int')-1
-  shifts = compare['shifts'][idx_shifts]
-  shifts_distr = compare['shifts_distr'][idx_shifts,:].toarray()
-  
-  for pop in p.keys():
-    if pop == 'all':
-      idxes = np.ones(N_data,'bool')
-    elif pop=='cont':
-      idxes = compare['inter_coding'][idx_ds,1]==1
-    elif pop=='mix':
-      idxes = ((compare['inter_coding'][idx_ds,1]>0) & (compare['inter_coding'][idx_ds,1]<1)) & (compare['inter_active'][idx_ds,1]==1)
-    elif pop=='discont':
-      idxes = (compare['inter_coding'][idx_ds,1]==0) & (compare['inter_active'][idx_ds,1]==1)
-    elif pop=='silent_mix':
-      idxes =(compare['inter_active'][idx_ds,1]>0) & (compare['inter_active'][idx_ds,1]<1)
-    elif pop=='silent':
-      idxes = compare['inter_active'][idx_ds,1]==0
-
-    # p[pop]['mean'], p[pop]['std'], _ = bootstrap_shifts(fit_shift_model,cdf_shifts_ds[idxes,:],N_bs,nbin)
-    p[pop]['mean'], p[pop]['CI'], p[pop]['std'], _ = bootstrap_shifts(fit_shift_model,shifts_distr[idxes,:],N_bs,nbin)
-  return p
 
 ## fitting functions and options
 F_shifts = lambda x,A0,A,sig,theta : A/(np.sqrt(2*np.pi)*sig)*np.exp(-(x-theta)**2/(2*sig**2)) + A0/len(x)     ## gaussian + linear offset
@@ -4005,3 +5061,45 @@ def get_field_stability_temp(cluster,SD=1.96,ds=3):
             # print(field_stability[c,s])
 
     return field_stability
+
+
+
+
+# def get_shift_distr(ds,compare,para):
+
+#     nSes,nbin,N_bs,idx_celltype = para
+#     L_track=100
+#     p = {'all':{},
+#         'cont':{},
+#         'mix':{},
+#         'discont':{},
+#         'silent_mix':{},
+#         'silent':{}}
+
+#     s1_shifts,s2_shifts,f1,f2 = np.unravel_index(compare['pointer'].col,(nSes,nSes,5,5))
+#     #print(idx_celltype)
+#     Ds = s2_shifts-s1_shifts
+#     idx_ds = np.where((Ds==ds) & idx_celltype)[0]
+#     N_data = len(idx_ds)
+
+#     idx_shifts = compare['pointer'].data[idx_ds].astype('int')-1
+#     shifts = compare['shifts'][idx_shifts]
+#     shifts_distr = compare['shifts_distr'][idx_shifts,:].toarray()
+    
+#     for pop in p.keys():
+#         if pop == 'all':
+#             idxes = np.ones(N_data,'bool')
+#         elif pop=='cont':
+#             idxes = compare['inter_coding'][idx_ds,1]==1
+#         elif pop=='mix':
+#             idxes = ((compare['inter_coding'][idx_ds,1]>0) & (compare['inter_coding'][idx_ds,1]<1)) & (compare['inter_active'][idx_ds,1]==1)
+#         elif pop=='discont':
+#             idxes = (compare['inter_coding'][idx_ds,1]==0) & (compare['inter_active'][idx_ds,1]==1)
+#         elif pop=='silent_mix':
+#             idxes =(compare['inter_active'][idx_ds,1]>0) & (compare['inter_active'][idx_ds,1]<1)
+#         elif pop=='silent':
+#             idxes = compare['inter_active'][idx_ds,1]==0
+
+#         # p[pop]['mean'], p[pop]['std'], _ = bootstrap_shifts(fit_shift_model,cdf_shifts_ds[idxes,:],N_bs,nbin)
+#         p[pop]['mean'], p[pop]['CI'], p[pop]['std'], _ = bootstrap_shifts(fit_shift_model,shifts_distr[idxes,:],N_bs,nbin)
+#     return p

@@ -62,7 +62,7 @@ def periodic_distr_distance(p1,p2,nbin,L_track,mu1=None,mu2=None,N_bs=1000,mode=
     shift_sign = 1 if (d_raw>=0) & (abs(d_raw)<(L_track/2)) else -1
     if abs(d_raw) > L_track/2:
       shift = int((mu1+mu2)/2)
-      d_out = periodic_wasserstein_distance(np.roll(p1,shift),np.roll(p2,shift),(mu1+shift)%L_track,(mu2+shift)%L_track,L_track)
+      d_out = sstats.wasserstein_distance(np.roll(p1,shift),np.roll(p2,shift),(mu1+shift)%L_track,(mu2+shift)%L_track,L_track)
     else:
 
       idx_p1 = p1>p1.max()*10**(-2)
@@ -72,13 +72,13 @@ def periodic_distr_distance(p1,p2,nbin,L_track,mu1=None,mu2=None,N_bs=1000,mode=
         d = np.zeros(nbin)
         for shift in np.linspace(0,L_track,nbin):
           #d[shift] = sstats.wasserstein_distance(x,x,np.roll(p1,shift),np.roll(p2,shift))
-          d[shift] = wasserstein_distance(x,x,np.roll(p1,shift),np.roll(p2,shift))
+          d[shift] = sstats.wasserstein_distance(x,x,np.roll(p1,shift),np.roll(p2,shift))
         d_out = d.min()
 
       else:
         #print('calc direct')
         #d_out = sstats.wasserstein_distance(x,x,p1,p2)
-        d_out = wasserstein_distance(x,x,p1,p2)
+        d_out = sstats.wasserstein_distance(x,x,p1,p2)
       d_out *= shift_sign
       #print('wasserstein: %5.3f: '%d_out)
       #print('raw: %5.3f'%d_raw)
@@ -143,22 +143,22 @@ def periodic_distr_distance(p1,p2,nbin,L_track,mu1=None,mu2=None,N_bs=1000,mode=
   return d_out
 
 
-def wasserstein_distance(u_values, v_values, u_weights=None, v_weights=None):
+# def wasserstein_distance(u_values, v_values, u_weights=None, v_weights=None):
 
-    deltas = np.ones(u_values.shape)
+#     deltas = np.ones(u_values.shape)
 
-    # Calculate the CDFs of u and v using their weights, if specified.
-    if u_weights is None:
-        u_cdf = u_cdf_indices / u_values.size
-    else:
-        u_cdf = np.cumsum(u_weights)
+#     # Calculate the CDFs of u and v using their weights, if specified.
+#     if u_weights is None:
+#         u_cdf = u_cdf_indices / u_values.size
+#     else:
+#         u_cdf = np.cumsum(u_weights)
 
-    if v_weights is None:
-        v_cdf = v_cdf_indices / v_values.size
-    else:
-        v_cdf = np.cumsum(v_weights)
+#     if v_weights is None:
+#         v_cdf = v_cdf_indices / v_values.size
+#     else:
+#         v_cdf = np.cumsum(v_weights)
 
-    return np.sum(np.multiply(np.abs(u_cdf - v_cdf), deltas))
+#     return np.sum(np.multiply(np.abs(u_cdf - v_cdf), deltas))
 
 
 
