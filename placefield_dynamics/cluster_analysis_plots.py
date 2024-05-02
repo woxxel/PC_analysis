@@ -25,7 +25,6 @@ class cluster_analysis_plots(cluster_analysis):
     '''
         TODO:
             * Plot 16 - missing key ’t_measures’
-            
             * Plot 191, 23, 31, 45 - missing keys self.stats [p_post_s] - get_transition_prob function has some bugs
             * Plot 22 - missing key - ‘zone_mask’
             * Plot 25, 27 - missing key - ‘SNR’ - has the name changed to 'SNR_comp'? 
