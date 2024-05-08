@@ -16,7 +16,7 @@ from .cluster_analysis import cluster_analysis
 
 from .placefield_detection import get_firingrate
 
-from .utils import get_ICPI, get_dp, gauss_smooth, add_number, bootstrap_data, com, periodic_distr_distance
+from .utils import get_ICPI, get_dp, gauss_smooth, add_number, bootstrap_data, com, periodic_distr_distance, get_status_arr
 
 from matplotlib.ticker import AutoMinorLocator, LogLocator, NullFormatter
 
@@ -24,8 +24,9 @@ class cluster_analysis_plots(cluster_analysis):
 
     '''
         TODO:
-            * Plot 16 - missing key ’t_measures’
-            * Plot 191, 23, 31, 45 - missing keys self.stats [p_post_s] - get_transition_prob function has some bugs
+            * read measurement time from file
+
+            * Plot 45 - missing keys self.stats [p_post_s] - get_transition_prob function has some bugs
             * Plot 22 - missing key - ‘zone_mask’
             * Plot 25, 27 - missing key - ‘SNR’ - has the name changed to 'SNR_comp'? 
             * Plot 41 - indexing issue
@@ -35,6 +36,7 @@ class cluster_analysis_plots(cluster_analysis):
         DONE:
             * Plot 12 - missing key - alignment['rotation_normal'] -> plot has been covered in neuron_matching.plot_alignment_statistics(s_compare)
             * Plot 15 - covered by plot_pv_correlation
+            * Plot 16 - just added ’t_measures’ as dummy data
             * Plot 19 - variable dloc empty -> uhm - no. it's working :) (plot_hierarchy_interaction)
             * Plot 20 - completely changed into plot_parameter_dependent_neuron_numbers
             * Plot 191 - fixed get_transition_prob function and cleaned up plot function (some more to do)
@@ -2754,14 +2756,14 @@ class cluster_analysis_plots(cluster_analysis):
 
         ds = 2
         if (not ('act_stability_temp' in self.stats.keys())) | reprocess:
-            self.stats['act_stability_temp'] = get_act_stability_temp(self,ds=ds)
+            self.stats['act_stability_temp'] = self.get_act_stability_temp(ds=ds)
         if (not ('act_stability' in self.stats.keys())) | reprocess:
-            self.stats['act_stability'] = get_act_stability(self,s_bool)
+            self.stats['act_stability'] = self.get_act_stability(s_bool)
         if (not ('field_stability_temp' in self.stats.keys())) | reprocess:
-            self.stats['field_stability_temp'] = get_field_stability_temp(self,SD=1.96,ds=ds)
+            self.stats['field_stability_temp'] = self.get_field_stability_temp(SD=1.96,ds=ds)
 
         if (not ('field_stability' in self.stats.keys())):
-            self.stats['field_stability'] = get_field_stability(self,SD=1.96)
+            self.stats['field_stability'] = self.get_field_stability(SD=1.96)
 
         # act_clusters = self.status['clusters']
         act_clusters = np.any(self.status['activity'][:,s_bool,1],1)
@@ -3470,6 +3472,8 @@ class cluster_analysis_plots(cluster_analysis):
         if sv:
             self.pl_dat.save_fig('multi_modes')
 
+
+
     def plot_coding_overlap(self):
 
         nSes = self.data['nSes']
@@ -3545,6 +3549,270 @@ class cluster_analysis_plots(cluster_analysis):
 
         plt.show(block=False)
     
+
+    
+    def plot_location_dependent_stability(self,sv=False):
+
+        print('### plot location-specific stability ###')
+
+        nSes = self.data['nSes']
+        nbin = self.data['nbin']
+
+        self.params['zone_mask'] = {
+            'gate': np.zeros(nbin,'bool'),
+            'reward': np.zeros(nbin,'bool'),
+            'others': np.zeros(nbin,'bool')
+        }
+
+        self.params['zone_mask']['gate'][20:35] = True
+        self.params['zone_mask']['reward'][50:65] = True
+        self.params['zone_mask']['others'] = ~self.params['zone_mask']['gate'] & ~self.params['zone_mask']['reward']
+        # p_rec = {'all':     np.zeros(nSes)*np.NaN,
+        #          'gate':    np.zeros(nSes)*np.NaN,
+        #          'reward':  np.zeros(nSes)*np.NaN,
+        #          'others':  np.zeros(nSes)*np.NaN}
+
+        if nSes>50:
+            s_arr = np.array([0,5,17,30,87])
+        # s_arr = np.array([0,16,60,87,96,107])
+        else:
+            s_arr = np.array([0,5,10,15,20])
+        s_arr += np.where(self.status['sessions'])[0][0]
+        print(s_arr)
+        # s_arr = np.array([0,10,21])
+        n_int = len(s_arr)-1
+
+        ds = 1
+        session_bool = np.where(np.pad(self.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(self.status['sessions'][:],(0,0),constant_values=False))[0]
+        # print(session_bool)
+        loc_stab = np.zeros((nSes,nbin+2,nbin+2))
+        loc_stab_p = np.zeros((nSes,nbin+2,nbin+2))
+        for s in session_bool:#range(nSes):#np.where(self.status['sessions'])[0]:
+            ### assign bin-specific remapping to rows, active nPC (nbins+1) & silent (nbins+2)
+            for c in np.where(self.status['activity'][:,s,2])[0]:
+                ## find belonging fields
+                if self.status['activity'][c,s+ds,2]:
+                    d = np.abs(np.mod(self.fields['location'][c,s,:,0][:,np.newaxis] - self.fields['location'][c,s+ds,:,0]+nbin/2,nbin)-nbin/2)
+                    d[np.isnan(d)] = nbin
+                    f1,f2 = sp.optimize.linear_sum_assignment(d)
+                    for f in zip(f1,f2):
+                        if d[f] < nbin:
+                            loc_stab[s,int(round(self.fields['location'][c,s,f[0],0])),int(round(self.fields['location'][c,s+ds,f[1],0]))] += 1
+                            loc_stab_p[s,int(round(self.fields['location'][c,s,f[0],0])),:nbin] += self.fields['p_x'][c,s+ds,f[1],:]
+
+        loc_stab = loc_stab[:,:nbin,:nbin]
+        loc_stab_p = loc_stab_p[:,:nbin,:nbin]
+
+        p_rec_loc = np.zeros((n_int,nbin,nSes))*np.NaN
+
+        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(self.compare['pointer'].col,(nSes,nSes,self.params['field_count_max'],self.params['field_count_max']))
+        c_shifts = self.compare['pointer'].row
+        sig_theta = self.stability['all']['mean'][0,2]
+        print(sig_theta)
+        di = 3
+        SD = 2
+        for ds in range(1,min(nSes,21)):
+            # session_bool = np.where(np.pad(self.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(self.status['sessions'][:],(0,0),constant_values=False))[0]
+
+            ### somehow condition this on the location
+            # for s1 in session_bool:
+            #     overlap = self.status['activity'][self.status['activity'][:,s1,1],s1+ds,1].sum(0).astype('float')
+            #     N_ref = self.status['activity'][:,s1,1].sum(0)
+            #     p_rec['act'][ds,s1] = (overlap/N_ref)
+            #
+            #     overlap = self.status['activity'][self.status['activity'][:,s1,2],s1+ds,2].sum(0).astype('float')
+            #     N_ref = self.status['activity'][self.status['activity'][:,s1,2],s1+ds,1].sum(0)
+            #     p_rec['PC'][ds,s1] = (overlap/N_ref)
+
+            Ds = s2_shifts-s1_shifts
+            idx = np.where(Ds==ds)[0]
+            idx_shifts = self.compare['pointer'].data[idx].astype('int')-1
+            shifts = self.compare['shifts'][idx_shifts]
+
+            s = s1_shifts[idx]
+            f = f1[idx]
+            c = c_shifts[idx]
+            loc_shifts = np.round(self.fields['location'][c,s,f,0]).astype('int')
+
+            for j in range(len(s_arr)-1):
+                for i in range(nbin):
+                    i_min = max(0,i-di)
+                    i_max = min(nbin,i+di)
+                    idx_loc = (loc_shifts>=i_min) & (loc_shifts<i_max) & ((s>=s_arr[j]) & (s<s_arr[j+1]))
+
+                    shifts_loc = shifts[idx_loc]
+                    N_data = len(shifts_loc)
+                    N_stable = (np.abs(shifts_loc)<(SD*sig_theta)).sum()
+
+                    p_rec_loc[j,i,ds] = N_stable/N_data
+
+        plt.figure(figsize=(7,5),dpi=self.pl_dat.sv_opt['dpi'])
+
+        gate = np.any(self.params['zone_mask']['gate'])
+        if gate:
+            ax_GT = plt.axes([0.4,0.8,0.25,0.175])
+            ax_GT.bar(range(nbin),1000.*self.params['zone_mask']['gate'],width=1,facecolor='tab:green',alpha=0.3)
+            ax_GT.set_ylim([0,0.1])
+            self.pl_dat.remove_frame(ax_GT,['top','right'])
+
+        ax_RW = plt.axes([0.1,0.8,0.25,0.175])
+        ax_RW.bar(range(nbin),1000.*self.params['zone_mask']['reward'],width=1,facecolor='tab:red',alpha=0.3)
+        ax_RW.set_ylim([0,0.1])
+        self.pl_dat.remove_frame(ax_RW,['top','right'])
+        ax_RW.set_xlabel('position [bins]')
+
+        ax_nRnG = plt.axes([0.7,0.8,0.25,0.175])
+        ax_nRnG.bar(range(nbin),1000.*self.params['zone_mask']['others'],width=1,facecolor='tab:blue',alpha=0.3)
+        ax_nRnG.set_ylim([0,0.1])
+        self.pl_dat.remove_frame(ax_nRnG,['top','right'])
+        ax_nRnG.set_xlabel('position [bins]')
+
+        for j in range(n_int):
+            col = [1,0.2*j,0.2*j]
+            occ = loc_stab_p[s_arr[j]:s_arr[j+1],self.params['zone_mask']['reward'],:].sum(0).sum(0)
+            occ /= occ.sum()
+            ax_RW.plot(range(nbin),occ,'-',color=col,label='Sessions %d-%d'%(s_arr[j]+1,s_arr[j+1]))
+            # ax.bar(range(nbin),loc_stab[:20,self.params['zone_mask']['reward'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
+
+            col = [0.2*j,0.2*j,1]
+            occ = loc_stab_p[s_arr[j]:s_arr[j+1],self.params['zone_mask']['others'],:].sum(0).sum(0)
+            occ /= occ.sum()
+            ax_nRnG.plot(range(nbin),occ,'-',color=col)
+            # ax.bar(range(nbin),loc_stab[:20,self.params['zone_mask']['others'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
+
+            if gate:
+                col = [0.2*j,0.8,0.2*j]
+                occ = loc_stab_p[s_arr[j]:s_arr[j+1],self.params['zone_mask']['gate'],:].sum(0).sum(0)
+                occ /= occ.sum()
+                ax_GT.plot(range(nbin),occ,'-',color=col)
+                # ax.bar(range(nbin),loc_stab[:20,self.params['zone_mask']['others'],:].sum(0).sum(0),width=1,facecolor='k',alpha=0.5)
+        ax_RW.legend(fontsize=6,loc='upper left',bbox_to_anchor=[0.05,1.1])
+        props = dict(boxstyle='round', facecolor='w', alpha=0.8)
+
+        for j in range(n_int):
+            ax_im = plt.axes([0.1,0.525-j*0.15,0.15,0.1])
+            im = ax_im.imshow(gauss_smooth(p_rec_loc[j,...],(1,0)),clim=[0.25,0.75],interpolation='None',origin='lower',aspect='auto')
+            plt.colorbar(im)
+            ax_im.set_xlim([0.5,10.5])
+            ax_im.text(x=6,y=107,s='Sessions %d-%d'%(s_arr[j]+1,s_arr[j+1]),ha='left',va='bottom',bbox=props,fontsize=8)
+            ax_im.set_ylabel('pos.')
+
+            ax = plt.axes([0.375,0.525-j*0.15,0.225,0.1])
+            for i,ds in enumerate([1,3]):
+                col = [0.35*i,0.35*i,0.35*i]
+                if j==0:
+                    ax_im.annotate('',xy=(ds,100),xytext=(ds,115),fontsize=6,annotation_clip=False,arrowprops=dict(arrowstyle='->',color=col))
+                ax.plot(gauss_smooth(p_rec_loc[j,:,ds],1),color=col)
+            ax.set_ylim([0,1])
+            ax.set_ylabel('$r_{s}$')
+            self.pl_dat.remove_frame(ax,['top','right'])
+            if j < (n_int-1):
+                ax_im.set_xticklabels([])
+                ax.set_xticklabels([])
+            else:
+                ax_im.set_xlabel('$\Delta s$ [sessions]')
+                ax.set_xlabel('position [bins]')
+
+            # ax = plt.axes([0.725,0.525-j*0.15,0.25,0.1])
+
+
+        status, status_dep = get_status_arr(self)
+
+        # idx_c = np.where(self.status['clusters'])[0]
+
+        # nC_good,nSes_good = status['act'].shape
+        # ds_max = 1
+
+        # need session average, not cluster average
+        # fields = np.any(self.status_fields[self.status['clusters'],...] & (self.fields['location'][self.status['clusters'],...,0]>self.params['zone_idx']['reward'][0]) & (self.fields['location'][self.status['clusters'],...,0]<self.params['zone_idx']['reward'][1]),2)
+        # fields = np.any(self.status_fields[self.status['clusters'],...] & (self.fields['location'][self.status['clusters'],...,0]<self.params['zone_idx']['reward'][0]) | (self.fields['location'][self.status['clusters'],...,0]>self.params['zone_idx']['reward'][1]),2)
+
+        ax = plt.axes([0.7,0.1,0.25,0.1])
+        ax.plot(gauss_smooth(self.stats['p_post_s']['act']['act'][:,1,0],1),'k')
+        ax.plot(gauss_smooth(self.stats['p_post_s']['code']['code'][:,1,0],1),'r')
+        ax.plot(gauss_smooth(self.stats['p_post_s']['stable']['code'][:,1,0],1),'b')
+        ax.set_ylim([0,1])
+
+        plt.show(block=False)
+
+        if sv:
+            self.pl_dat.save_fig('change_of_stability')
+
+
+        plt.figure()
+        p_rec_loc = np.zeros((nSes,nbin))*np.NaN
+        # for ds in range(1,min(nSes,41)):
+        ds = 1
+        session_bool = np.where(np.pad(self.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(self.status['sessions'][:],(0,0),constant_values=False))[0]
+
+        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(self.compare['pointer'].col,(nSes,nSes,self.params['field_count_max'],self.params['field_count_max']))
+        c_shifts = self.compare['pointer'].row
+        sig = 6
+        di = 3
+
+        Ds = s2_shifts-s1_shifts
+        idx = np.where(Ds==ds)[0]
+        idx_shifts = self.compare['pointer'].data[idx].astype('int')-1
+        shifts = self.compare['shifts'][idx_shifts]
+
+        s = s1_shifts[idx]
+        f = f1[idx]
+        c = c_shifts[idx]
+        loc_shifts = np.round(self.fields['location'][c,s,f,0]).astype('int')
+        for s0 in np.where(session_bool)[0]:
+            for i in range(nbin):
+                i_min = max(0,i-di)
+                i_max = min(nbin,i+di)
+                idx_loc = (loc_shifts>=i_min) & (loc_shifts<i_max) & (s==s0)
+
+                shifts_loc = shifts[idx_loc]
+                N_data = len(shifts_loc)
+                N_stable = (np.abs(shifts_loc)<(SD*sig)).sum()
+
+                p_rec_loc[s0,i] = N_stable/N_data
+
+        plt.subplot(212)
+        ## find location specific stabilization
+        RW_stab = np.nanmean(p_rec_loc[:,self.params['zone_mask']['reward']],1)
+        plt.plot(gauss_smooth(RW_stab,1),color='tab:red')
+        non_start = np.copy(self.params['zone_mask']['others'])
+        non_start[:13] = False
+        nRnG_stab = np.nanmean(p_rec_loc[:,non_start],1)
+        plt.plot(gauss_smooth(nRnG_stab,1),color='tab:blue')
+        START_stab = np.nanmean(p_rec_loc[:,15:35],1)
+        plt.plot(gauss_smooth(START_stab,1),color='tab:green')
+
+        plt.show(block=False)
+
+        # maxSes = 20
+        # print('what are those stable cells coding for?')
+        # plt.figure(figsize=(5,2.5))
+        #
+        # col_arr = ['k',[0.5,1,0.5],[1,0.5,0.5],[0.5,0.5,1]]
+        # label_arr = ['all','GT','RW','nRG']
+        # key_arr = ['all','gate','reward','others']
+        #
+        # w_bar = 0.2
+        # nKey = len(key_arr)
+        # offset_bar = ((nKey+1)%2)*w_bar/2 + (nKey//2 - 1)*w_bar
+        #
+        # arr = np.arange(1,min(40,nSes),2)
+        # for i,key in enumerate(key_arr):
+
+            # plt.bar(arr-offset_bar+i*w_bar,p_rec[key][arr],width=w_bar,facecolor=col_arr[i],edgecolor='k',label=label_arr[i])
+            # plt.errorbar(np.arange(1,maxSes+1)-offset_bar+i*w_bar,self.loc_stability[key]['mean'][:maxSes,1],self.loc_stability[key]['std'][:maxSes,1],fmt='none',ecolor='r')
+
+        # plt.xlabel('session difference $\Delta s$')
+        # plt.ylabel('$\%$ stable fields')
+        # plt.ylim([0,1.1])
+        # plt.legend(loc='upper right',ncol=2)
+        # plt.tight_layout()
+        # plt.show(block=False)
+
+
+
+
+
 
     def plot_XY(self):
 
@@ -4714,7 +4982,1234 @@ class cluster_analysis_plots(cluster_analysis):
         plt.show(block=False)
 
 
+    def plot_location_dependent_statistics(self,sv=False):
 
+
+        print('### plot location-specific, static statistics ###')
+
+        nSes = self.data['nSes']
+        nbin = self.data['nbin']
+
+        ## initialize some arrays
+        loc = np.round(self.fields['location'][...,0]).astype('int')
+
+        # par_keys = ['width','reliability','firingrate','max_rate','MI_value']
+        par_keys = ['width','oof_firingrate_adapt','if_firingrate_adapt','reliability','MI_value']
+        par_labels = ['$\sigma$','$\\nu^-$','$\\nu^*$','a','MI']
+        ranges = np.array([[0,20],[0,2.0],[0,6],[0,1],[0,1.]])
+
+        distr = {}
+        for key in par_keys:
+            distr[key] = np.zeros((nbin,2))*np.NaN
+
+
+        fig = plt.figure(figsize=(7,4),dpi=self.pl_dat.sv_opt['dpi'])
+
+        ### place field density
+        ax_im = plt.axes([0.1,0.35,0.325,0.2])
+        ax = plt.axes([0.1,0.12,0.325,0.11])
+        self.pl_dat.add_number(fig,ax_im,order=2)
+        s_range = 20
+
+        # ax = plt.axes([0.525,0.1,0.375,0.275])
+        fields = np.zeros((nbin,nSes))
+        for i,s in enumerate(np.where(self.status['sessions'])[0]):
+            # idx_PC = np.where(self.fields['status'][:,s,:]>=3)
+            idx_PC = np.where(self.status_fields[:,s,:])
+            # idx_PC = np.where(~np.isnan(self.fields['location'][:,s,:]))
+            # fields[s,:] = np.nansum(self.fields['p_x'][:,s,:,:],1).sum(0)
+            fields[:,s] = np.nansum(self.fields['p_x'][idx_PC[0],s,idx_PC[1],:],0)
+            # fields[:,s] /= fields[:,s].sum()
+            ax.plot(gauss_smooth(fields[:,s]/fields[:,s].sum(),1),'-',color=[0.5,0.5,0.5],linewidth=0.3,alpha=0.5)
+        fields = gauss_smooth(fields,(2,0))
+
+        im = ax_im.imshow(fields/fields.max(0),origin='lower',aspect='auto',cmap='hot')#,clim=[0,1])
+        ax_im.set_xlim([-0.5,nSes-0.5])
+        ax_im.set_xlim([-0.5+np.where(self.status['sessions'])[0][0],np.where(self.status['sessions'])[0][-1]-0.5])
+        ax_im.set_ylim([0,100])
+
+        cbaxes = plt.axes([0.44,0.35,0.01,0.2])
+        h_cb = plt.colorbar(im,cax=cbaxes)
+        h_cb.set_label('place field \ndensity',fontsize=8)
+        h_cb.set_ticks([])
+
+        ax_im.set_xlabel('session')
+        ax_im.set_ylabel('position')
+
+        self.pl_dat.add_number(fig,ax,order=3)
+        s_arr = [24,44,74]
+        # s_arr = [0,5,17,88]
+        # s_arr += np.where(self.status['sessions'])[0][0]
+        for i in range(len(s_arr)):
+            col = [0.7-0.35*i,0.7-0.35*i,0.7-0.35*i]
+            ax_im.annotate(text='',xy=(s_arr[i],100),xytext=(s_arr[i],110),fontsize=6,annotation_clip=False,arrowprops=dict(arrowstyle='->',color=col))
+            # ax_im.annotate(s='',xy=(s_arr[i+1]-1,100),xytext=(s_arr[i+1]-1,110),fontsize=6,annotation_clip=False,arrowprops=dict(arrowstyle='->',color=col))
+
+        ax.plot(np.nanmean(fields[:,1:15]/fields[:,1:15].max(0),1),color='k')
+
+        ax.set_xlim([0,100])
+        ax.set_yticks([])
+        ax.set_xlabel('position')
+        ax.set_ylabel('density')
+        self.pl_dat.remove_frame(ax,['top','right'])
+
+
+        # s_arr2 = np.array([1,14,34])
+        # s_arr2 += np.where(self.status['sessions'])[0][0]
+
+        props = dict(boxstyle='round', facecolor='w', alpha=0.8)
+        for j,s in enumerate(s_arr):
+            if s < nSes:
+                ax = plt.axes([0.075+0.12*j,0.65,0.1,0.275])
+                if j == 0:
+                    self.pl_dat.add_number(fig,ax,order=1,offset=[-100,50])
+                idxes_tmp = np.where(self.status_fields[:,s,:] & (self.stats['SNR_comp'][:,s]>2)[...,np.newaxis] & (self.stats['r_values'][:,s]>0)[...,np.newaxis] & (self.matching['score'][:,s,0]>0.5)[...,np.newaxis])
+                idxes = idxes_tmp[0]
+                sort_idx = np.argsort(self.fields['location'][idxes_tmp[0],s,idxes_tmp[1],0])
+                sort_idx = idxes[sort_idx]
+                nID = len(sort_idx)
+
+                firingmap = self.stats['firingmap'][sort_idx,s,:]
+                firingmap = gauss_smooth(firingmap,[0,2])
+                firingmap = firingmap - np.nanmin(firingmap,1)[:,np.newaxis]
+                # firingmap = firingmap / np.nanmax(firingmap,1)[:,np.newaxis]
+                im = ax.imshow(firingmap,aspect='auto',origin='upper',cmap='jet',clim=[0,5])
+                ax.text(5,nID*0.95,'n = %d'%nID,bbox=props,color='k',fontsize=6)
+                ax.text(95,nID/10,'Session %d'%(s+1),bbox=props,color='k',fontsize=6,ha='right')
+                self.pl_dat.remove_frame(ax)
+                ax.set_xticks([])
+                ax.set_yticks([])
+
+        cbaxes = plt.axes([0.425,0.825,0.01,0.1])
+        h_cb = plt.colorbar(im,cax=cbaxes)
+        h_cb.set_label('$Ca^{2+}$',fontsize=8)
+        h_cb.set_ticks([0,5])
+        h_cb.set_ticklabels(['low','high'])
+
+
+        ### location-specific parameters
+        ## width, rel, MI, max_rate
+        for j,key in enumerate(par_keys):
+            ax = plt.axes([0.6,0.8-j*0.17,0.375,0.13])
+            if j==0:
+                self.pl_dat.add_number(fig,ax,order=4)
+            if key in ['oof_firingrate_adapt','if_firingrate_adapt','MI_value']:
+                dat = self.stats[key]
+            elif key == 'width':
+                dat = self.fields[key][...,0]
+            else:
+                dat = self.fields[key]
+
+            for i in range(nbin):
+                idx = ((loc == i) & self.status_fields & ((np.arange(nSes)<15) & (np.arange(nSes)>5))[np.newaxis,:,np.newaxis])
+                if key in ['oof_firingrate_adapt','if_firingrate_adapt','MI_value']:
+                    idx = np.any(idx,-1)
+                distr[key][i,0] = np.nanmean(dat[idx])
+                distr[key][i,1] = np.nanstd(dat[idx])
+            idx = np.where(self.status_fields)
+            if key in ['oof_firingrate_adapt','if_firingrate_adapt','MI_value']:
+                ax.plot(self.fields['location'][idx[0],idx[1],idx[2],0],dat[idx[0],idx[1]],'.',color=[0.6,0.6,0.6],markersize=1,markeredgewidth=0,zorder=0)
+            else:
+                ax.plot(self.fields['location'][idx[0],idx[1],idx[2],0],dat[idx[0],idx[1],idx[2]],'.',color=[0.6,0.6,0.6],markersize=1,markeredgewidth=0,zorder=0)
+            self.pl_dat.plot_with_confidence(ax,np.linspace(0,nbin-1,nbin),distr[key][:,0],distr[key][:,1],col='tab:red')
+            ax.set_ylabel(par_labels[j],rotation='vertical',ha='left',va='center')
+            ax.yaxis.set_label_coords(-0.175,0.5)
+            self.pl_dat.remove_frame(ax,['top','right'])
+            if j < 4:
+                ax.set_xticklabels([])
+            else:
+                ax.set_xlabel('position [bins]')
+            ax.set_ylim(ranges[j,:])
+            ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+
+        # plt.tight_layout()
+
+        # ax = plt.axes([0.6,0.1,0.35,0.2])
+        # s1_shifts,s2_shifts,f1,f2 = np.unravel_index(self.compare['pointer'].col,(nSes,nSes,self.params['field_count_max'],self.params['field_count_max']))
+        # c_shifts = self.compare['pointer'].row
+        #
+        # Ds = s2_shifts-s1_shifts
+        # idx = np.where(Ds==1)[0]
+        # idx_shifts = self.compare['pointer'].data[idx].astype('int')-1
+        # shifts = np.abs(self.compare['shifts'][idx_shifts])
+        #
+        # loc_ref = self.fields['location'][c_shifts[idx],s1_shifts[idx],f1[idx],0].astype('int')
+        # shift_dist = np.zeros((nbin,2))
+        # for i in range(nbin):
+        #     shift_dist[i,0] = shifts[loc_ref==i].mean()
+        #     shift_dist[i,1] = shifts[loc_ref==i].std()
+        #
+        # pl_dat.plot_with_confidence(ax,range(nbin),shift_dist[:,0],shift_dist[:,1],col='k')
+        # ax.set_xlabel('position')
+
+
+        # ax = plt.axes([0.6,0.4,0.35,0.2])
+
+
+        plt.show(block=False)
+
+        if sv:
+            self.pl_dat.save_fig('PC_locationStats')
+
+
+
+        fields /= fields.sum(0)[np.newaxis,:]
+
+
+        plt.figure(figsize=(3,2),dpi=self.pl_dat.sv_opt['dpi'])
+
+
+
+        density = {}
+        density['reward'] = np.zeros(nSes)
+        density['gate'] = np.zeros(nSes)
+        density['others'] = np.zeros(nSes)
+        for s in np.where(self.status['sessions'])[0]:
+            zone_mask = {}
+            zone_mask['reward'] = np.zeros(nbin).astype('bool')
+            zone_mask['gate'] = np.zeros(nbin).astype('bool')
+            zone_mask['others'] = np.ones(nbin).astype('bool')
+
+            RW_pos = self.session_data['RW_pos'][s,:].astype('int')
+            GT_pos = self.session_data['GT_pos'][s,:].astype('int')
+            print('session %d'%s)
+            print(RW_pos)
+            zone_mask['reward'][RW_pos[0]:RW_pos[1]] = True
+            zone_mask['others'][zone_mask['reward']] = False
+            if ~np.isnan(self.session_data['GT_pos'][s,0]):
+                zone_mask['gate'][GT_pos[0]:GT_pos[1]] = True
+                zone_mask['others'][zone_mask['gate']] = False
+            zone_mask['others'][:10] = False
+            zone_mask['others'][-10:] = False
+            for key in ['reward','gate','others']:
+                density[key][s] = np.nanmean(fields[zone_mask[key],s],0)
+
+
+        # ax = plt.axes([0.1,0.6,0.25,0.35])
+        ax = plt.subplot(111)
+        self.pl_dat.add_number(fig,ax,order=1)
+        # print(fields.sum(0))
+        # print(fields[self.params['zone_mask']['reward'],:],0)
+        ax.plot(gauss_smooth(density['reward'],1),color='tab:red')
+        ax.plot(gauss_smooth(density['gate'],1),color='tab:green')
+        ax.plot(gauss_smooth(density['others'],1),color='tab:blue')
+        ax.set_ylim([0,0.02])
+        ax.set_xlim([0,np.where(self.status['sessions'])[0][-1]])
+        self.pl_dat.remove_frame(ax,['top','right'])
+
+        plt.tight_layout()
+        plt.show(block=False)
+
+
+        # ax_sig = plt.axes([0.1,0.15,0.15,0.2])
+        # pl_dat.add_number(fig,ax_sig,order=2)
+        # ax_MI = plt.axes([0.325,0.15,0.15,0.2])
+        # ax_rate1 = plt.axes([0.5,0.15,0.15,0.2])
+        # ax_rate2 = plt.axes([0.675,0.15,0.15,0.2])
+        # ax_rel = plt.axes([0.85,0.15,0.15,0.2])
+        # # s_arr = np.arange(0,nSes+s_range,s_range)
+        # # s_arr = np.array([0,5,17,50,87])
+        #
+        # for j in range(len(s_arr)-1):
+        #     idx = (self.status_fields & (self.stats['SNR']>2)[...,np.newaxis] & (self.stats['r_values']>0)[...,np.newaxis] & (self.matching['score'][...,0]>0.9)[...,np.newaxis] & ((np.arange(nSes)>=s_arr[j]) & (np.arange(nSes)<s_arr[j+1]))[np.newaxis,:,np.newaxis])
+        #     density = np.histogram(self.fields['location'][idx,0],np.linspace(0,nbin,nbin+1),density=True)
+        #     print(idx.shape)
+        #     col = [0.1+0.225*j,0.1+0.225*j,1]
+        #     # ax.plot(np.linspace(0,nbin-1,nbin),density[0],color=col,label='s %d-%d'%(s_arr[j]+1,s_arr[j+1]))
+        #
+        #     _,_,patches = ax_sig.hist(self.fields['width'][idx,0],np.linspace(0,20,51),color=col,cumulative=True,density=True,histtype='step')
+        #     patches[0].set_xy(patches[0].get_xy()[:-1])
+        #     _,_,patches =ax_rel.hist(self.fields['reliability'][idx],np.linspace(0,1,51),color=col,cumulative=True,density=True,histtype='step')
+        #     patches[0].set_xy(patches[0].get_xy()[:-1])
+        #     _,_,patches = ax_rate1.hist(self.stats['firingrate_adapt'][np.any(idx,-1)],np.linspace(0,0.5,51),color=col,cumulative=True,density=True,histtype='step')
+        #     patches[0].set_xy(patches[0].get_xy()[:-1])
+        #     _,_,patches =ax_rate2.hist(self.fields['max_rate'][idx],np.linspace(0,50,51),color=col,cumulative=True,density=True,histtype='step')
+        #     patches[0].set_xy(patches[0].get_xy()[:-1])
+        #     _,_,patches = ax_MI.hist(self.stats['MI_value'][np.any(idx,-1)],np.linspace(0,1,51),color=col,cumulative=True,density=True,histtype='step')
+        #     patches[0].set_xy(patches[0].get_xy()[:-1])
+        #     # ax.hist(self.fields['location'][idx,0],np.linspace(0,nbin-1,nbin),density=True,histtype='step')
+        # pl_dat.remove_frame(ax_sig,['top','right'])
+        # pl_dat.remove_frame(ax_MI,['top','right'])
+        # pl_dat.remove_frame(ax_rate1,['top','right'])
+        # pl_dat.remove_frame(ax_rate2,['top','right'])
+        # pl_dat.remove_frame(ax_rel,['top','right'])
+        # ax_sig.set_ylabel('fraction')
+        # ax_sig.set_xlabel('$\sigma$ [bins]')
+        # ax_MI.set_yticklabels([])
+        # ax_MI.set_xlabel('MI [bit]')
+        # ax_rate1.set_yticklabels([])
+        # ax_rate1.set_xlabel('$\\nu^-$ [Hz]')
+        # ax_rate2.set_yticklabels([])
+        # ax_rate2.set_xlabel('$\\nu^*$ [Hz]')
+        # ax_rel.set_yticklabels([])
+        # ax_rel.set_xlabel('a')
+        # # ax.set_xlabel('position [bins]')
+        # # ax.set_ylabel('density')
+        # # ax.legend(fontsize=8,loc='upper right',bbox_to_anchor=[1.25,1.2],handlelength=1)
+        # # pl_dat.remove_frame(ax,['top','right'])
+        # plt.show(block=False)
+
+        if sv:
+            self.pl_dat.save_fig('PC_timeStats')
+
+
+    def plot_time_dependent_statistics(self,sv=False):
+
+        print('### plot time-specific, static statistics ###')
+
+        nSes = self.data['nSes']
+        nbin = self.data['nbin']
+
+        fig = plt.figure(figsize=(7,5),dpi=self.pl_dat.sv_opt['dpi'])
+
+        ax_im = plt.axes([0.1,0.35,0.325,0.2])
+        ax = plt.axes([0.1,0.12,0.325,0.11])
+        self.pl_dat.add_number(fig,ax_im,order=2)
+        s_range = 20
+
+        # ax = plt.axes([0.525,0.1,0.375,0.275])
+        fields = np.zeros((nbin,nSes))
+        for i,s in enumerate(np.where(self.status['sessions'])[0]):
+            # idx_PC = np.where(self.fields['status'][:,s,:]>=3)
+            idx_PC = np.where(self.status_fields[:,s,:])
+            # idx_PC = np.where(~np.isnan(self.fields['location'][:,s,:]))
+            # fields[s,:] = np.nansum(self.fields['p_x'][:,s,:,:],1).sum(0)
+            fields[:,s] = np.nansum(self.fields['p_x'][idx_PC[0],s,idx_PC[1],:],0)
+            fields[:,s] /= fields[:,s].sum()
+            # ax.plot(gauss_smooth(fields[:,s],1),'-',color=[0.5,0.5,0.5],linewidth=0.3,alpha=0.5)
+        fields = gauss_smooth(fields,(2,0))
+
+        im = ax_im.imshow(fields,origin='lower',aspect='auto',cmap='hot',interpolation='none')#,clim=[0,1])
+        ax_im.set_xlim([-0.5,nSes-0.5])
+        ax_im.set_xlim([-0.5+np.where(self.status['sessions'])[0][0],np.where(self.status['sessions'])[0][-1]-0.5])
+        ax_im.set_ylim([0,100])
+
+        cbaxes = plt.axes([0.44,0.35,0.01,0.2])
+        h_cb = plt.colorbar(im,cax=cbaxes)
+        h_cb.set_label('place field \ndensity',fontsize=8)
+        h_cb.set_ticks([])
+
+        ax_im.set_xlabel('session')
+        ax_im.set_ylabel('position')
+
+        self.pl_dat.add_number(fig,ax,order=3)
+        s_arr = [2,9,15,30]
+        s_arr2 = [0,5,17,88,97]
+        # s_arr += np.where(self.status['sessions'])[0][0]
+        for i in range(len(s_arr)):
+            col = [0.8-0.2*i,0.8-0.2*i,0.8-0.2*i]
+            ax_im.annotate(text='',xy=(s_arr[i],100),xytext=(s_arr[i],110),fontsize=6,annotation_clip=False,arrowprops=dict(arrowstyle='->',color=col))
+            # ax_im.annotate(s='',xy=(s_arr[i+1]-1,100),xytext=(s_arr[i+1]-1,110),fontsize=6,annotation_clip=False,arrowprops=dict(arrowstyle='->',color=col))
+
+            ax.plot(np.nanmean(fields[:,s_arr2[i]:s_arr2[i+1]],1),color=col)
+
+        ax.set_xlim([0,100])
+        ax.set_yticks([])
+        ax.set_xlabel('position')
+        ax.set_ylabel('density')
+        self.pl_dat.remove_frame(ax,['top','right'])
+
+
+        # s_arr2 = np.array([1,14,34])
+        # s_arr2 += np.where(self.status['sessions'])[0][0]
+
+        props = dict(boxstyle='round', facecolor='w', alpha=0.8)
+        for j,s in enumerate(s_arr):
+            if s < nSes:
+                ax = plt.axes([0.075+0.1*j,0.65,0.075,0.275])
+                if j == 0:
+                    self.pl_dat.add_number(fig,ax,order=1,offset=[-100,50])
+                idxes_tmp = np.where(self.status_fields[:,s,:] & (self.stats['SNR_comp'][:,s]>2)[...,np.newaxis] & (self.stats['r_values'][:,s]>0)[...,np.newaxis] & (self.matching['score'][:,s,0]>0.5)[...,np.newaxis])
+                idxes = idxes_tmp[0]
+                sort_idx = np.argsort(self.fields['location'][idxes_tmp[0],s,idxes_tmp[1],0])
+                sort_idx = idxes[sort_idx]
+                nID = len(sort_idx)
+
+                firingmap = self.stats['firingmap'][sort_idx,s,:]
+                firingmap = gauss_smooth(firingmap,[0,2])
+                firingmap = firingmap - np.nanmin(firingmap,1)[:,np.newaxis]
+                # firingmap = firingmap / np.nanmax(firingmap,1)[:,np.newaxis]
+                im = ax.imshow(firingmap,aspect='auto',origin='upper',cmap='jet',clim=[0,5])
+                ax.text(5,nID*0.95,'n = %d'%nID,bbox=props,color='k',fontsize=6)
+                ax.text(95,nID/10,'Session %d'%(s+1),bbox=props,color='k',fontsize=6,ha='right')
+                self.pl_dat.remove_frame(ax)
+                ax.set_xticks([])
+                ax.set_yticks([])
+
+        cbaxes = plt.axes([0.46,0.825,0.01,0.1])
+        h_cb = plt.colorbar(im,cax=cbaxes)
+        h_cb.set_label('$Ca^{2+}$',fontsize=8)
+        h_cb.set_ticks([0,5])
+        h_cb.set_ticklabels(['low','high'])
+
+        RW_rec = np.zeros(nSes)
+        slowing = np.zeros(nSes)
+        sig = np.zeros((nSes,3))*np.NaN
+        if_fr = np.zeros((nSes,3))*np.NaN
+        oof_fr = np.zeros((nSes,2,3))*np.NaN
+        rel = np.zeros((nSes,3))*np.NaN
+        for i,s in enumerate(np.where(self.status['sessions'])[0]):
+            try:
+                RW_rec[s] = self.behavior['performance'][s]['RW_reception'].mean()
+                slowing[s] = self.behavior['performance'][s]['slowDown'].mean()
+                idx_fields = np.where(self.status_fields[:,s,:])
+            except:
+                # print('pass')
+                continue
+                # pass
+            # print(idx_fields)
+
+            try:
+                oof_fr[s,0,0] = self.stats['oof_firingrate_adapt'][self.status['activity'][:,s,1]&(~self.status['activity'][:,s,2]),s].mean()
+                oof_fr[s,0,1:] = np.nanpercentile(self.stats['oof_firingrate_adapt'][self.status['activity'][:,s,1]&(~self.status['activity'][:,s,2]),s],[5,95])
+                oof_fr[s,1,0] = self.stats['oof_firingrate_adapt'][self.status['activity'][:,s,2],s].mean()
+                oof_fr[s,1,1:] = np.nanpercentile(self.stats['oof_firingrate_adapt'][self.status['activity'][:,s,2],s],[5,95])
+            except:
+                pass
+
+            
+            if len(idx_fields[0]) > 0:
+                sig[s,0] = self.fields['width'][idx_fields[0],s,idx_fields[1]].mean()
+                sig[s,1:] = np.nanpercentile(self.fields['width'][idx_fields[0],s,idx_fields[1]],[5,95])
+
+                if_fr[s,0] = self.stats['if_firingrate_adapt'][idx_fields[0],s,idx_fields[1]].mean()
+                if_fr[s,1:] = np.nanpercentile(self.stats['if_firingrate_adapt'][idx_fields[0],s,idx_fields[1]],[5,95])
+
+                rel[s,0] = self.fields['reliability'][idx_fields[0],s,idx_fields[1]].mean()
+                rel[s,1:] = np.nanpercentile(self.fields['reliability'][idx_fields[0],s,idx_fields[1]],[5,95])
+
+            
+        ax = plt.axes([0.65,0.85,0.3,0.1])
+        ax.plot(np.where(self.status['sessions'])[0],self.status['activity'][:,self.status['sessions'],2].sum(0)/self.behavior['time_active'][self.status['sessions']],'k.',markersize=2)
+        self.pl_dat.remove_frame(ax,['top','right'])
+        ax.set_ylabel('$t_{active}$')
+        ax.set_xticklabels([])
+
+        ax = plt.axes([0.65,0.7,0.3,0.1])
+        self.pl_dat.plot_with_confidence(ax,range(nSes),sig[:,0],sig[:,1:].T,col='b')
+        # mask_sig = np.ma.masked_array(self.fields['width'][...,0],mask=~self.status_fields)
+        # ax.plot(mask_sig.mean(2).mean(0),'b')
+        ax.set_ylim([0,20])
+        self.pl_dat.remove_frame(ax,['top','right'])
+        ax.set_ylabel('$\\sigma$')
+        ax.set_xticklabels([])
+
+        ax = plt.axes([0.65,0.55,0.3,0.1])
+        self.pl_dat.plot_with_confidence(ax,range(nSes),oof_fr[:,0,0],oof_fr[:,0,1:].T,col='k')
+        self.pl_dat.plot_with_confidence(ax,range(nSes),oof_fr[:,1,0],oof_fr[:,1,1:].T,col='b')
+        ax.set_xticklabels([])
+        ax.set_ylim([0,3.])
+        self.pl_dat.remove_frame(ax,['top','right'])
+        ax.set_ylabel('$\\nu^-$')
+
+        ax = plt.axes([0.65,0.4,0.3,0.1])
+        self.pl_dat.plot_with_confidence(ax,range(nSes),if_fr[:,0],if_fr[:,1:].T,col='b')
+        ax.set_ylim([0,10.])
+        self.pl_dat.remove_frame(ax,['top','right'])
+        ax.set_ylabel('$\\nu^*$')
+        ax.set_xticklabels([])
+
+        ax = plt.axes([0.65,0.25,0.3,0.1])
+        self.pl_dat.plot_with_confidence(ax,range(nSes),rel[:,0],rel[:,1:].T,col='b')
+        ax.set_ylim([0,1])
+        self.pl_dat.remove_frame(ax,['top','right'])
+        ax.set_ylabel('$a$')
+        ax.set_xticklabels([])
+
+        ax = plt.axes([0.65,0.1,0.3,0.1])
+        mask_MI = np.ma.masked_array(self.stats['MI_value'],mask=~(self.status['activity'][...,1]&(~self.status['activity'][...,2])))
+        self.pl_dat.plot_with_confidence(ax,range(nSes),mask_MI.mean(0),mask_MI.std(0),col='k')
+        # ax.plot(mask_MI.mean(),'k')
+        mask_MI = np.ma.masked_array(self.stats['MI_value'],mask=~self.status['activity'][...,2])
+        self.pl_dat.plot_with_confidence(ax,range(nSes),mask_MI.mean(0),mask_MI.std(0),col='b')
+        # ax.plot(mask_MI.mean(0),'b')
+        ax.set_ylim([0,1.5])
+        self.pl_dat.remove_frame(ax,['top','right'])
+        ax.set_ylabel('MI')
+
+
+
+        # ax.plot(self.sessions['time_active'],self.status['activity'][...,2].sum(0),'k.',markersize=2)
+        plt.show(block=False)
+
+        if sv:
+            self.pl_dat.save_fig('timedep_parameters')
+
+
+    def plot_neuron_cluster_stats(self,sv=False):
+
+        print('plot cluster specific statistics (stability, etc)')
+
+        nC = self.data['nC']
+        status, status_dep = get_status_arr(self)
+        status_arr = ['act','code','stable']
+
+        # ds_max = 2
+        # nC_good = np.sum(self.status['clusters'])
+
+        # reprocess = True
+        # if (not ('p_post_c' in self.stats.keys())) or reprocess:
+        #     self.stats['p_post_c'] = {}
+        #     for status_key in status_arr:
+        #         self.stats['p_post_c'][status_key] = {}
+        #         for status2_key in status_arr:
+        #             self.stats['p_post_c'][status_key][status2_key] = np.zeros((nC,ds_max+1,2,2))*np.NaN
+
+        #     for ds in range(1,ds_max):
+
+        #         ### activity -> coding
+        #         ## what's the general state before obtaining a place field? (active / silent?; above chance level?
+        #         for c in tqdm(np.where(self.status['clusters'])[0]):
+
+        #             counts = {}
+        #             for status_key in status_arr:
+        #                 counts[status_key] = {}
+        #                 for status2_key in status_arr:
+        #                     counts[status_key][status2_key] = np.zeros(3)
+
+        #             for s in np.where(self.status['sessions'])[0][:-ds]:
+        #                 if self.status['sessions'][s+ds]:
+
+        #                     for status_key in status_arr:
+        #                         if status[status_key][c,s]:
+        #                             for status2_key in status_arr:
+        #                                 if status_dep[status2_key][c,s+ds]:
+        #                                     counts[status_key][status2_key][0] += 1
+
+        #                                 if status[status2_key][c,s+ds] & status_dep[status2_key][c,s+ds]:
+        #                                     counts[status_key][status2_key][1] += 1
+        #                                 elif status_dep[status2_key][c,s+ds]:
+        #                                     counts[status_key][status2_key][2] += 1
+
+        #             for status_key in status_arr:
+        #                 for status2_key in status_arr:
+        #                     self.stats['p_post_c'][status_key][status2_key][c,ds,0,0] = counts[status_key][status2_key][1]/counts[status_key][status2_key][0] if counts[status_key][status2_key][0]>0 else np.NaN
+        #                     self.stats['p_post_c'][status_key][status2_key][c,ds,0,1] = counts[status_key][status2_key][2]/counts[status_key][status2_key][0] if counts[status_key][status2_key][0]>0 else np.NaN
+
+
+        # idx_c = np.where(self.status['clusters'])[0]
+
+        subpop_lim = 0.95
+        idx_c_stable = np.where(self.stats['p_post_c']['stable']['act'][:,1,0]>subpop_lim)
+        idx_c_code = np.where(self.stats['p_post_c']['code']['act'][:,1,0]>subpop_lim)
+
+        plt.figure(figsize=(7,5),dpi=self.pl_dat.sv_opt['dpi'])
+
+        ax = plt.subplot(441)
+        ax.hist(self.stats['p_post_c']['act']['act'][:,1,0],np.linspace(0,1,51))
+        ax.set_xlabel('$p(\\alpha_{s+1}^+|\\alpha_s^+)$')
+        ax = plt.subplot(442)
+        ax.hist(self.stats['p_post_c']['code']['act'][:,1,0],np.linspace(0,1,51))
+        ax.plot([subpop_lim,subpop_lim],[0,ax.get_ylim()[1]],'k--')
+        ax.set_xlabel('$p(\\alpha_{s+1}^+|\\beta_s^+)$')
+        ax = plt.subplot(445)
+        ax.hist(self.stats['p_post_c']['stable']['act'][:,1,0],np.linspace(0,1,51))
+        ax.plot([subpop_lim,subpop_lim],[0,ax.get_ylim()[1]],'k--')
+        ax.set_xlabel('$p(\\alpha_{s+1}^+|\\gamma_s^+)$')
+        ax = plt.subplot(446)
+        ax.hist(self.stats['p_post_c']['stable']['code'][:,1,0],np.linspace(0,1,51))
+        ax.set_xlabel('$p(\\beta_{s+1}^+|\\beta_s^+)$')
+
+        dense = True
+        ax = plt.subplot(4,2,6)
+        _,_,patches = ax.hist(self.stats['p_post_c']['act']['act'][:,1,0],np.linspace(0,1,51),alpha=0.5,color='k',cumulative=True,histtype='step',density=dense,label='$\\alpha^+$')
+        patches[0].set_xy(patches[0].get_xy()[:-1])
+        _,_,patches = ax.hist(self.stats['p_post_c']['code']['act'][:,1,0],np.linspace(0,1,51),alpha=0.5,color='b',cumulative=True,histtype='step',density=dense,label='$\\beta^+$')
+        patches[0].set_xy(patches[0].get_xy()[:-1])
+        _,_,patches = ax.hist(self.stats['p_post_c']['stable']['act'][:,1,0],np.linspace(0,1,51),alpha=0.5,color='r',cumulative=True,histtype='step',density=dense,label='$\\gamma^+$')
+        patches[0].set_xy(patches[0].get_xy()[:-1])
+        ax.set_xlabel('$p(\\alpha^+|X)$')
+        ax.legend(fontsize=8,loc='upper left')
+
+        ax = plt.subplot(4,2,8)
+        _,_,patches = ax.hist(self.stats['p_post_c']['act']['code'][:,1,0],np.linspace(0,1,51),alpha=0.5,color='k',cumulative=True,histtype='step',density=dense,label='$\\alpha^+$')
+        patches[0].set_xy(patches[0].get_xy()[:-1])
+        _,_,patches = ax.hist(self.stats['p_post_c']['code']['code'][:,1,0],np.linspace(0,1,51),alpha=0.5,color='b',cumulative=True,histtype='step',density=dense,label='$\\beta^+$')
+        patches[0].set_xy(patches[0].get_xy()[:-1])
+        _,_,patches = ax.hist(self.stats['p_post_c']['stable']['code'][:,1,0],np.linspace(0,1,51),alpha=0.5,color='r',cumulative=True,histtype='step',density=dense,label='$\\gamma^+$')
+        patches[0].set_xy(patches[0].get_xy()[:-1])
+        ax.set_xlabel('$p(\\beta^+|X)$')
+        ax.legend(fontsize=8,loc='upper left')
+
+        par_key = 'MI_value'
+        ax = plt.subplot(443)
+        ax.hist(self.fields['location'][...,0].flat,np.linspace(0,100,51),density=True,alpha=0.5)
+        # ax.hist(self.fields['location'][idx_c_stable,:,:,0].flat,np.linspace(0,100,51),density=True,alpha=0.5)
+        idx_stable = np.where(status['stable']==1)
+        # print(idx_stable.shape)
+        # c_idx_stable = idx_c[idx_stable[0]]
+        ax.hist(self.fields['location'][idx_stable[0],idx_stable[1],:,0].flat,np.linspace(0,100,51),density=True,alpha=0.5)
+        ax.set_xlabel('$\\theta (> p(\\alpha|\\gamma))$')
+
+        ax = plt.subplot(444)
+        try:
+            ax.hist(self.fields[par_key].flat,np.linspace(0,np.nanmax(self.fields[par_key]),51),density=True,alpha=0.5)
+            ax.hist(self.fields[par_key][idx_stable[0],...].flat,np.linspace(0,np.nanmax(self.fields[par_key]),51),density=True,alpha=0.5)
+        except:
+            ax.hist(self.stats[par_key].flat,np.linspace(0,np.nanmax(self.stats[par_key]),51),density=True,alpha=0.5)
+            ax.hist(self.stats[par_key][idx_stable[0],...].flat,np.linspace(0,np.nanmax(self.stats[par_key]),51),density=True,alpha=0.5)
+
+
+
+        ax = plt.subplot(447)
+        ax.hist(self.fields['location'][...,0].flat,np.linspace(0,100,51),density=True,alpha=0.5)
+        ax.hist(self.fields['location'][idx_c_code,:,:,0].flat,np.linspace(0,100,51),density=True,alpha=0.5)
+        ax.set_xlabel('$\\theta (> p(\\alpha|\\beta))$')
+
+        ax = plt.subplot(448)
+        try:
+            ax.hist(self.fields[par_key].flat,np.linspace(0,np.nanmax(self.fields[par_key]),51),density=True,alpha=0.5)
+            ax.hist(self.fields[par_key][idx_c_code,...].flat,np.linspace(0,np.nanmax(self.fields[par_key]),51),density=True,alpha=0.5)
+        except:
+            ax.hist(self.stats[par_key].flat,np.linspace(0,np.nanmax(self.stats[par_key]),51),density=True,alpha=0.5)
+            ax.hist(self.stats[par_key][idx_c_code,...].flat,np.linspace(0,np.nanmax(self.stats[par_key]),51),density=True,alpha=0.5)
+        # ax = plt.subplot(444)
+        # ax.hist(self.fields['reliability'][idx_c_stable,:,:,0].flat,np.linspace(0,100,101))
+
+        ax = plt.subplot(223)
+        # ax.scatter(self.stats['p_post_c']['act'][:,1,0,0]+0.02*np.random.rand(nC_good),self.stats['p_post_c']['code'][:,1,0,1]+0.02*np.random.rand(nC_good),s=self.status['activity'][...,1].sum(1)/40,color='k',edgecolors='none')
+        ax.scatter(self.stats['p_post_c']['act']['act'][:,1,0]+0.02*np.random.rand(nC),self.stats['p_post_c']['code']['code'][:,1,0]+0.02*np.random.rand(nC),s=self.status['activity'][...,1].sum(1)/40,color='k',edgecolors='none')
+        ax.set_xlabel('$p(\\alpha_{s+1}^+|\\alpha_{s}^+)$')
+        ax.set_ylabel('$p(\\beta_{s+1}^+|\\beta_{s}^+)$')
+
+        plt.tight_layout()
+        plt.show(block=False)
+
+        if sv:
+            self.pl_dat.save_fig('individual_neurons')
+
+
+        plt.figure()
+        plt.plot()
+        plt.show(block=False)
+
+
+
+
+    def plot_time_vs_experience(self,sv=False):
+
+        print('### plot time dependence of dynamics ###')
+
+        nSes = self.data['nSes']
+        ### ds > 0
+        # p = {}
+        SD = 1.96
+        maxSes = 10
+        sig_theta = self.stability['all']['mean'][0,2]
+
+        self.mouse_data = {}
+        self.mouse_data['t_measures'] = np.linspace(0,200,nSes)
+
+        trials = np.cumsum(self.behavior['trial_ct'])
+        diff = {'t':        (self.mouse_data['t_measures'][np.newaxis,:]-self.mouse_data['t_measures'][:,np.newaxis]).astype('int'),
+                'nights':   ((self.mouse_data['t_measures'][np.newaxis,:]-self.mouse_data['t_measures'][:,np.newaxis]).astype('int')+10)//24,
+                's':        (np.arange(nSes)[np.newaxis,:] - np.arange(nSes)[:,np.newaxis]).astype('int'),
+                'trials':    ((trials[np.newaxis,:] - trials[:,np.newaxis]) // 10).astype('int')*10}
+
+
+        s_bool = np.zeros(nSes,'bool')
+        s_bool[17:87] = True
+        # s_bool[D.sessions[mouse]['steady'][0]:D.sessions[mouse]['steady'][1]] = True
+        s_bool[~self.status['sessions']] = False
+
+        t_start = time.time()
+        s1_shifts,s2_shifts,f1,f2 = np.unravel_index(self.compare['pointer'].col,(nSes,nSes,self.params['field_count_max'],self.params['field_count_max']))
+        c_shifts = self.compare['pointer'].row
+
+        dT_shifts = self.mouse_data['t_measures'][s2_shifts]-self.mouse_data['t_measures'][s1_shifts]
+        nights_shifts = (dT_shifts+10)//24
+
+        # print(diff)
+        arr = {}#'s':     np.unique(np.triu(diff['s'])),
+               #'t':     np.unique(np.triu(diff['t']))}
+        for key in diff.keys():
+            arr[key] = np.unique(np.triu(diff[key]))
+        # ds_arr = np.unique(np.triu(diff['s']))
+        # dt_arr = np.unique(np.triu(diff['t']))
+
+        def get_p_rec(diff,compare,key1,key2,s_bool):
+
+            key1_arr = np.unique(np.triu(diff[key1]))
+            key2_arr = np.unique(np.triu(diff[key2]))
+
+            p_rec = {'act':     np.zeros((len(key1_arr),len(key2_arr),2))*np.NaN,
+                     'PC':      np.zeros((len(key1_arr),len(key2_arr),2))*np.NaN,
+                     'PF':      np.zeros((len(key1_arr),len(key2_arr),2))*np.NaN}
+            pval = {'act':  np.zeros(len(key1_arr))*np.NaN,
+                    'PC':   np.zeros(len(key1_arr))*np.NaN,
+                    'PF':   np.zeros(len(key1_arr))*np.NaN}
+
+            s1_shifts,s2_shifts,f1,f2 = np.unravel_index(compare['pointer'].col,(nSes,nSes,self.params['field_count_max'],self.params['field_count_max']))
+            c_shifts = compare['pointer'].row
+            Ds = s2_shifts-s1_shifts
+
+            N_ref = {}
+            tmp = {}
+            for dx in key1_arr:#min(nSes,30)):
+                x = np.where(key1_arr==dx)
+
+                x_tmp = {'act': [],
+                         'PC':  [],
+                         'PF':  []}
+
+                for dy in np.unique(diff[key2][diff[key1]==dx]):
+                    y = np.where(key2_arr==dy)
+
+                    for key in p_rec.keys():
+                        N_ref[key]=0
+                        tmp[key] = []
+
+                    s1_arr, s2_arr = np.where((diff[key1]==dx) & (diff[key2]==dy))
+
+                    for s1,s2 in zip(s1_arr,s2_arr):
+                        if s_bool[s1] & s_bool[s2] & (s1!=s2):
+                            overlap = self.status['activity'][self.status['activity'][:,s1,1],s2,1].sum(0).astype('float')
+                            N_ref['act'] = self.status['activity'][:,s1,1].sum(0)
+                            tmp['act'].append(overlap/N_ref['act'])
+
+                            overlap_PC = self.status['activity'][self.status['activity'][:,s1,2],s2,2].sum(0).astype('float')
+                            N_ref['PC'] = self.status['activity'][self.status['activity'][:,s1,2],s2,1].sum(0)
+                            tmp['PC'].append(overlap_PC/N_ref['PC'])
+
+                            idx = np.where((s1_shifts==s1) & (s2_shifts==s2))[0]
+                            N_ref['PF'] = len(idx)
+                            idx_shifts = self.compare['pointer'].data[idx].astype('int')-1
+                            shifts = self.compare['shifts'][idx_shifts]
+                            N_stable = (np.abs(shifts)<(SD*sig_theta)).sum()
+
+                            tmp['PF'].append(N_stable/N_ref['PF'])
+
+                    for key in p_rec.keys():
+                        if N_ref[key]>0:
+                            p_rec[key][x,y,:] = [np.mean(tmp[key]),np.std(tmp[key])]
+                            x_tmp[key].append(tmp[key])
+
+                # print(x_tmp)
+                for key in p_rec.keys():
+                    if len(x_tmp[key])>1:
+                        try:
+                            # print(x_tmp[key])
+                            # res = sstats.f_oneway(*x_tmp[key])
+                            res = sstats.kruskal(*x_tmp[key])
+                            # res = sstats.mannwhitneyu(*x_tmp[key])
+                            # res = sstats.ttest_ind(*x_tmp[key])
+                            # print(res)
+                            pval[key][x] = res.pvalue
+                        except:
+                            pass
+                ### now, do anova to test
+
+            return p_rec,pval
+        # print(sig_theta)
+        # key1 = 't'
+        # key2 = 's'
+        key_arr = ['s','nights','trials','t']
+        p_rec = {}
+        pval = {}
+        for i,key1 in enumerate(key_arr):
+            for key2 in key_arr[:]:
+                key_pair = '%s_%s'%(key1,key2)
+                p_rec[key_pair],pval[key_pair] = get_p_rec(diff,self.compare,key1,key2,s_bool)
+
+        col = ['k','tab:red','tab:blue']
+        fig = plt.figure(figsize=(7,5),dpi=self.pl_dat.sv_opt['dpi'])
+
+        # print(diff)
+        ax = plt.axes([0.1,0.85,0.125,0.11])
+        self.pl_dat.add_number(fig,ax,order=1,offset=[-175,25])
+        plt.plot(diff['s'][0,:],'k.',markersize=1.5)
+        ax.set_ylabel('$\sum$ s')
+        ax.yaxis.set_label_coords(-0.4,0.5)
+        self.pl_dat.remove_frame(ax,['top','right'])
+        ax1 = plt.axes([0.325,0.85,0.25,0.11])
+        self.pl_dat.add_number(fig,ax1,order=2,offset=[-125,25])
+
+        ax = plt.axes([0.1,0.6,0.125,0.11])
+        self.pl_dat.add_number(fig,ax,order=3)
+        plt.plot(diff['nights'][0,:],'k.',markersize=1.5)
+        ax.set_ylabel('$\sum$ nights')
+        ax.yaxis.set_label_coords(-0.4,0.5)
+        self.pl_dat.remove_frame(ax,['top','right'])
+        ax2 = plt.axes([0.325,0.6,0.25,0.11])
+        self.pl_dat.add_number(fig,ax2,order=4,offset=[-125,50])
+
+        ax = plt.axes([0.1,0.35,0.125,0.11])
+        self.pl_dat.add_number(fig,ax,order=6)
+        plt.plot(diff['trials'][0,:],'k.',markersize=1.5)
+        ax.set_ylabel('$\sum$ trials')
+        ax.yaxis.set_label_coords(-0.4,0.5)
+        self.pl_dat.remove_frame(ax,['top','right'])
+        ax3 = plt.axes([0.325,0.35,0.25,0.11])
+        self.pl_dat.add_number(fig,ax3,order=7,offset=[-125,50])
+
+        ax = plt.axes([0.1,0.1,0.125,0.11])
+        self.pl_dat.add_number(fig,ax,order=9)
+        ax.plot(diff['t'][0,:],'k.',markersize=1.5)
+        ax.set_ylabel('$\sum $ t')
+        ax.yaxis.set_label_coords(-0.4,0.5)
+        ax.set_xlabel('$\sum s$')
+        self.pl_dat.remove_frame(ax,['top','right'])
+        ax4 = plt.axes([0.325,0.1,0.25,0.11])
+        self.pl_dat.add_number(fig,ax4,order=10,offset=[-125,50])
+        key_label = ['activation','coding','field stability']
+        for i,key in enumerate(p_rec['s_t'].keys()):
+            mask = ~np.isnan(np.nanmean(p_rec['s_t'][key][...,0],1))
+            self.pl_dat.plot_with_confidence(ax1,arr['s'][mask],np.nanmean(p_rec['s_t'][key][...,0],1)[mask],np.nanstd(p_rec['s_t'][key][...,0],1)[mask],col=col[i],label=key_label[i])
+            mask = ~np.isnan(np.nanmean(p_rec['s_t'][key][...,0],0))
+            self.pl_dat.plot_with_confidence(ax4,arr['t'][mask],np.nanmean(p_rec['s_t'][key][...,0],0)[mask],np.nanstd(p_rec['s_t'][key][...,0],0)[mask],col=col[i])
+            mask = ~np.isnan(np.nanmean(p_rec['trials_nights'][key][...,0],1))
+            self.pl_dat.plot_with_confidence(ax3,arr['trials'][mask],np.nanmean(p_rec['trials_nights'][key][...,0],1)[mask],np.nanstd(p_rec['trials_nights'][key][...,0],1)[mask],col=col[i])
+            mask = ~np.isnan(np.nanmean(p_rec['trials_nights'][key][...,0],0))
+            self.pl_dat.plot_with_confidence(ax2,arr['nights'][mask],np.nanmean(p_rec['trials_nights'][key][...,0],0)[mask],np.nanstd(p_rec['trials_nights'][key][...,0],0)[mask],col=col[i])
+            # pl_dat.add_number(fig,ax,order=6)
+        ax1.legend(fontsize=12,loc='lower left',bbox_to_anchor=[1.1,-0.3])
+        ax1.set_ylim([0,1])
+        ax2.set_ylim([0,1])
+        ax3.set_ylim([0,1])
+        ax4.set_ylim([0,1])
+        ax1.set_xlabel('$\Delta s$')
+        ax2.set_xlabel('$\Delta$ nights')
+        ax3.set_xlabel('$\Delta$ trials')
+        ax4.set_xlabel('$\Delta t$')
+        ax1.set_ylabel('$p(+|+)$',rotation='horizontal',fontsize=8)
+        ax1.yaxis.set_label_coords(0.1,1.1)
+        ax2.set_ylabel('$p(+|+)$',rotation='horizontal',fontsize=8)
+        ax2.yaxis.set_label_coords(0.1,1.1)
+        ax3.set_ylabel('$p(+|+)$',rotation='horizontal',fontsize=8)
+        ax3.yaxis.set_label_coords(0.1,1.1)
+        ax4.set_ylabel('$p(+|+)$',rotation='horizontal',fontsize=8)
+        ax4.yaxis.set_label_coords(0.1,1.1)
+        self.pl_dat.remove_frame(ax1,['top','right'])
+        self.pl_dat.remove_frame(ax2,['top','right'])
+        self.pl_dat.remove_frame(ax3,['top','right'])
+        self.pl_dat.remove_frame(ax4,['top','right'])
+
+        key1 = 's'
+        for j,key2 in enumerate(key_arr):
+            if key1 == key2:
+                continue
+            key_pairs = '%s_%s'%(key1,key2)
+            key_pairs_rev = '%s_%s'%(key2,key1)
+
+            ax = plt.axes([0.7,0.85-j*0.25,0.125,0.125])
+            self.pl_dat.add_number(fig,ax,order=2+j*3)
+            ax.plot([0,arr[key1][-1]],[0.01,0.01],'k--',linewidth=0.5)
+            mask = ~np.isnan(np.nanmean(p_rec[key_pairs][key][...,0],1))
+            for i,key in enumerate(p_rec['s_t'].keys()):
+                pval[key_pairs][key][pval[key_pairs][key]<10**(-6)] = 10**(-6)
+                ax.plot(arr[key1][mask],pval[key_pairs][key][mask],'.',color=col[i],markersize=2)
+            ax.set_yscale('log')
+            ax.set_ylim([0.9*10**(-6),1])
+            ax.set_xlim([0,arr[key1][mask][-1]])
+            ax.set_ylabel('p-value',fontsize=8,rotation='horizontal')
+            ax.yaxis.set_label_coords(-0.2,1.1)
+
+            ax.set_xlabel('$\Delta $%s'%key1)
+            ax = plt.axes([0.85,0.85-j*0.25,0.125,0.125])
+            ax.plot([0,arr[key2][-1]],[0.01,0.01],'k--',linewidth=0.5)
+            mask = ~np.isnan(np.nanmean(p_rec[key_pairs_rev][key][...,0],1))
+            for i,key in enumerate(p_rec['s_t'].keys()):
+                pval[key_pairs_rev][key][pval[key_pairs_rev][key]<10**(-6)] = 10**(-6)
+                ax.plot(arr[key2][mask],pval[key_pairs_rev][key][mask],'.',color=col[i],markersize=2)
+            ax.set_xlabel('$\Delta $%s'%key2)
+            ax.set_yscale('log')
+            ax.set_yticklabels([])
+            ax.set_ylim([0.9*10**(-6),1])
+            ax.set_xlim([0,arr[key2][mask][-1]])
+
+        # ax2.set_xlabel('$\Delta$ nights')
+        # ax3.set_xlabel('$\Delta t$')
+        plt.show(block=False)
+
+        if sv:
+            self.pl_dat.save_fig('time_in_HC')
+        return
+
+
+
+        print(self.mouse_data['t_measures'][s2_shifts])
+
+        # print(c_shifts.shape)
+        # print(dT_shifts.shape)
+        dT_arr = [4,20,24,28,44,48,52,64,68,72,84,88,92]
+
+        # N_stable = np.zeros(nSes)*np.NaN
+        # N_total = np.zeros(nSes)*np.NaN     ### number of PCs which could be stable
+        # fig = plt.figure()
+
+        p_rec = {'act':     np.zeros((nSes,nSes))*np.NaN,
+                 'PC':      np.zeros((nSes,nSes))*np.NaN,
+                 'PF':      np.zeros((nSes,nSes))*np.NaN}
+
+        for ds in range(1,nSes):#min(nSes,30)):
+            session_bool = np.where(np.pad(self.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(self.status['sessions'][:],(0,0),constant_values=False))[0]
+            for s1 in session_bool:
+                overlap = self.status['activity'][self.status['activity'][:,s1,1],s1+ds,1].sum(0).astype('float')
+                N_ref = self.status['activity'][:,s1,1].sum(0)
+                p_rec['act'][ds,s1] = (overlap/N_ref)
+
+                overlap = self.status['activity'][self.status['activity'][:,s1,2],s1+ds,2].sum(0).astype('float')
+                N_ref = self.status['activity'][self.status['activity'][:,s1,2],s1+ds,1].sum(0)
+                p_rec['PC'][ds,s1] = (overlap/N_ref)
+
+                Ds = s2_shifts-s1_shifts
+                idx = np.where((s1_shifts==s1) & (Ds==ds))[0]
+
+                N_data = len(idx)
+
+                idx_shifts = self.compare['pointer'].data[idx].astype('int')-1
+                shifts = self.compare['shifts'][idx_shifts]
+                N_stable = (np.abs(shifts)<(SD*self.stability['all']['mean'][ds,2])).sum()
+
+                p_rec['PF'][ds,s1] = N_stable/N_data
+                # N_total[ds] = self.status_fields[:,session_bool,:].sum()
+        # print(p_rec['PF'])
+        # print(np.nanmean(p_rec['PF'],1))
+        # print(recurr)
+        # return recurr
+
+        diff = {'t':        (self.mouse_data['t_measures'][np.newaxis,self.status['sessions']]-self.mouse_data['t_measures'][self.status['sessions'],np.newaxis]).astype('int'),
+                's':        np.where(self.status['sessions'])[0][np.newaxis,:] - np.where(self.status['sessions'])[0][:,np.newaxis],
+                'trial':    ((trials[np.newaxis,self.status['sessions']] - trials[self.status['sessions'],np.newaxis]) // 10).astype('int')}
+
+        # s_good = np.where(self.status['sessions'])[0]
+
+        ### test same ds, different dt
+
+        ds_arr = np.unique(np.triu(diff['s']))#[1:]
+        dt_arr = np.unique(np.triu(diff['t']))#[1:]
+
+        def calc_pval(diff,p_rec,key1,key1_arr,key2):
+
+            s_good = np.where(self.status['sessions'])[0]
+            nSteps = len(key1_arr)
+            ## preallocate arrays
+            pval = {'act':  np.zeros(nSteps)*np.NaN,
+                    'PC':   np.zeros(nSteps)*np.NaN,
+                    'PF':   np.zeros(nSteps)*np.NaN}
+
+            nt = len(dt_arr)
+            p = {'act':  np.zeros((nSteps,nt))*np.NaN,
+                 'PC':   np.zeros((nSteps,nt))*np.NaN,
+                 'PF':   np.zeros((nSteps,nt))*np.NaN}
+
+
+            for i,dx in enumerate(key1_arr):    ## iterate through x-axis - values assumed to return stable statistics
+                # print('ds: %d'%ds)
+                dy_tmp = np.unique(diff[key2][diff[key1]==dx])      ## find all differences on second dimensions according to fixed dx along x-axis
+                # print(' ---- dx: %d ----'%dx)
+                # print(dy_tmp)
+                for key in ['act','PC','PF']:       ## for each of the different hierarchies do...
+                    tmp = []
+
+                    for dy in dy_tmp:               ## iterate through different realizations of fixed dx
+
+                        ## find all shifts with dx and dy
+                        s1,s2 = np.where((diff[key1]==dx) & (diff[key2]==dy))
+                        # print(s1)
+                        # print(s2)
+                        s1 = s_good[s1]
+                        s2 = s_good[s2]
+                        ds = s2[0]-s1[0]
+                        # print(ds)
+                        if len(s1)>1:
+                            # print(p_rec[key][ds,s1])
+                            tmp.append(p_rec[key][ds,s1])
+                            # print(tmp)
+
+                        dt = np.where(dt_arr == (self.mouse_data['t_measures'][s2[0]] - self.mouse_data['t_measures'][s1[0]]))[0][0]
+
+                        p[key][ds,dt] = p_rec[key][ds,s1].mean()
+                    try:
+                        res = sstats.f_oneway(*tmp)
+                        pval[key][i] = res.pvalue
+                    except:
+                        pass
+            return pval,p
+
+        print('add "nights" to parameters')
+        print('add variability with $\Delta x$ as plot')
+        pval_s, p_s = calc_pval(diff,p_rec,'s',ds_arr,'t')
+        print('s-t done')
+        pval_t, p_t = calc_pval(diff,p_rec,'t',dt_arr,'s')
+
+
+        fig = plt.figure(figsize=(7,4),dpi=pl_dat.sv_opt['dpi'])
+        ax1 = plt.axes([0.12,0.11,0.35,0.24])
+        ax1.plot([0,ds_arr[-1]],[0.01,0.01],'k--')
+        ax1.plot(ds_arr,pval_s['act'],'ko',markersize=2,label='activation')
+        ax1.plot(ds_arr,pval_s['PC'],'bo',markersize=2,label='coding')
+        ax1.plot(ds_arr,pval_s['PF'],'ro',markersize=2,label='field stability')
+        ax1.set_yscale('log')
+        ax1.set_ylim([0.1*10**(-5),1])
+        ax1.set_xlim([0,10.5])
+        ax1.tick_params(axis='y',which='both',left=True,right=True,labelright=False,labelleft=True)
+        ax1.set_xlabel('session difference $\Delta s$')
+        ax1.set_ylabel('p-value')
+        ax1.legend(loc='lower right',fontsize=8,bbox_to_anchor=[0.9,0])
+
+        ax2 = plt.axes([0.525,0.11,0.35,0.24])
+        ax2.plot([0,dt_arr[-1]],[0.01,0.01],'k--')
+        ax2.plot(dt_arr,pval_t['act'],'ko',markersize=2)
+        ax2.plot(dt_arr,pval_t['PC'],'bo',markersize=2)
+        ax2.plot(dt_arr,pval_t['PF'],'ro',markersize=2)
+        ax2.set_yscale('log')
+        ax2.set_ylim([0.1*10**(-5),1])
+        ax2.set_xlim([0,160])
+        ax2.tick_params(axis='y',which='both',left=True,right=True,labelright=False,labelleft=False)
+        ax2.set_xlabel('time difference $\Delta t$ [h]')
+
+        maxSes = 21
+        w_bar = 0.05
+        offset_bar = ((maxSes+1)%2)*w_bar/2 + (maxSes//2 - 1)*w_bar
+
+        ax_act = plt.axes([0.12,0.7,0.35,0.25],sharex=ax1)
+        ax_PF = plt.axes([0.12,0.4,0.35,0.25],sharex=ax1)
+        color_t = iter(plt.cm.rainbow(np.linspace(0,1,maxSes)))
+        for i in range(1,maxSes):
+            col = next(color_t)
+            ax_act.bar(ds_arr-offset_bar+i*w_bar,p_s['act'][:,i],width=w_bar,facecolor=col)
+            ax_PF.bar(ds_arr-offset_bar+i*w_bar,p_s['PF'][:,i],width=w_bar,facecolor=col)
+            # plt.errorbar(ds_arr-offset_bar+i*w_bar,self.stability_dT[dT]['mean'][:maxSes,1],self.stability_dT[dT]['std'][:maxSes,1],fmt='none',ecolor='r')
+        # ax.set_xlim([0,15])
+        plt.setp(ax_act.get_xticklabels(), visible=False)
+        plt.setp(ax_PF.get_xticklabels(), visible=False)
+        ax_act.set_yticks(np.linspace(0,1,3))
+        ax_PF.set_yticks(np.linspace(0,1,3))
+        ax_act.tick_params(axis='y',which='both',left=True,right=True,labelright=True,labelleft=False)
+        ax_PF.tick_params(axis='y',which='both',left=True,right=True,labelright=True,labelleft=False)
+        ax_act.set_ylim([0,1])
+        ax_PF.set_ylim([0,1])
+        pl_dat.remove_frame(ax_act,['top'])
+        pl_dat.remove_frame(ax_PF,['top'])
+        ax_act.plot(0,np.NaN,label='activation recurrence $p_{\\alpha}$')
+        ax_PF.plot(0,np.NaN,label='field stability $r_{stable}^*$')
+        ax_act.legend(loc='upper right',handlelength=0,fontsize=10,bbox_to_anchor=[1,1.1])
+        ax_PF.legend(loc='upper right',handlelength=0,fontsize=10,bbox_to_anchor=[1,1.1])
+
+        rainbow = plt.get_cmap('rainbow')
+        cNorm = colors.Normalize(vmin=dt_arr[1],vmax=dt_arr[maxSes])
+        scalarMap = plt.cm.ScalarMappable(norm=cNorm,cmap=rainbow)
+        cbaxes = plt.axes([0.09,0.4,0.01,0.55])
+        cb = fig.colorbar(scalarMap,cax=cbaxes,orientation='vertical')
+        cbaxes.yaxis.tick_left()
+        cbaxes.yaxis.set_label_position('left')
+        cbaxes.set_ylabel('$\Delta t$')
+        # plt.legend(ncol=3)
+
+        ax_act = plt.axes([0.525,0.7,0.35,0.25],sharex=ax2)
+        ax_PF = plt.axes([0.525,0.4,0.35,0.25],sharex=ax2)
+        maxSes = 11
+        w_bar = 0.4
+        offset_bar = ((maxSes+1)%2)*w_bar/2 + (maxSes//2 - 1)*w_bar
+        color_s = iter(plt.cm.rainbow(np.linspace(0,1,maxSes)))
+        for i in range(1,maxSes):
+            col = next(color_s)
+            ax_act.bar(dt_arr-offset_bar+i*w_bar,p_s['act'][i,:],width=w_bar,facecolor=col)
+            ax_PF.bar(dt_arr-offset_bar+i*w_bar,p_s['PF'][i,:],width=w_bar,facecolor=col)
+            # plt.errorbar(np.arange(1,maxSes+1)-offset_bar+i*w_bar,self.stability_dT[dT]['mean'][:maxSes,1],self.stability_dT[dT]['std'][:maxSes,1],fmt='none',ecolor='r')
+        plt.setp(ax_act.get_xticklabels(), visible=False)
+        plt.setp(ax_PF.get_xticklabels(), visible=False)
+        # ax.set_xlim([0,200])
+        ax_act.set_ylim([0,1])
+        ax_PF.set_ylim([0,1])
+        ax_act.set_yticks(np.linspace(0,1,3))
+        ax_PF.set_yticks(np.linspace(0,1,3))
+        ax_act.tick_params(axis='y',which='both',left=True,right=True,labelright=False,labelleft=False)
+        ax_PF.tick_params(axis='y',which='both',left=True,right=True,labelright=False,labelleft=False)
+        pl_dat.remove_frame(ax_act,['top'])
+        pl_dat.remove_frame(ax_PF,['top'])
+
+        cNorm = colors.Normalize(vmin=ds_arr[1],vmax=ds_arr[maxSes])
+        scalarMap = plt.cm.ScalarMappable(norm=cNorm,cmap=rainbow)
+        cbaxes = plt.axes([0.9,0.4,0.01,0.55])
+        cb = fig.colorbar(scalarMap,cax=cbaxes,orientation='vertical')
+        cbaxes.set_ylabel('$\Delta s$')
+        # plt.legend(ncol=3)
+
+
+        # plt.subplot(313)
+        # plt.plot(dtrial_arr,pval_dtr,'ro')
+        # plt.plot(dtrial_arr,pval_rec_dtr,'ko')
+        # plt.plot(dtrial_arr,pval_recPC_dtr,'bo')
+        # plt.ylim([0,1])
+
+        plt.tight_layout()
+        plt.show(block=False)
+
+        if sv:
+            pl_dat.save_fig('time_dependence')
+        # for
+
+        # s_good[np.where((t_diff==4)]
+        # return p_stable, t_diff, s_diff
+
+    
+
+    def get_field_stability(self,SD=1.96,s_bool=None):
+
+        nbin = self.data['nbin']
+
+        sig_theta = self.stability['all']['mean'][0,2]
+        stab_thr = SD*sig_theta
+
+        s_bool = self.status['sessions'] if s_bool is None else s_bool
+
+        field_stability = np.zeros(self.data['nC'])*np.NaN
+        # idx_fields = np.where(self.status_fields & self.status['sessions'][np.newaxis,:,np.newaxis])
+        idx_fields = np.where(self.status_fields & s_bool[np.newaxis,:,np.newaxis])
+
+        for c in np.where(self.status['clusters'])[0]:#[:10]
+
+            c_fields = (idx_fields[0] == c)
+            fields_ref = self.fields['location'][c,idx_fields[1][c_fields],idx_fields[2][c_fields],0]
+
+            count_hit = 0
+            # count_ref = self.status['activity'][c,:,2].sum()
+            if self.status['activity'][c,s_bool,2].sum()>1:
+                for s in np.where(self.status['activity'][c,:,1] & s_bool)[0]:
+                    if self.status['activity'][c,s,2]:
+                        fields_compare = self.fields['location'][c,s,self.status_fields[c,s,:],0]
+                        count_ref = len(fields_ref)-len(fields_compare)
+                        d = np.abs(np.mod(fields_ref[np.newaxis,:]-fields_compare[:,np.newaxis]+nbin/2,nbin)-nbin/2)
+                        # count_hit += (np.sum(d < stab_thr)-len(fields_compare))/(count_ref-1) if count_ref > 1 else np.NaN
+                        count_hit += (np.sum(d < stab_thr)-len(fields_compare))/count_ref if count_ref > 0 else np.NaN
+            # N_norm = self.status['activity'][c,:,1].sum()
+            N_norm = s_bool.sum()
+            if N_norm > 0:
+                field_stability[c] = count_hit / N_norm#count_ref# - count_miss / count_ref
+
+        return field_stability
+    
+
+
+    def get_act_stability_temp(self,status_act=None,ds=3):
+
+        act_stability = np.zeros((self.data['nC'],self.data['nSes'],2))*np.NaN
+        # ds = ds//2
+
+        if status_act is None:
+            status_act = self.status['activity'][...,1]
+
+        # print(ds)
+        for c in np.where(self.status['clusters'])[0]:#[:10]
+
+            for s in np.where(self.status['sessions'])[0][:-1]:
+                s_min = max(0,s-ds)
+                s_max = min(self.data['nSes']-1,s+ds+1)
+
+                count_act = status_act[c,s_min:s_max].sum()
+                count_act_possible = self.status['sessions'][s_min:s_max].sum()
+                count_act_recurr = 0
+                count_act_recurr_possible = 0
+
+                for s2 in range(s_min,s_max):
+                    if self.status['sessions'][s2]:
+                        if self.status['sessions'][s2+1]:
+                            count_act_recurr_possible += 1
+                            if status_act[c,s2]:
+                                count_act_recurr += status_act[c,s2+1]
+
+                # if self.status['activity'][c,s,1]:
+                act_stability[c,s,0] = count_act/count_act_possible
+                act_stability[c,s,1] = count_act_recurr/count_act_recurr_possible if count_act_recurr_possible>0 else np.NaN
+                # else:
+                    # act_stability[c,s,:] = 0
+                # print('--- neuron %d @ s%d: ---'%(c,s))
+                # print(act_stability[c,s,:])
+                # print('counts: %d/%d'%(count_act,count_act_possible))
+                # print(self.status['activity'][c,s_min:s_max,1])
+                # print(self.status['sessions'][s_min:s_max])
+        return act_stability
+
+
+    def get_act_stability(self,s_bool):
+
+        act_stability = np.zeros((self.data['nC'],3))*np.NaN
+
+        for c in np.where(self.status['clusters'])[0]:#[:10]
+
+            count_act = self.status['activity'][c,s_bool,1].sum()
+            count_act_possible = s_bool.sum()
+            count_act_recurr = 0
+            count_act_recurr_possible = 0
+
+            for s in np.where(s_bool)[0][:-1]:
+
+                if self.status['sessions'][s+1]:
+                    count_act_recurr_possible += 1
+                    if self.status['activity'][c,s,1]:
+                        count_act_recurr += self.status['activity'][c,s+1,1]
+
+            act_stability[c,0] = count_act/count_act_possible
+            act_stability[c,1] = count_act_recurr/count_act_recurr_possible if count_act_recurr_possible>0 else np.NaN
+            act_stability[c,2] = act_stability[c,1] - (count_act)/count_act_possible
+
+            # print('--- neuron %d : ---'%c)
+            # print(act_stability[c,:])
+            # print('counts: %d/%d'%(count_act,count_act_possible))
+            # print('counts (recurr): %d/%d'%(count_act_recurr,count_act_recurr_possible))
+            # print(self.status['activity'][c,s_bool,1])
+            # print(self.status['sessions'][s_min:s_max])
+        return act_stability
+
+    def get_field_stability_temp(self,SD=1.96,ds=3):
+
+        # nC = self.data['nC']
+        # nSes = self.data['nSes']
+        nbin = self.data['nbin']
+        # nC,nSes = self.status['activity'].shape[:2]
+        sig_theta = self.stability['all']['mean'][0,2]
+        stab_thr = SD*sig_theta
+        # nbin = 100
+        # ds = ds//2
+        print(ds)
+        field_stability = np.zeros((self.data['nC'],self.data['nSes']))*np.NaN
+        # act_stability = np.zeros((nC,nSes))*np.NaN
+        idx_fields = np.where(self.status_fields & self.status['sessions'][np.newaxis,:,np.newaxis])
+
+        for c in np.where(self.status['clusters'])[0]:
+
+            c_fields = (idx_fields[0] == c)
+
+            for s in np.where(self.status['sessions'])[0][:-1]:
+
+                field_stability[c,s] = 0
+
+                if self.status['activity'][c,s,2]:
+                    s_min = max(0,s-ds)
+                    s_max = min(self.data['nSes']-1,s+ds+1)
+                    if self.status['activity'][c,s_min:s_max,2].sum()>1:
+                        s_fields = (idx_fields[1]>=s_min) & (idx_fields[1]<s_max)
+                        fields_ref = self.fields['location'][c,idx_fields[1][c_fields&s_fields],idx_fields[2][c_fields&s_fields],0]
+
+                        fields_compare = self.fields['location'][c,s,self.status_fields[c,s,:],0]
+                        count_ref = len(fields_ref)-len(fields_compare)
+                        d = np.abs(np.mod(fields_ref[np.newaxis,:]-fields_compare[:,np.newaxis]+nbin/2,nbin)-nbin/2)
+
+                        field_stability[c,s] += (np.sum(d < stab_thr)-len(fields_compare))/count_ref# if count_ref > 0 else np.NaN
+                        # count_hit = 0
+
+                # count_ref = self.status['activity'][c,s_min:s_max,2].sum()
+                # act_stability[c,s] = self.status['activity'][c,s_min:s_max,1].sum()/self.status['sessions'][s_min:s_max].sum()
+
+
+                # if self.status['activity'][c,s_min:s_max,2].sum()>1:
+                #     for s2 in range(s_min,s_max):#np.where(self.status['activity'][c,:,1])[0]:
+                #         if self.status['activity'][c,s2,2]:
+                #             fields_compare = self.fields['location'][c,s2,self.status_fields[c,s2,:],0]
+                #             count_ref = len(fields_ref)-len(fields_compare)
+                #             d = np.abs(np.mod(fields_ref[np.newaxis,:]-fields_compare[:,np.newaxis]+nbin/2,nbin)-nbin/2)
+                #             # count_hit += (np.sum(d < stab_thr)-len(fields_compare))/(count_ref-1)
+                #             count_hit += (np.sum(d < stab_thr)-len(fields_compare))/count_ref if count_ref > 0 else np.NaN
+
+                # N_norm = self.status['activity'][c,s_min:s_max,1].sum()
+                # N_norm = self.status['sessions'][s_min:s_max].sum()
+                # if N_norm > 0:
+                    # field_stability[c,s] = count_hit / N_norm#count_ref# - count_miss / count_ref
+                # print(field_stability[c,s])
+
+        return field_stability
 
 
 
@@ -4897,169 +6392,7 @@ def fit_shift_model(data):
     return np.zeros(4)*np.NaN, np.NaN
 
 
-def get_field_stability(cluster,SD=1.96,s_bool=None):
 
-    nbin = cluster.data['nbin']
-
-    sig_theta = cluster.stability['all']['mean'][0,2]
-    stab_thr = SD*sig_theta
-
-    s_bool = cluster.status['sessions'] if s_bool is None else s_bool
-
-    field_stability = np.zeros(cluster.data['nC'])*np.NaN
-    # idx_fields = np.where(cluster.status_fields & cluster.status['sessions'][np.newaxis,:,np.newaxis])
-    idx_fields = np.where(cluster.status_fields & s_bool[np.newaxis,:,np.newaxis])
-
-    for c in np.where(cluster.status['clusters'])[0]:#[:10]
-
-        c_fields = (idx_fields[0] == c)
-        fields_ref = cluster.fields['location'][c,idx_fields[1][c_fields],idx_fields[2][c_fields],0]
-
-        count_hit = 0
-        # count_ref = cluster.status['activity'][c,:,2].sum()
-        if cluster.status['activity'][c,s_bool,2].sum()>1:
-            for s in np.where(cluster.status['activity'][c,:,1] & s_bool)[0]:
-                if cluster.status['activity'][c,s,2]:
-                    fields_compare = cluster.fields['location'][c,s,cluster.status_fields[c,s,:],0]
-                    count_ref = len(fields_ref)-len(fields_compare)
-                    d = np.abs(np.mod(fields_ref[np.newaxis,:]-fields_compare[:,np.newaxis]+nbin/2,nbin)-nbin/2)
-                    # count_hit += (np.sum(d < stab_thr)-len(fields_compare))/(count_ref-1) if count_ref > 1 else np.NaN
-                    count_hit += (np.sum(d < stab_thr)-len(fields_compare))/count_ref if count_ref > 0 else np.NaN
-        # N_norm = cluster.status['activity'][c,:,1].sum()
-        N_norm = s_bool.sum()
-        if N_norm > 0:
-            field_stability[c] = count_hit / N_norm#count_ref# - count_miss / count_ref
-
-    return field_stability
-
-
-def get_act_stability_temp(cluster,status_act=None,ds=3):
-
-    act_stability = np.zeros((cluster.data['nC'],cluster.data['nSes'],2))*np.NaN
-    # ds = ds//2
-
-    if status_act is None:
-        status_act = cluster.status['activity'][...,1]
-
-    # print(ds)
-    for c in np.where(cluster.status['clusters'])[0]:#[:10]
-
-        for s in np.where(cluster.status['sessions'])[0][:-1]:
-            s_min = max(0,s-ds)
-            s_max = min(cluster.data['nSes']-1,s+ds+1)
-
-            count_act = status_act[c,s_min:s_max].sum()
-            count_act_possible = cluster.status['sessions'][s_min:s_max].sum()
-            count_act_recurr = 0
-            count_act_recurr_possible = 0
-
-            for s2 in range(s_min,s_max):
-                if cluster.status['sessions'][s2]:
-                    if cluster.status['sessions'][s2+1]:
-                        count_act_recurr_possible += 1
-                        if status_act[c,s2]:
-                            count_act_recurr += status_act[c,s2+1]
-
-            # if cluster.status['activity'][c,s,1]:
-            act_stability[c,s,0] = count_act/count_act_possible
-            act_stability[c,s,1] = count_act_recurr/count_act_recurr_possible if count_act_recurr_possible>0 else np.NaN
-            # else:
-                # act_stability[c,s,:] = 0
-            # print('--- neuron %d @ s%d: ---'%(c,s))
-            # print(act_stability[c,s,:])
-            # print('counts: %d/%d'%(count_act,count_act_possible))
-            # print(cluster.status['activity'][c,s_min:s_max,1])
-            # print(cluster.status['sessions'][s_min:s_max])
-    return act_stability
-
-
-def get_act_stability(cluster,s_bool):
-
-    act_stability = np.zeros((cluster.data['nC'],3))*np.NaN
-
-    for c in np.where(cluster.status['clusters'])[0]:#[:10]
-
-        count_act = cluster.status['activity'][c,s_bool,1].sum()
-        count_act_possible = s_bool.sum()
-        count_act_recurr = 0
-        count_act_recurr_possible = 0
-
-        for s in np.where(s_bool)[0][:-1]:
-
-            if cluster.status['sessions'][s+1]:
-                count_act_recurr_possible += 1
-                if cluster.status['activity'][c,s,1]:
-                    count_act_recurr += cluster.status['activity'][c,s+1,1]
-
-        act_stability[c,0] = count_act/count_act_possible
-        act_stability[c,1] = count_act_recurr/count_act_recurr_possible if count_act_recurr_possible>0 else np.NaN
-        act_stability[c,2] = act_stability[c,1] - (count_act)/count_act_possible
-
-        # print('--- neuron %d : ---'%c)
-        # print(act_stability[c,:])
-        # print('counts: %d/%d'%(count_act,count_act_possible))
-        # print('counts (recurr): %d/%d'%(count_act_recurr,count_act_recurr_possible))
-        # print(cluster.status['activity'][c,s_bool,1])
-        # print(cluster.status['sessions'][s_min:s_max])
-    return act_stability
-
-def get_field_stability_temp(cluster,SD=1.96,ds=3):
-
-    # nC = cluster.data['nC']
-    # nSes = cluster.data['nSes']
-    nbin = cluster.data['nbin']
-    # nC,nSes = cluster.status['activity'].shape[:2]
-    sig_theta = cluster.stability['all']['mean'][0,2]
-    stab_thr = SD*sig_theta
-    # nbin = 100
-    # ds = ds//2
-    print(ds)
-    field_stability = np.zeros((cluster.data['nC'],cluster.data['nSes']))*np.NaN
-    # act_stability = np.zeros((nC,nSes))*np.NaN
-    idx_fields = np.where(cluster.status_fields & cluster.status['sessions'][np.newaxis,:,np.newaxis])
-
-    for c in np.where(cluster.status['clusters'])[0]:
-
-        c_fields = (idx_fields[0] == c)
-
-        for s in np.where(cluster.status['sessions'])[0][:-1]:
-
-            field_stability[c,s] = 0
-
-            if cluster.status['activity'][c,s,2]:
-                s_min = max(0,s-ds)
-                s_max = min(cluster.data['nSes']-1,s+ds+1)
-                if cluster.status['activity'][c,s_min:s_max,2].sum()>1:
-                    s_fields = (idx_fields[1]>=s_min) & (idx_fields[1]<s_max)
-                    fields_ref = cluster.fields['location'][c,idx_fields[1][c_fields&s_fields],idx_fields[2][c_fields&s_fields],0]
-
-                    fields_compare = cluster.fields['location'][c,s,cluster.status_fields[c,s,:],0]
-                    count_ref = len(fields_ref)-len(fields_compare)
-                    d = np.abs(np.mod(fields_ref[np.newaxis,:]-fields_compare[:,np.newaxis]+nbin/2,nbin)-nbin/2)
-
-                    field_stability[c,s] += (np.sum(d < stab_thr)-len(fields_compare))/count_ref# if count_ref > 0 else np.NaN
-                    # count_hit = 0
-
-            # count_ref = cluster.status['activity'][c,s_min:s_max,2].sum()
-            # act_stability[c,s] = cluster.status['activity'][c,s_min:s_max,1].sum()/cluster.status['sessions'][s_min:s_max].sum()
-
-
-            # if cluster.status['activity'][c,s_min:s_max,2].sum()>1:
-            #     for s2 in range(s_min,s_max):#np.where(cluster.status['activity'][c,:,1])[0]:
-            #         if cluster.status['activity'][c,s2,2]:
-            #             fields_compare = cluster.fields['location'][c,s2,cluster.status_fields[c,s2,:],0]
-            #             count_ref = len(fields_ref)-len(fields_compare)
-            #             d = np.abs(np.mod(fields_ref[np.newaxis,:]-fields_compare[:,np.newaxis]+nbin/2,nbin)-nbin/2)
-            #             # count_hit += (np.sum(d < stab_thr)-len(fields_compare))/(count_ref-1)
-            #             count_hit += (np.sum(d < stab_thr)-len(fields_compare))/count_ref if count_ref > 0 else np.NaN
-
-            # N_norm = cluster.status['activity'][c,s_min:s_max,1].sum()
-            # N_norm = cluster.status['sessions'][s_min:s_max].sum()
-            # if N_norm > 0:
-                # field_stability[c,s] = count_hit / N_norm#count_ref# - count_miss / count_ref
-            # print(field_stability[c,s])
-
-    return field_stability
 
 
 

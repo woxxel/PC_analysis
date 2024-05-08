@@ -31,7 +31,7 @@ class silence_redetection:
         self.path_images = os.path.join(path_images,dataset,mouse)
         self.fileName_results = fileName_results
 
-        self.cluster = cluster_analysis(mousePath,'')
+        self.cluster = cluster_analysis(mousePath,'',dataSet='OnACID_results.hdf5')
         self.cluster.get_matching()
 
         self.params = {

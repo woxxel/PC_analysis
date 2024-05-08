@@ -12,8 +12,8 @@ mice=$(find $datapath_in/$dataset/* -maxdepth 0 -type d -exec basename {} \;)
 echo "Found mice in dataset $dataset: $mice"
 read -p 'Which mouse should be processed? ' mouse
 
-# for mouse in $mice
-# do
+for mouse in $mice
+do
   mkdir -p $datapath_out/$dataset/$mouse
 
   ## getting all sessions of $mouse to loop through
@@ -27,10 +27,10 @@ read -p 'Which mouse should be processed? ' mouse
       mkdir -p $datapath_out/$dataset/$mouse/$session_name;
     fi
 
-    if test -f $datapath_out/$dataset/$mouse/$session_name/CaImAn_complete.hdf5; then
-      echo "$session_name already processed - skipping"
-      continue
-    fi
+    # if test -f $datapath_out/$dataset/$mouse/$session_name/CaImAn_complete.hdf5; then
+    #   echo "$session_name already processed - skipping"
+    #   continue
+    # fi
 
     session_path=$datapath_in/$dataset/$mouse/$session_name
 
@@ -70,4 +70,4 @@ EOF
     ((s++))
 
   done
-# done
+done

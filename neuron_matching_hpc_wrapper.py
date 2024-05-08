@@ -1,7 +1,11 @@
 import os, sys
 from placefield_dynamics.neuron_matching import *
 
-_, datapath, result_files, suffix, dataset, mouse, cpus = sys.argv
+if len(sys.argv)==6:
+    suffix = ''
+    _, datapath, result_files, dataset, mouse, cpu = sys.argv
+else:
+    _, datapath, result_files, suffix, dataset, mouse, cpus = sys.argv
 
 mousePath = os.path.join(datapath,dataset,mouse)
 

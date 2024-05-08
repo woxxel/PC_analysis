@@ -44,23 +44,35 @@ class cluster_analysis:
 	def __init__(self,
 			pathMouse,
 			mouse,
-			# dataSet='redetect',session_order=None,
+			dataSet='CaImAn_complete.hdf5',
+			# session_order=None,
 			s_corr_min=0.2,suffix=''):
 
 		paramsObj = cluster_parameters(mouse,s_corr_min)
-		paramsObj.set_paths(pathMouse,suffix)
+		paramsObj.set_paths(pathMouse,suffix,dataSet)
 
 		self.params = paramsObj.params
 		self.paths = paramsObj.paths
 		self.data = paramsObj.data
 
 		self.data['nSes'] = len(self.paths['sessions'])
+	
 
+	def get_path(self,file: str,s: int ,check_exists: bool=False):
+		'''
+			helper function to get path to file of type 'file' for session s
+			and optionally check if it exists
+		'''
+
+		if file in ['CNMF','PCFields','Behavior']:
+			path = os.path.join(self.paths['sessions'][s],self.paths[f'fileName{file}'])
+		else:
+			assert False, f'entry "fileName{file}" not found'
 		
-		# if not (nSes is None):
-		#     self.data['nSes'] = nSes
-		# else:
-		#     self.data['nSes'], tmp = get_nPaths(self.pathMouse,'Session')
+		if check_exists:
+			return path, os.path.exists(path)
+		else:
+			return path
 
 
 	def run_complete(self,sessions=None,n_processes=0,reprocess=False):
@@ -110,7 +122,7 @@ class cluster_analysis:
 				'shift':np.zeros((self.data['nSes'],2)),
 				'corr':np.full(self.data['nSes'],np.NaN),
 				'borders':np.full((2,2),np.NaN),
-				'flow': np.zeros((self.data['nSes'],2)+self.params['dims']),
+				# 'flow': np.zeros((self.data['nSes'],2)+self.params['dims']),
 				'transposed': np.zeros(self.data['nSes'],'bool')
 			}
 
@@ -206,49 +218,50 @@ class cluster_analysis:
 		self.matching['f_same'] = ldModel['f_same']
 
 		with open(self.paths['assignments'],'rb') as f_open:
-			ldData = pickle.load(f_open)
+			results = pickle.load(f_open)
 
-		self.matching['IDs'] = ldData['results']['assignments']
+		self.matching['IDs'] = results['assignments']
 
 		## get matching results
-		self.matching['score'] = ldData['results']['p_matched']
-		self.matching['com'] = ldData['results']['cm']
+		self.matching['score'] = results['p_matched']
+		self.matching['com'] = results['cm']
 
-		self.stats['SNR_comp'] = ldData['results']['SNR_comp']
-		self.stats['r_values'] = ldData['results']['r_values']
-		self.stats['cnn_preds'] = ldData['results']['cnn_preds']
+		self.stats['SNR_comp'] = results['SNR_comp']
+		self.stats['r_values'] = results['r_values']
+		self.stats['cnn_preds'] = results['cnn_preds']
 		
-		has_reference = False
-		for s in range(self.data['nSes']):
+		self.alignment['transposed'] = results['remap']['transposed']# if has_reference else False
+		self.alignment['shift'] = results['remap']['shift']# if has_reference else [0,0]
+		self.alignment['corr'] = results['remap']['corr']# if has_reference else 1
+		# has_reference = False
+		# for s in range(self.data['nSes']):
 
-			if not os.path.exists(os.path.join(self.paths['sessions'][s],self.paths['fileNamePCFields'])):
-				continue
+		# 	_, path_exists = self.get_path('CNMF',s,check_exists=True)
+		# 	if not path_exists:
+		# 		continue
 			
-			self.alignment['transposed'][s] = ldData['data'][s]['remap']['transposed'] if has_reference else False
-			self.alignment['shift'][s,:] = ldData['data'][s]['remap']['shift'] if has_reference else [0,0]
-			self.alignment['corr'][s] = ldData['data'][s]['remap']['c_max'] if has_reference else 1
 
-			self.alignment['flow'][s,...] = ldData['data'][s]['remap']['flow'] if has_reference else np.NaN
+		# 	# self.alignment['flow'][s,...] = ldData['data'][s]['remap']['flow'] if has_reference else np.NaN
 
-			# idx_c = np.where(np.isfinite(self.matching['IDs'][:,s]))[0]
+		# 	# idx_c = np.where(np.isfinite(self.matching['IDs'][:,s]))[0]
 
-			# ## match- and best non-match-score should be calculated and stored in matching algorithm
-			# if not has_reference:
-			#     self.matching['score'][idx_c,s,0] = 1
-			#     self.matching['score'][idx_c,s,1] = np.NaN
-			# elif s in ldData['data'].keys():
+		# 	# ## match- and best non-match-score should be calculated and stored in matching algorithm
+		# 	# if not has_reference:
+		# 	#     self.matching['score'][idx_c,s,0] = 1
+		# 	#     self.matching['score'][idx_c,s,1] = np.NaN
+		# 	# elif s in ldData['data'].keys():
 
-			#     p_all = ldData['data'][s]['p_same']
+		# 	#     p_all = ldData['data'][s]['p_same']
 
-			#     idx_c_first = idx_c[idx_c>=p_all.shape[0]]    # first occurence of a neuron is always certain match!
-			#     self.matching['score'][idx_c_first,s,0] = 1
-			#     self.matching['score'][idx_c_first,s,1] = np.NaN
+		# 	#     idx_c_first = idx_c[idx_c>=p_all.shape[0]]    # first occurence of a neuron is always certain match!
+		# 	#     self.matching['score'][idx_c_first,s,0] = 1
+		# 	#     self.matching['score'][idx_c_first,s,1] = np.NaN
 
-			#     idx_c = idx_c[idx_c<p_all.shape[0]]    # remove entries of first-occurence neurons (no matching possible)
-			#     self.matching['score'][idx_c,s,0] = p_matched[idx_c,s]
-			#     scores_now = p_all.toarray()
-			#     self.matching['score'][idx_c,s,1] = [max(scores_now[c,np.where(scores_now[c,:]!=self.matching['score'][c,s,0])[0]]) for c in idx_c]
-			has_reference = True
+		# 	#     idx_c = idx_c[idx_c<p_all.shape[0]]    # remove entries of first-occurence neurons (no matching possible)
+		# 	#     self.matching['score'][idx_c,s,0] = p_matched[idx_c,s]
+		# 	#     scores_now = p_all.toarray()
+		# 	#     self.matching['score'][idx_c,s,1] = [max(scores_now[c,np.where(scores_now[c,:]!=self.matching['score'][c,s,0])[0]]) for c in idx_c]
+		# 	has_reference = True
 		
 		self.classify_sessions()
 		self.classify_cluster()
@@ -277,17 +290,22 @@ class cluster_analysis:
 		## check for coherence with other sessions (low shift, high correlation)
 		abs_shift = np.array([np.sqrt(x**2+y**2) for (x,y) in self.alignment['shift']])
 		self.status['sessions'][abs_shift>self.params['session_max_shift']] = False ## huge shift
-		
 		self.status['sessions'][self.alignment['corr']<self.params['session_min_correlation']] = False ## huge shift
 		self.status['sessions'][np.isnan(self.alignment['corr'])] = False
+		# print(self.status['sessions'])
 		
-		## reset first session to True if needed (doesnt pass correlation check)
-		if self.sStart == 0:
-			self.status['sessions'][0] = True
+		# ## reset first session to True if needed (doesnt pass correlation check)
+		# if self.sStart == 0:
+		# 	self.status['sessions'][0] = True
 		
 		## finally, check if data can be loaded properly
 		for s in np.where(self.status['sessions'])[0]:
-			if not os.path.exists(os.path.join(self.paths['sessions'][s],self.paths['fileNameCNMF'])):
+			_, CNMF_exists = self.get_path('CNMF',s,check_exists=True)
+			_, Fields_exists = self.get_path('PCFields',s,check_exists=True)
+			_, Behavior_exists = self.get_path('Behavior',s,check_exists=True)
+
+			# print(CNMF_exists,Fields_exists,Behavior_exists)
+			if not (CNMF_exists and Fields_exists and Behavior_exists):
 				self.status['sessions'][s] = False
 		
 		thr_high = self.params['dims'] + self.alignment['shift'][self.status['sessions'],:].min(0)
@@ -342,13 +360,13 @@ class cluster_analysis:
 		'''
 
 		self.prepare_dicts(which=['behavior'])
-
-		pathsBehavior = [os.path.join(path,self.paths['fileNameBehavior']) for path in self.paths['sessions']]
 		
-		for s,path in enumerate(pathsBehavior):
+		for s in range(self.data['nSes']):
+			pathBehavior = self.get_path('Behavior',s)
+
 			if not self.status['sessions'][s]: continue
 			
-			ldData = prepare_behavior_from_file(path,nbin_coarse=20,calculate_performance=True)
+			ldData = prepare_behavior_from_file(pathBehavior,nbin_coarse=20,calculate_performance=True)
 			self.behavior['trial_ct'][s] = ldData['trials']['ct']
 			self.behavior['trial_frames'][s] = ldData['trials']['nFrames']
 
@@ -366,15 +384,16 @@ class cluster_analysis:
 
 		self.prepare_dicts(which=['stats'])
 
-		for (s,path) in tqdm(enumerate(self.paths['sessions']),total=self.data['nSes'],leave=False):
+		for s in tqdm(range(self.data['nSes']),leave=False):
+
 			if not self.status['sessions'][s]: continue
 			
 			idx_c = np.where(np.isfinite(self.matching['IDs'][:,s]))[0]
 			n_arr = self.matching['IDs'][idx_c,s].astype('int')
 				
 			## load results from the place field detection algorithm
-			pathPCFields = os.path.join(path,self.paths['fileNamePCFields'])
-			if os.path.exists(pathPCFields):
+			pathPCFields, path_exists = self.get_path('PCFields',s,check_exists=True)
+			if path_exists:
 
 				with open(pathPCFields,'rb') as f_open:
 					PCFields = pickle.load(f_open)
@@ -400,12 +419,12 @@ class cluster_analysis:
 		
 		self.prepare_dicts(which=['fields'])
 		
-		for (s,path) in tqdm(enumerate(self.paths['sessions']),total=self.data['nSes'],leave=False):
+		for s in tqdm(range(self.data['nSes']),leave=False):
 			if not self.status['sessions'][s]: continue
 			# for (s,s0) in enumerate(self.session_order):
 			# pathSession = pathcat([self.params['pathMouse'],'Session%02d'%s0])
-			pathFields = os.path.join(path,self.paths['fileNamePCFields'])
-			if os.path.exists(pathFields):
+			pathFields, path_exists = self.get_path('PCFields',s,check_exists=True)
+			if path_exists:
 
 				idx_c = np.where(~np.isnan(self.matching['IDs'][:,s]))[0]
 				n_arr = self.matching['IDs'][idx_c,s].astype('int')
@@ -448,7 +467,7 @@ class cluster_analysis:
 						# self.fields['reliability'][c,s,:] = fields['reliability'][n,:self.params['field_count_max']]
 
 			else:
-				print(f'Data for Session {path} does not exist')
+				print(f'Data for Session {pathFields} does not exist')
 
 		# self.save([False,False,False,True,False])
 		t_end = time.time()
@@ -710,14 +729,14 @@ class cluster_analysis:
 		oof_frate = np.zeros((self.data['nC'],self.data['nSes']))*np.NaN   # out-of-field firingrate
 		if_frate = np.zeros((self.data['nC'],self.data['nSes'],self.params['field_count_max']))*np.NaN    # in-field firingrate
 		
-		for (s,path) in tqdm(enumerate(self.paths['sessions']),total=self.data['nSes'],leave=False):
+		for s in tqdm(range(self.data['nSes']),leave=False):
 		
 			if not self.status['sessions'][s]: continue
 
-			dataBH = prepare_behavior_from_file(os.path.join(path, self.paths['fileNameBehavior']))
-			pathLoad = os.path.join(path,self.paths['fileNameCNMF'])
-			if os.path.exists(pathLoad):
-				ld = load_dict_from_hdf5(pathLoad)
+			dataBH = prepare_behavior_from_file(self.get_path('Behavior',s))
+			pathCNMF, path_exists = self.get_path('CNMF',s,check_exists=True)
+			if path_exists:
+				ld = load_dict_from_hdf5(pathCNMF)
 				S = ld['S'][:,dataBH['active']]
 
 				c_arr = np.where(np.isfinite(self.matching['IDs'][:,s]))[0]

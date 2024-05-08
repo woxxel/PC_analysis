@@ -58,17 +58,21 @@ class cluster_parameters:
             'nbin': None,
         }
 	
-    def set_paths(self,pathMouse,suffix=''):
+    def set_paths(self,pathMouse,suffix='',dataSet=None):
+        
+        ## make sure suffix starts with '_'
+        if suffix and suffix[0] != '_':
+            suffix = '_' + suffix
         
         pathAssignments = os.path.join(pathMouse,f'matching/neuron_registration{suffix}.pkl')
-        ## load stored filenames in order in which they were matched
         with open(pathAssignments,'rb') as f_open:
-            ld = pickle.load(f_open)
-
-        paths = [os.path.split(session['filePath'])[0] for key,session in ld['data'].items() if isinstance(key,int)]
-        paths = replace_relative_path(paths,pathMouse)
+            results = pickle.load(f_open)
         
-        self.data['nC'],self.data['nSes'] = ld['results']['assignments'].shape
+        ## load stored filenames in order in which they were matched        
+        paths = [os.path.split(path)[0] if path else '' for path in results['filePath']]
+        paths = replace_relative_path(paths,pathMouse)
+
+        self.data['nC'],self.data['nSes'] = results['assignments'].shape
         
         self.paths = {
             'sessions':               paths,
@@ -79,7 +83,7 @@ class cluster_parameters:
             
             ### provide names for distinct result files (needed?)
             'fileNamePCFields':       f'PC_fields{suffix}.pkl',
-            'fileNameCNMF':           f'OnACID_results{suffix}.hdf5',
+            'fileNameCNMF':           dataSet if dataSet else f'OnACID_results{suffix}.hdf5',
             # 'fileNameCNMF':           f'CaImAn{suffix}.hdf5',
             'fileNameBehavior':       'aligned_behavior.pkl',
 
@@ -145,8 +149,10 @@ def extend_dict(D,n,D2=None,dim=0,exclude=[]):
     return D
 
 def replace_relative_path(paths,newPath):
-    prepath = os.path.commonpath(paths)
-    return [os.path.join(newPath,os.path.relpath(path,prepath)) for path in paths]
+
+    cleaned_paths = [path for path in paths if path]
+    prepath = os.path.commonpath(cleaned_paths)
+    return [os.path.join(newPath,os.path.relpath(path,prepath)) if path else '' for path in paths]
         
 # def clean_dict(D,idx,dim=0):
 #   assert dim==0, 'Only works for dimension 0 for now'
