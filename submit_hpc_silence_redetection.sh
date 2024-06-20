@@ -40,11 +40,12 @@ do
         ## writing sbatch submission commands to bash-file
         cat > $SUBMIT_FILE <<- EOF
 #!/bin/bash
-#SBATCH -A all
-#SBATCH -p medium
+#SBATCH -A cidbn_legacy
+#SBATCH -p cidbn
 #SBATCH -c $cpus
 #SBATCH -t 02:00:00
 #SBATCH -o $datapath_out/$dataset/$mouse/$session_name/log_silence_redetection.out
+#SBATCH -e $datapath_out/$dataset/$mouse/$session_name/log_error_%j.txt
 #SBATCH --mem=20000
 
 module use /usr/users/cidbn_sw/sw/modules

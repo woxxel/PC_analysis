@@ -3,3 +3,8 @@
 *.txt
 *.mp4
 __pycache__
+
+.ipynb*
+.virtual*
+
+tmp/
