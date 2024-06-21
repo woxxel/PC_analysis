@@ -217,10 +217,7 @@ def load_behavior_data(data_path,
             data['recording'] = binary_closing(data_tmp[:,mic_col]<1,np.ones(5))
         else:
             idx_start = np.where(data['frame']==1)[0][0]
-            print(data['frame'])
-            print(data['frame'][:20])
-            print(data['frame'][-20:])
-            print(len(data['frame']))
+            
             if 8989 in data['frame']:
                 idx_end = min(np.where(data['frame']==8989)[0][0]+4,np.where(data['frame']==8989)[0][-1])
             else:
