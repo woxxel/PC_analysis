@@ -65,7 +65,8 @@ read -p 'Which mouse should be processed? ' mouse
 #SBATCH -p cidbn
 #SBATCH -c $cpus
 #SBATCH -t 01:00:00
-#SBATCH -o $datapath/$dataset/$mouse/$session_name/log_placefield_detection.out
+#SBATCH -o $datapath/$dataset/$mouse/$session_name/log_placefield_detection.log
+#SBATCH -e $datapath/$dataset/$mouse/$session_name/log_placefield_detection_error.log
 #SBATCH --mem=8000
 
 module use /usr/users/cidbn_sw/sw/modules

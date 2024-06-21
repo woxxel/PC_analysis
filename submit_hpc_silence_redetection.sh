@@ -44,8 +44,8 @@ do
 #SBATCH -p cidbn
 #SBATCH -c $cpus
 #SBATCH -t 02:00:00
-#SBATCH -o $datapath_out/$dataset/$mouse/$session_name/log_silence_redetection.out
-#SBATCH -e $datapath_out/$dataset/$mouse/$session_name/log_error_%j.txt
+#SBATCH -o $datapath_out/$dataset/$mouse/$session_name/log_silence_redetection.log
+#SBATCH -e $datapath_out/$dataset/$mouse/$session_name/log_silence_redetection_error.log
 #SBATCH --mem=20000
 
 module use /usr/users/cidbn_sw/sw/modules

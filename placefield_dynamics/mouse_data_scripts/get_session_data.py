@@ -1,7 +1,7 @@
 # from ..utils import cluster_parameters
 # from pexpect import pxssh
 
-import paramiko, socket, os, pickle, tqdm
+import os, pickle, tqdm
 from itertools import combinations
 from matplotlib import pyplot as plt
 
@@ -12,6 +12,8 @@ import numpy as np
 
 import pandas as pd
 from align_mouse_behavior import *
+
+from utils.connections import *
 
 def get_session_data(ssh_config_file_name='id_ed25519_GWDG',datasets=['Shank2Mice_Hayashi','AlzheimerMice_Hayashi'],suffix='complete'):
 
@@ -297,29 +299,6 @@ def write_data_to_xlsx(df,filename='session_data.xlsx'):
 	
  
 
-def establish_connection(serverName,username,ssh_key_file,proxyJump=None):
-
-	## getting IP address of server, as hostname can not be directly used
-	serverIP = socket.getaddrinfo(serverName, None)[0][4][0]	## kinda hacky, but works...
-	pkey = paramiko.Ed25519Key.from_private_key_file(ssh_key_file)
-
-	client = paramiko.SSHClient()
-	client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-	if proxyJump:
-
-		client_proxy = establish_connection(proxyJump,username,ssh_key_file)
-
-		transport = client_proxy.get_transport()
-		dest_addr = (serverIP, 22)		
-		local_addr = ('127.0.0.1', 22)	## does this always hold for current host?
-		channel = transport.open_channel("direct-tcpip", dest_addr, local_addr)
-		client.connect(serverIP, username=username, pkey=pkey, sock=channel)
-	else:
-		client.connect(serverIP, username=username, pkey=pkey)
-
-
-	return client
 
 
 def get_video_correlation(nSes=60):

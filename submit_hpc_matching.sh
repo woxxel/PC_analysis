@@ -48,8 +48,8 @@ do
 #SBATCH -p cidbn
 #SBATCH -c $cpus
 #SBATCH -t 02:00:00
-#SBATCH -o $datapath/$dataset/$mouse/log_matching.out
-#SBATCH -e $datapath/$dataset/$mouse/log_matching_error.txt
+#SBATCH -o $datapath/$dataset/$mouse/log_matching.log
+#SBATCH -e $datapath/$dataset/$mouse/log_matching_error.log
 #SBATCH --mem=20000
 
 module use /usr/users/cidbn_sw/sw/modules
