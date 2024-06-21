@@ -147,7 +147,7 @@ def get_session_data(ssh_config_file_name='id_ed25519_GWDG',datasets=['Shank2Mic
 					new_data['image_correlation'] = correlations[s]
 
 					max_idx = np.where(ld['Cn_corr'][s,:]>0.9)[0]
-					new_data['duplicate'] = max_idx if len(max_idx) else None
+					new_data['duplicate'] = sessions[max_idx[0]] if len(max_idx) else None
 					
 					new_data['n_neurons'] = n_neurons[s]
 					sessionFolder = os.path.join(mouseFolder,session)
@@ -263,7 +263,7 @@ def get_session_data(ssh_config_file_name='id_ed25519_GWDG',datasets=['Shank2Mic
 				df.loc[(mouse,session),:] = new_data
 				if (not new_data['files_recording']) | (not new_data['files_behavior']) | \
 					(not new_data['files_processed_recording']) | (not new_data['files_processed_behavior']) | \
-					isinstance(new_data['duplicate'],list):
+					(not (new_data['duplicate'] is None)):
 					# print('missing data for session: ',new_data)
 					df_missing.loc[(mouse,session),:] = new_data
 				
