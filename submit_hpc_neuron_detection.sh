@@ -65,10 +65,10 @@ do
 #SBATCH -A cidbn_legacy
 #SBATCH -p cidbn
 #SBATCH -c $cpus
-#SBATCH -t 02:00:00
+#SBATCH -t 04:00:00
 #SBATCH -o $datapath_out/$dataset/$mouse/$session_name/log_neuron_detection.log
 #SBATCH -e $datapath_out/$dataset/$mouse/$session_name/log_neuron_detection_error.log
-#SBATCH --mem=32000
+#SBATCH --mem=64000
 
 module use /usr/users/cidbn_sw/sw/modules
 module load cidbn_caiman-1.9.10_py-3.9
