@@ -1796,28 +1796,6 @@ class plot_test_undetected:
 
 #     return fitness, erfc, sd_r, md
 
-# def get_spikeNr(traces):
-#     md = find_modes(traces)
-#     ff1 = traces - md
-
-#     # only consider values under the mode to determine the noise standard deviation
-#     ff1 = -ff1 * (ff1 < 0)
-
-#     # compute 25 percentile
-#     ff1 = np.sort(ff1)
-#     ff1[ff1 == 0] = np.nan
-#     Ns = round((ff1>0).sum() * .5).astype('int')
-#     iqr_h = np.zeros(traces.shape[0])
-
-#     #for idx, _ in enumerate(ff1):
-#     iqr_h = ff1[-Ns]
-
-#     # approximate standard deviation as iqr/1.349
-#     sd_r = 2 * iqr_h / 1.349
-#     data_thr = md+2*sd_r
-#     spikeNr = np.floor(traces/data_thr).sum()
-#     return spikeNr,md,sd_r
-
 
 if __name__=='__main__':
     sr = silence_redetection()

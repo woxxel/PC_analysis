@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from align_mouse_behavior import *
 
-from utils.connections import *
+from .utils.connections import *
 
 def get_session_data(ssh_config_file_name='id_ed25519_GWDG',datasets=['Shank2Mice_Hayashi','AlzheimerMice_Hayashi'],suffix='complete'):
 

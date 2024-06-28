@@ -45,7 +45,9 @@ def copy_to_server(path_source, path_target,ssh_conn='hpc-sofja',ssh_config_file
                 
                 path_session = os.path.join(path_mouse, path_name)
                 if os.path.isdir(path_session) and path_name.startswith('Session'):
-
+                    
+                    # if path_name=='Session47' and dir_mouse=='232':
+                    #     continue
 
                     print(f"mouse {dir_mouse}, {path_name}")
                     

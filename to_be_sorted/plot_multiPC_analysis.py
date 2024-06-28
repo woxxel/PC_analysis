@@ -27,7 +27,7 @@ from utils import get_nPaths, pathcat, periodic_distr_distance, bootstrap_data, 
 from get_t_measures import *
 from utils_data import set_para
 from get_session_specifics import get_session_specifics
-from plot_PC_analysis import *
+from PC_analysis.placefield_dynamics.plot_PC_analysis import *
 
 warnings.filterwarnings("ignore")
 
