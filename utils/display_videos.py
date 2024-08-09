@@ -26,16 +26,35 @@ class tif_mov:
             self.file = TiffFile(path)
             self.shape = self.file.series[0].shape
             self.dtype = self.file.series[0].dtype
-            self.getSlice = lambda t: self.file.pages[t].asarray().astype('float32') ## for some reason, cv2 doesn't like float16 images...
+            print(self.dtype)
+            # self.getSlice = lambda t: self.file.pages[t].asarray().astype('float32') ## for some reason, cv2 doesn't like float16 images...
+            def getSlice(t):
+                frame = self.file.pages[t].asarray().astype(self.dtype) ## for some reason, cv2 doesn't like float16 images...
+                frame -= np.min(frame)
+                # print(frame)
+                # print(self.dtype)
+                return frame / 2000
+                # return frame / (np.iinfo(self.dtype).max / 10)
+                # return frame / np.max(frame)
+            self.getSlice = getSlice
         elif ext=='.mmap':
 
             assert dim, 'dim and dtype needs to be specified for mmap'
             self.shape = dim
             self.dtype = np.float32
+            # self.dtype = np.int16
             self.file = np.memmap(path,mode='r',shape=(self.shape[1]*self.shape[2],self.shape[0]),dtype=self.dtype,order='F')   # for files created by caimans NormCorr
             # self.file = self.file.copy()
             # self.file = cv2.cvtColor(self.file, cv2.COLOR_BGR2RGB)
-            self.getSlice = lambda t: np.reshape(self.file[:,t],(512,512),'F').copy()
+            def getSlice(t):
+                frame = np.reshape(self.file[:,t],(self.shape[1],self.shape[2]),'F').copy()
+                frame -= np.min(frame)
+                return frame / 2000
+                # return frame / (np.iinfo(self.dtype).max / 10)
+                # return frame / np.max(frame)
+                
+            self.getSlice = getSlice
+            # self.getSlice = lambda t: np.reshape(self.file[:,t],(512,512),'F').copy()
         else:
             print('not yet available')
 
@@ -54,7 +73,8 @@ def display_videos(paths,f=15,save_to_file=False):
     ## reading in video(s) metadata
     nVideos = len(paths)
 
-    vids = [tif_mov(path,(8989,512,512)) for path in paths]
+    # vids = [tif_mov(path,(8989,512,512)) for path in paths]
+    vids = [tif_mov(path,(13329,512,512)) for path in paths]
 
     # return vids
     ## brief sanity checks
@@ -88,6 +108,7 @@ def display_videos(paths,f=15,save_to_file=False):
 
     def create_frame(vids,val):
         frame = np.concatenate([vid.getSlice(val) for vid in vids],axis=1)
+        # print(frame)
         val_freq = cv2.getTrackbarPos('frequency',windowName)
         cv2.putText(frame, 't=%.2fs @%dHz'%(val/15.,val_freq), (50, 50), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.8, color=(255,0,0), thickness=2) ## color not working...
         cv2.imshow(windowName,frame)

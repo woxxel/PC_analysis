@@ -7,7 +7,6 @@ import itertools
 from scipy.optimize import curve_fit
 
 from multiprocessing import get_context
-from caiman.utils.utils import load_dict_from_hdf5
 
 from .utils import pickleData, fdr_control, periodic_distr_distance, get_reliability, get_status_arr, get_average
 from .utils import cluster_parameters
@@ -15,10 +14,14 @@ from .utils import timing
 
 from .placefield_detection import prepare_behavior_from_file, get_firingrate
 from .mouse_data_scripts.get_session_specifics import *
-from .neuron_matching import matching_params
+from .neuron_matching import matching, matching_params, load_data
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 warnings.filterwarnings("ignore")
+
+
+
+
 
 class cluster_analysis:
 	'''
@@ -42,18 +45,26 @@ class cluster_analysis:
 	'''
 
 	def __init__(self,
-			pathMouse,
-			mouse,
-			dataSet='CaImAn_complete.hdf5',
+			pathsSession,
+			pathsResults,
+			mouse=None,
 			# session_order=None,
-			s_corr_min=0.2,suffix=''):
+			s_corr_min=0.2,suffix='',#
+			matlab=False,
+			matching_only=False):
+		
+		self.matlab = matlab
 
-		paramsObj = cluster_parameters(mouse,s_corr_min)
-		paramsObj.set_paths(pathMouse,suffix,dataSet)
+		self.pathMouse = os.path.split(pathsSession[0])[0]
+
+		paramsObj = cluster_parameters(mouse,s_corr_min,matlab=matlab)
+		paramsObj.set_paths(pathsSession,pathsResults,self.pathMouse)
 
 		self.params = paramsObj.params
 		self.paths = paramsObj.paths
 		self.data = paramsObj.data
+
+		self.matching_only = matching_only
 
 		self.data['nSes'] = len(self.paths['sessions'])
 	
@@ -213,26 +224,34 @@ class cluster_analysis:
 		self.prepare_dicts(which=['alignment','matching','stats'])
 		
 		## load model first, to allow proper matching of footprints
-		with open(os.path.join(*os.path.split(self.paths['assignments'])[:-1],f'match_model{self.paths["suffix"]}.pkl'),'rb') as f_open:
-			ldModel = pickle.load(f_open)
-		self.matching['f_same'] = ldModel['f_same']
+		m = matching(mousePath=self.pathMouse,paths=self.paths['CaImAn_results'],matlab=self.matlab)
+		m.load_model()
+		m.dynamic_fit()
+		self.matching['f_same'] = m.model['f_same']
 
-		with open(self.paths['assignments'],'rb') as f_open:
-			results = pickle.load(f_open)
+		m.load_registration()
 
-		self.matching['IDs'] = results['assignments']
+		# modelPath = os.path.join(*os.path.split(self.paths['assignments'])[:-1],f'match_model{self.paths["suffix"]}.{"mat" if self.matlab else "pkl"}')
+		# ldModel = load_data(modelPath)
+
+		# if 'f_same' in ldModel.keys():
+		# 	self.matching['f_same'] = ldModel['f_same']
+
+		# results = load_data(self.paths['assignments'])
+		# m.results = results
+		self.matching['IDs'] = m.results['assignments']
 
 		## get matching results
-		self.matching['score'] = results['p_matched']
-		self.matching['com'] = results['cm']
+		self.matching['score'] = m.results['p_matched']
+		self.matching['com'] = m.results['cm']
 
-		self.stats['SNR_comp'] = results['SNR_comp']
-		self.stats['r_values'] = results['r_values']
-		self.stats['cnn_preds'] = results['cnn_preds']
+		self.stats['SNR_comp'] = m.results['SNR_comp']
+		self.stats['r_values'] = m.results['r_values']
+		self.stats['cnn_preds'] = m.results['cnn_preds']
 		
-		self.alignment['transposed'] = results['remap']['transposed']# if has_reference else False
-		self.alignment['shift'] = results['remap']['shift']# if has_reference else [0,0]
-		self.alignment['corr'] = results['remap']['corr']# if has_reference else 1
+		self.alignment['transposed'] = m.results['remap']['transposed']# if has_reference else False
+		self.alignment['shift'] = m.results['remap']['shift']# if has_reference else [0,0]
+		self.alignment['corr'] = m.results['remap']['corr']# if has_reference else 1
 		# has_reference = False
 		# for s in range(self.data['nSes']):
 
@@ -287,12 +306,13 @@ class cluster_analysis:
 			self.sEnd = sessions[-1]
 		self.status['sessions'][self.sStart:self.sEnd] = True
 
+		print(self.alignment['shift'].dtype)
+
 		## check for coherence with other sessions (low shift, high correlation)
 		abs_shift = np.array([np.sqrt(x**2+y**2) for (x,y) in self.alignment['shift']])
 		self.status['sessions'][abs_shift>self.params['session_max_shift']] = False ## huge shift
 		self.status['sessions'][self.alignment['corr']<self.params['session_min_correlation']] = False ## huge shift
 		self.status['sessions'][np.isnan(self.alignment['corr'])] = False
-		# print(self.status['sessions'])
 		
 		# ## reset first session to True if needed (doesnt pass correlation check)
 		# if self.sStart == 0:
@@ -300,13 +320,18 @@ class cluster_analysis:
 		
 		## finally, check if data can be loaded properly
 		for s in np.where(self.status['sessions'])[0]:
-			_, CNMF_exists = self.get_path('CNMF',s,check_exists=True)
-			_, Fields_exists = self.get_path('PCFields',s,check_exists=True)
-			_, Behavior_exists = self.get_path('Behavior',s,check_exists=True)
-
+			
 			# print(CNMF_exists,Fields_exists,Behavior_exists)
-			if not (CNMF_exists and Fields_exists and Behavior_exists):
-				self.status['sessions'][s] = False
+			if self.matching_only:
+				if not os.path.exists(self.paths['CaImAn_results'][s]):
+					self.status['sessions'][s] = False
+			else:
+				_, CNMF_exists = self.get_path('CNMF',s,check_exists=True)
+				_, Fields_exists = self.get_path('PCFields',s,check_exists=True)
+				_, Behavior_exists = self.get_path('Behavior',s,check_exists=True)
+				if not (CNMF_exists and Fields_exists and Behavior_exists):
+					self.status['sessions'][s] = False
+		
 		
 		thr_high = self.params['dims'] + self.alignment['shift'][self.status['sessions'],:].min(0)
 		thr_low = self.alignment['shift'][self.status['sessions'],:].max(0)
@@ -736,7 +761,7 @@ class cluster_analysis:
 			dataBH = prepare_behavior_from_file(self.get_path('Behavior',s))
 			pathCNMF, path_exists = self.get_path('CNMF',s,check_exists=True)
 			if path_exists:
-				ld = load_dict_from_hdf5(pathCNMF)
+				ld = load_data(pathCNMF)
 				S = ld['S'][:,dataBH['active']]
 
 				c_arr = np.where(np.isfinite(self.matching['IDs'][:,s]))[0]

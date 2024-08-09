@@ -6,12 +6,14 @@
 import os, pickle
 import numpy as np
 
+from placefield_dynamics.neuron_matching.utils import load_data
+
 class cluster_parameters:
 
 	# params = {}
 	# paths = {}
 
-    def __init__(self,mouse,s_corr_min):
+    def __init__(self,mouse,s_corr_min,matlab=False):
         self.params = {
             
             'f': 15,   ## measurement frequency
@@ -57,25 +59,34 @@ class cluster_parameters:
             'nC': None,
             'nbin': None,
         }
+        self.matlab = matlab
 	
-    def set_paths(self,pathMouse,suffix='',dataSet=None):
+    def set_paths(self,pathsSession,pathsResults,pathMouse,suffix=''):
         
         ## make sure suffix starts with '_'
         if suffix and suffix[0] != '_':
             suffix = '_' + suffix
         
-        pathAssignments = os.path.join(pathMouse,f'matching/neuron_registration{suffix}.pkl')
-        with open(pathAssignments,'rb') as f_open:
-            results = pickle.load(f_open)
+
+        # with open(pathAssignments,'rb') as f_open:
+                # results = pickle.load(f_open)
         
         ## load stored filenames in order in which they were matched        
-        paths = [os.path.split(path)[0] if path else '' for path in results['filePath']]
-        paths = replace_relative_path(paths,pathMouse)
+        # paths = [os.path.split(path)[0] if path else '' for path in results['filePath']]
+        # paths = [path if path else '' for path in results['filePath']]
+        # paths = replace_relative_path(paths,pathMouse)
 
+        # sessions = [os.path.split(path)[0] for path in paths]
+
+        pathAssignments = os.path.join(pathMouse,f'matching/neuron_registration{suffix}.{"mat" if self.matlab else "pkl"}')
+        print(pathAssignments)
+        results = load_data(pathAssignments)
         self.data['nC'],self.data['nSes'] = results['assignments'].shape
         
         self.paths = {
-            'sessions':               paths,
+            # 'fileNameCNMF':           dataSet if dataSet else f'OnACID_results{suffix}.hdf5',
+            'CaImAn_results':         pathsResults,
+            'sessions':               pathsSession,
             'suffix':                 suffix,
             # 'data':                   pathData,
             'assignments':            pathAssignments,
@@ -83,7 +94,6 @@ class cluster_parameters:
             
             ### provide names for distinct result files (needed?)
             'fileNamePCFields':       f'PC_fields{suffix}.pkl',
-            'fileNameCNMF':           dataSet if dataSet else f'OnACID_results{suffix}.hdf5',
             # 'fileNameCNMF':           f'CaImAn{suffix}.hdf5',
             'fileNameBehavior':       'aligned_behavior.pkl',
 
@@ -100,7 +110,7 @@ class cluster_parameters:
         # print(self.paths)
         try:
             while True:
-                pathPCFields = os.path.join(paths[s],self.paths['fileNamePCFields'])
+                pathPCFields = os.path.join(pathsSession[s],self.paths['fileNamePCFields'])
                 if os.path.exists(pathPCFields):
                     #  print('breaking')
                     break
@@ -149,7 +159,12 @@ def extend_dict(D,n,D2=None,dim=0,exclude=[]):
     return D
 
 def replace_relative_path(paths,newPath):
+    '''
+        Replaces the common path of all paths in 'paths' with 'newPath'
+    '''
 
+    ## first, strip whitespace
+    paths = [path.strip() for path in paths]
     cleaned_paths = [path for path in paths if path]
     prepath = os.path.commonpath(cleaned_paths)
     return [os.path.join(newPath,os.path.relpath(path,prepath)) if path else '' for path in paths]

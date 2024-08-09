@@ -3,36 +3,43 @@ import numpy as np
 from matplotlib import pyplot as plt, colors as mcolors, rc, patches as mppatches, lines as mplines
 from matplotlib_scalebar.scalebar import ScaleBar
 from tqdm import *
-from scipy.io import loadmat
 from scipy.optimize import linear_sum_assignment
 
 import caiman as cm
 from caiman.source_extraction import cnmf as cnmf
 
 from .neuron_detection import *
-from .neuron_matching import get_shift_and_flow, calculate_statistics, calculate_p
+from .neuron_matching import get_shift_and_flow, calculate_statistics, calculate_p, load_data, save_data, set_paths_default
 from .cluster_analysis import cluster_analysis
 
 
 class silence_redetection:
 
-    def __init__(self,dataset='AlzheimerMice_Hayashi',mouse='556wt',
-                path_detected='usr/users/cidbn1/placefields',
-                path_images='/usr/users/cidbn1/neurodyn',
-                fileName_results='CaImAn_complete.hdf5'):
-
+    def __init__(self,
+            pathsSession,
+            pathsResults,
+            pathsImages,
+            matlab=False):
+            # filePath_images=None,
+            # fileName_suffix_out='_redetected',
+            # fileName_results='results_CaImAn*'):
         '''
             find an as-complete-as-possible set of neurons active in this session by using input footprints from
                 1. neurons previously detected in this session
                 2. neurons detected in other sessions, that could not be matched to any in this
         '''
 
-        mousePath = os.path.join(path_detected,dataset,mouse)        
-        self.path_images = os.path.join(path_images,dataset,mouse)
-        self.fileName_results = fileName_results
+        self.matlab = matlab
 
-        self.cluster = cluster_analysis(mousePath,'',dataSet='OnACID_results.hdf5')
+        # mousePath = os.path.join(path_detected,dataset,mouse)
+        
+        # self.fileName_results = fileName_in#fileName_results
+
+        self.cluster = cluster_analysis(pathsSession,pathsResults,matlab=matlab,matching_only=True)
         self.cluster.get_matching()
+
+        self.paths_images = pathsImages
+
 
         self.params = {
             's_corr_min': 0.05,
@@ -42,40 +49,52 @@ class silence_redetection:
         self.dims = self.cluster.params['dims']
 
 
-    # def run_all(self,n_processes=4,
-    #             plt_bool=False,complete_new=False):
+    def run_all(self,n_processes=8,plt_bool=False):
 
-    #     '''
-    #         TODO:
-    #             * split into one code for a single session, and one code iterating over it, to allow hpc-queuing
-    #             (what kind of data is required by each instance? what can be removed?)
-    #     '''
+        '''
+            TODO:
+                * split into one code for a single session, and one code iterating over it, to allow hpc-queuing
+                (what kind of data is required by each instance? what can be removed?)
+        '''
 
-    #     for s,path in enumerate(self.cluster.paths['sessions']):
+        for s,path in enumerate(self.cluster.paths['sessions']):
 
             
-    #         ## test some stuff (such as session correlation and shift distance)
-    #         if s==0:
-    #             process = True
-    #         else:
-    #             process = self.cluster['alignment']['corr'][s] > self.params['s_corr_min']
-    #             print(path,self.cluster['alignment']['shifts'][s,:])
-    #             print(np.sqrt(np.sum([x**2 for x in self.cluster['alignment']['shifts'][s,:]])))
-    #             process &= np.sqrt(np.sum([x**2 for x in self.cluster['alignment']['shifts'][s,:]])) < self.params['max_shift']
+            ## test some stuff (such as session correlation and shift distance)
+            try:
+                self.process_session(s,n_processes=n_processes,ssh_alias=None,plt_bool=plt_bool)
+            except:
+                print('Error in processing session %d'%s)
+                continue
 
-    #         if process:
-    #             self.process_session(s)
-    #             # print('process this!')
-    #             # pass
+            # if s==0:
+            #     process = True
+            # else:
+            #     process = self.cluster['alignment']['corr'][s] > self.params['s_corr_min']
+            #     print(path,self.cluster['alignment']['shifts'][s,:])
+            #     print(np.sqrt(np.sum([x**2 for x in self.cluster['alignment']['shifts'][s,:]])))
+            #     process &= np.sqrt(np.sum([x**2 for x in self.cluster['alignment']['shifts'][s,:]])) < self.params['max_shift']
+
+            # if process:
+            #     self.process_session(s)
+            #     # print('process this!')
+            #     # pass
 
     
-    def process_session(self,s,n_processes=8,path_tmp='data/tmp',ssh_alias='transfer-gwdg',plt_bool=True):
+    def process_session(self,s,n_processes=8,path_tmp='data/tmp',ssh_alias='hpc-sofja',plt_bool=True):
 
+        if not self.cluster.status['sessions'][s]:
+            print(f'Session has not been included in matching or is skipped for another reason - skip redetection of "silent" cells on session {s+1}')
+            return
+
+        self.currentS = s
         self.currentSession = self.cluster.paths['sessions'][s]
         self.path_tmp = os.path.join(path_tmp,os.path.split(self.currentSession)[-1])
 
         print('process',self.currentSession)
         t_start = time.time()
+
+        print('paths:',self.cluster.paths)
         self.obtain_footprints(s)
         print('### --------- footprints constructed - time took: %5.3fs ---------- ###'%(time.time()-t_start))
 
@@ -98,6 +117,7 @@ class silence_redetection:
 
     def obtain_footprints(self,s,max_diff=None,complete_new=False):
 
+        
         print(f'Run redetection of "silent" cells on session {s+1}')
         
         ## prepare some dictionaries for storing in- and output data
@@ -122,7 +142,9 @@ class silence_redetection:
         self.dataIn = {}
         self.dataOut = {}
 
-        T = 8989
+        ld = load_data(self.cluster.paths['CaImAn_results'][s])
+        T = ld['C'].shape[1]
+        
         self.dataIn['A'] = scipy.sparse.csc_matrix((np.prod(self.dims),self.nC))
         self.dataIn['C'] = np.random.rand(self.nC,T)
 
@@ -145,15 +167,21 @@ class silence_redetection:
             print('silent:', self.idxes['in']['nSilent'], 'active:', self.idxes['in']['nActive'])
             
             ## load footprints of active cells from session s
-            ld = load_dict_from_hdf5(os.path.join(self.currentSession,self.cluster.paths['fileNameCNMF']))
-            Cn_ref = ld['Cn'].T
+            ld = load_data(self.cluster.paths['CaImAn_results'][s])
+            if 'Cn' in ld.keys():
+                Cn_ref = ld['Cn'].T 
+            else:
+                # self.log.warning('Cn not in result files. constructing own Cn from footprints!')
+                Cn_ref = np.array(ld['A'].sum(axis=1).reshape(*self.params['dims']))
+            
+            # Cn_ref = ld['Cn'].T
 
             c_idx = np.concatenate([np.where(isActive)[0],np.where(isSilent)[0]])
             n_idx = self.cluster.matching['IDs'][isActive,s].astype('int')
 
             self.idxes['in']['match_to_c'] = c_idx
             self.idxes['in']['match_to_n'] = n_idx
-        
+
             if self.cluster.alignment['transposed'][s]:
                 print(f'load transposed from session {s+1}')
                 self.dataIn['A'][:,:self.idxes['in']['nActive']] = scipy.sparse.hstack([(a/a.sum()).reshape(self.dims).transpose().reshape(-1,1) for a in ld['A'][:,n_idx].T])
@@ -201,17 +229,22 @@ class silence_redetection:
         progress = tqdm.tqdm(s_load,total=len(s_load),desc='Loading footprints for processing Session %d...'%(s+1))
         for s_ld in progress:
 
-            pathData = os.path.join(self.cluster.paths['sessions'][s_ld],self.cluster.paths['fileNameCNMF'])
-            ld = load_dict_from_hdf5(pathData)
+            ld = load_data(self.cluster.paths['CaImAn_results'][s_ld])
             A_tmp = ld['A'].tocsc()
-            Cn = ld['Cn'].T
+            # Cn = ld['Cn'].T
+            if 'Cn' in ld.keys():
+                Cn = ld['Cn'].T
+            else:
+                # self.log.warning('Cn not in result files. constructing own Cn from footprints!')
+                Cn = np.array(ld['A'].sum(axis=1).reshape(*self.params['dims']))
+
             if self.cluster.alignment['transposed'][s_ld]:
                 # print('load transposed from session %d'%(s_ld+1))
                 A_tmp = scipy.sparse.hstack([img.reshape(self.dims).transpose().reshape(-1,1) for img in A_tmp.transpose()]).tocsc()
                 Cn = Cn.T
     
             x_grid, y_grid = np.meshgrid(np.arange(0., dims[0]).astype(np.float32), np.arange(0., dims[1]).astype(np.float32))
-            (x_shift,y_shift),flow,_ = get_shift_and_flow(Cn_ref,Cn,dims,projection=None,plot_bool=False)
+            (x_shift,y_shift),flow,_,_ = get_shift_and_flow(Cn_ref,Cn,dims,projection=None,plot_bool=False)
 
             x_remap = (x_grid - x_shift + flow[:,:,0])
             y_remap = (y_grid - y_shift + flow[:,:,1])
@@ -235,26 +268,34 @@ class silence_redetection:
     def prepare_CNMF(self,
                 n_processes=0,
                 ssh_alias='hpc-sofja'):
-
         '''
             function to set up a CaImAn batch-processing instance
         '''
-        self.currentSession_source = os.path.join(self.path_images,os.path.split(self.currentSession)[-1])
-
+        # self.currentSession_source = os.path.join(self.path_images,os.path.split(self.currentSession)[-1])
+        self.currentSession_source = self.paths_images[self.currentS]
+        isFolder = not len(os.path.splitext(self.currentSession_source)[1])
+        
         if ssh_alias:
             ## if file(s) are on remote, copy over data, first
-            path_tmp_images = os.path.join(self.path_tmp,'images')
+            # path_tmp_images = os.path.join(self.path_tmp,'images')
+            path_tmp_images = self.path_tmp
             get_data_from_server(self.currentSession_source,path_tmp_images,ssh_alias)
         else:
-            path_tmp_images = os.path.join(self.currentSession_source,'images')
+            # path_tmp_images = os.path.join(self.currentSession_source,'images')
+            path_tmp_images = self.currentSession_source
         
-        ### if files present in single tifs, only (its the case for my data), run batch-creation
-        path_to_stacks = make_stack_from_single_tifs(path_tmp_images,self.path_tmp,data_type='float16',clean_after_stacking=True)
-
+        ## if files present in single tifs, only (its the case for my data), run batch-creation
+        if isFolder:
+            path_to_stack = make_stack_from_single_tifs(path_tmp_images,self.path_tmp,data_type='float16',clean_after_stacking=True)
+        else:
+            path_to_stack = path_tmp_images
+            
+        print(f'{path_to_stack=}')
         # run motion correction separately (to not having to call everything manually...)
         CaImAn_params['fnames'] = None   # reset to remove previously set data
-        path_to_motion_correct = motion_correct(path_to_stacks,CaImAn_params,n_processes=n_processes)
+        path_to_motion_correct = motion_correct(path_to_stack,CaImAn_params,n_processes=n_processes)
         
+        # path_to_motion_correct = os.path.join(self.currentSession,'20240607_58_ROI1_00001_els__d1_512_d2_512_d3_1_order_F_frames_13329.mmap')
         CaImAn_params['fnames'] = [path_to_motion_correct]
 
         self.opts = cnmf.params.CNMFParams(params_dict=CaImAn_params)
@@ -270,13 +311,13 @@ class silence_redetection:
         #if not self.preprocessed:
         use_parallel = n_processes>1
         if use_parallel:
-            c, dview, n_processes = cm.cluster.setup_cluster(backend='local', n_processes=n_processes, single_thread=False)
+            c, self.dview, n_processes = cm.cluster.setup_cluster(backend='local', n_processes=n_processes, single_thread=False)
         else:
-            dview=None
+            self.dview=None
             n_processes=1
 
     
-        self.cnm = cnmf.CNMF(n_processes,dview=dview)
+        self.cnm = cnmf.CNMF(n_processes,dview=self.dview)
 
         Yr, dims, T = cm.load_memmap(CaImAn_params['fnames'][0])
         images = np.reshape(Yr.T, [T] + list(dims), order='F')
@@ -333,12 +374,13 @@ class silence_redetection:
         self.cnm.estimates.Cn = cm.load(Y.filename, subindices=slice(0,None,10)).local_correlations(swap_dim=False)
 
         if use_parallel:
-            cm.cluster.stop_server(dview=dview)      ## restart server to clean up memory
+            cm.cluster.stop_server(dview=self.dview)      ## restart server to clean up memory
 
         print(f'done! after {time.time()-t_start}s')
         if cleanup:
-            # os.remove(CaImAn_params['fnames'][0])
-            shutil.rmtree(self.path_tmp)
+            os.remove(CaImAn_params['fnames'][0])
+            if os.path.isdir(self.path_tmp):
+                shutil.rmtree(self.path_tmp)
 
 
     def analyze_traces(self,redo=False):
@@ -427,6 +469,8 @@ class silence_redetection:
         self.idxes['out']['silent_new'] = ~self.idxes['out']['active'] & idx_out_active_before
         
         self.idxes['out']['active_unmatched'] = self.idxes['out']['active'] & ~idx_out_active_before & ~idx_matched
+
+        self.idxes['out']['silent'] = []
 
         nC_new = self.idxes['out']['active_unmatched'].sum()
         print('%d new neurons detected'%nC_new)
@@ -545,10 +589,13 @@ class silence_redetection:
         #self.analysis['fp_corr'].tocsc()
 
 
-    def save_results(self,ext='mat'):
+    def save_results(self):
 
         ### save everything important from running the detection
-    
+
+        fileParts = os.path.splitext(self.cluster.paths['CaImAn_results'][self.currentS])
+        svPath = os.path.join(f'{fileParts[0]}_redetected{fileParts[1]}')
+
         results = {
             'A':self.dataOut['A'],
             'C':self.dataOut['C'],
@@ -561,8 +608,7 @@ class silence_redetection:
             'r_values':self.dataOut['r_values'],
             'cnn_preds':self.dataOut['cnn_preds']
         }
-        svPath = os.path.join(self.currentSession,self.fileName_results)
-        save_dict_to_hdf5(results,svPath)
+        save_data(results,svPath)
                
         
         compares = {
@@ -570,9 +616,10 @@ class silence_redetection:
             'Cin':self.dataIn['C'],
             'idxes': self.idxes,
         }
-        svPath = os.path.splitext(svPath)[0] + '_compares.pkl'
-        with open(svPath,'wb') as f_open:
-            pickle.dump(compares,f_open)
+        svPath = os.path.join(f'{fileParts[0]}_redetected_compares{fileParts[1]}')
+        save_data(compares,svPath)
+        # with open(svPath,'wb') as f_open:
+            # pickle.dump(compares,f_open)
 
         ### analyze silent ones: do they show firing behavior at all? are they correlated with nearby active neurons?
 
@@ -581,11 +628,9 @@ class silence_redetection:
         pathData = os.path.join(self.currentSession,self.fileName_results)
         #pathData = pathcat([pathSession,'results_postSilent.%s'%ext])
         print('loading data from %s'%pathData)
-        # if ext == 'mat':
-        #     ld = loadmat(pathData,squeeze_me=True)
-        # else:
-        with open(pathData,'rb') as f_open:
-            ld = pickle.load(f_open)
+        
+        ld = load_data(pathData)
+        
         self.dataOut = {'A':ld['A'],
                     'C':ld['C'],
                     'S':ld['S'],
@@ -837,10 +882,8 @@ class plot_test_undetected:
           pathSession = os.path.join(self.pathMouse,'Session%02d'%(s+1))
           pathData = os.path.join(pathSession,'results_redetect.%s'%ext)
           self.progress.set_description('Now processing Session %d'%(s+1))
-          if ext == 'mat':
-            ld = loadmat(pathData,squeeze_me=True)
-          else:
-            ld = pickleData([],pathData,'load')
+
+          ld = load_data(pathData)
 
           self.eval_data[s] = {}#   {'SNR':       np.zeros((self.nC,self.nSes))*np.NaN,
                                 #'CNN':       np.zeros((self.nC,self.nSes))*np.NaN,
@@ -852,7 +895,8 @@ class plot_test_undetected:
   def load(self,ext='mat'):
 
     ### load matching results
-    ld_dat = pickleData([],self.pathMatching,'load')
+    ld_dat = load_data(self.pathMatching)
+    # ld_dat = pickleData([],self.pathMatching,'load')
     try:
       assignments = ld_dat['assignments']
     except:
@@ -882,10 +926,8 @@ class plot_test_undetected:
       pathSession = os.path.join(self.pathMouse,'Session%02d'%(s+1))
       pathData = os.path.join(pathSession,'results_redetect.%s'%ext)
       self.progress.set_description('Now processing Session %d'%(s+1))
-      if ext == 'mat':
-        ld = loadmat(pathData,squeeze_me=True)
-      else:
-        ld = pickleData([],pathData,'load')
+
+      ld = load_data(pathData)
 
       idx_c = np.where(~np.isnan(assignments[:,s]))[0]
       n_arr = assignments[idx_c,s].astype('int')
@@ -1023,7 +1065,7 @@ class plot_test_undetected:
 
         pathSession = os.path.join(self.pathMouse,'Session%02d'%(s))
         pathData = os.path.join(pathSession,'results_redetect.mat')
-        ld = loadmat(pathData,squeeze_me=True)
+        ld = load_data(pathData)
 
         cm_in = com(ld['Ain'],dims[0],dims[1])
         cm_out = com(ld['A'],dims[0],dims[1])
@@ -1222,7 +1264,8 @@ class plot_test_undetected:
 
         pathSession = os.path.join(self.pathMouse,'Session%02d'%(s+1))
         pathData = os.path.join(pathSession,'results_redetect.mat')
-        ld = loadmat(pathData,variable_names=['Cin','C','Ain','A'],squeeze_me=True)
+        ld = load_data(pathData)
+        # ld = loadmat(pathData,variable_names=['Cin','C','Ain','A'],squeeze_me=True)
 
         dims=(512,512)
         ax_A.imshow(ld['A'].sum(1).reshape(dims))
@@ -1295,7 +1338,8 @@ class plot_test_undetected:
 
         pathSession = os.path.join(self.pathMouse,'Session%02d'%(s+1))
         pathData = os.path.join(pathSession,'results_redetect.mat')
-        ld = loadmat(pathData,variable_names=['Cin','C','Ain','A'],squeeze_me=True)
+        ld = load_data(pathData)
+        # ld = loadmat(pathData,variable_names=['Cin','C','Ain','A'],squeeze_me=True)
 
         #plt.figure(figsize=(6,2.5))
         #dims=(512,512)
