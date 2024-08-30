@@ -19,6 +19,7 @@ def copy_to_server(path_source, path_target,ssh_conn='hpc-sofja',ssh_config_file
     """
     ## setting up connection to server
     username = 'schmidt124'
+    # proxyServerName = 'login.gwdg.de'
     proxyServerName = 'login.gwdg.de'
     serverName = 'login-dbn02.hpc.gwdg.de'
 
@@ -71,7 +72,7 @@ def copy_to_remote(sftp_client,path_source,path_target,relative_path_to_file, ss
         sftp_client.stat(outfile)
         print(f'{outfile} already exists - skipping')
     except IOError:
-        cp_cmd = f"rsync --relative {permissions} -e ssh {infile} {ssh_conn}:{path_target}"
+        cp_cmd = f"rsync --info=progress2 --relative {permissions} -e ssh {infile} {ssh_conn}:{path_target}"
         if printing:
             print(f"Pushing behavior data to {ssh_conn}:{outfile}...")
         os.system(cp_cmd)
