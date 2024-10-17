@@ -8,8 +8,12 @@ dataset="AlzheimerMice_Hayashi"
 SUBMIT_FILE=./sbatch_submit.sh
 
 mice=$(find $datapath_in/$dataset/* -maxdepth 0 -type d -exec basename {} \;)
-# echo "Found mice in dataset $dataset: $mice"
-# read -p 'Which mouse should be processed? ' mouse
+echo "Found mice in dataset $dataset: $mice"
+read -p 'Which mouse should be processed? (hit enter to process all): ' mouse
+
+if [[ -n $mouse ]]; then
+  mice=($mouse)
+fi
 
 for mouse in $mice
 do
@@ -34,13 +38,9 @@ do
 #SBATCH -p cidbn
 #SBATCH -c $cpus
 #SBATCH -t 00:10:00
-#SBATCH -o $datapath_out/$dataset/$mouse/log_alignment.out
-#SBATCH -e $datapath_out/$dataset/$mouse/log_alignment_error.txt
+#SBATCH -o $datapath_out/$dataset/$mouse/$session_name/log_alignment.log
+#SBATCH -e $datapath_out/$dataset/$mouse/$session_name/log_alignment.log
 #SBATCH --mem=1000
-
-module use /usr/users/cidbn_sw/sw/modules
-module load cidbn_caiman-1.9.10_py-3.9
-source activate caiman-1.9.10_py-3.9
 
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1

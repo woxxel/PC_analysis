@@ -252,6 +252,7 @@ class cluster_analysis:
 		self.alignment['transposed'] = m.results['remap']['transposed']# if has_reference else False
 		self.alignment['shift'] = m.results['remap']['shift']# if has_reference else [0,0]
 		self.alignment['corr'] = m.results['remap']['corr']# if has_reference else 1
+		self.alignment['corr_zscored'] = m.results['remap']['corr_zscored']# if has_reference else 1
 		# has_reference = False
 		# for s in range(self.data['nSes']):
 
@@ -299,24 +300,27 @@ class cluster_analysis:
 		## if 'sessions' is provided (tuple), it specifies range
 		## of sessions to be included
 		if sessions is None:
-			self.sStart = 0
+			self.sStart = np.where(self.alignment['corr']==1.)[0][0]
 			self.sEnd = self.data['nSes']
 		else:
 			self.sStart = max(0,sessions[0]-1)
 			self.sEnd = sessions[-1]
+
+		# print(f'processing sessions {self.sStart} to {self.sEnd}')
 		self.status['sessions'][self.sStart:self.sEnd] = True
 
-		print(self.alignment['shift'].dtype)
+		# print(f'processing sessions {self.sStart} to {self.sEnd}')
+		# print(self.alignment['shift'].dtype)
 
 		## check for coherence with other sessions (low shift, high correlation)
 		abs_shift = np.array([np.sqrt(x**2+y**2) for (x,y) in self.alignment['shift']])
 		self.status['sessions'][abs_shift>self.params['session_max_shift']] = False ## huge shift
-		self.status['sessions'][self.alignment['corr']<self.params['session_min_correlation']] = False ## huge shift
-		self.status['sessions'][np.isnan(self.alignment['corr'])] = False
+		self.status['sessions'][self.alignment['corr_zscored']<self.params['min_session_correlation_zscore']] = False ## huge shift
+		self.status['sessions'][np.isnan(self.alignment['corr_zscored'])] = False
 		
 		# ## reset first session to True if needed (doesnt pass correlation check)
-		# if self.sStart == 0:
-		# 	self.status['sessions'][0] = True
+		if self.sStart == 0:
+			self.status['sessions'][0] = True
 		
 		## finally, check if data can be loaded properly
 		for s in np.where(self.status['sessions'])[0]:

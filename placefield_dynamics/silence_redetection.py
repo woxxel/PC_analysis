@@ -18,8 +18,9 @@ class silence_redetection:
     def __init__(self,
             pathsSession,
             pathsResults,
-            pathsImages,
-            matlab=False):
+            pathsImages=None,
+            matlab=False,
+            params_in={}):
             # filePath_images=None,
             # fileName_suffix_out='_redetected',
             # fileName_results='results_CaImAn*'):
@@ -39,7 +40,7 @@ class silence_redetection:
         self.cluster.get_matching()
 
         self.paths_images = pathsImages
-
+        self.params_in = params_in
 
         self.params = {
             's_corr_min': 0.05,
@@ -81,24 +82,26 @@ class silence_redetection:
             #     # pass
 
     
-    def process_session(self,s,n_processes=8,path_tmp='data/tmp',ssh_alias='hpc-sofja',plt_bool=True):
-
+    def process_session(self,s,n_processes=8,path_tmp='data/tmp',pathImage=None,ssh_alias='hpc-sofja',plt_bool=True):
+        
+        print(self.cluster.status['sessions'])
         if not self.cluster.status['sessions'][s]:
             print(f'Session has not been included in matching or is skipped for another reason - skip redetection of "silent" cells on session {s+1}')
             return
 
         self.currentS = s
         self.currentSession = self.cluster.paths['sessions'][s]
-        self.path_tmp = os.path.join(path_tmp,os.path.split(self.currentSession)[-1])
+        self.currentSession_source = pathImage if pathImage else self.paths_images[s]
+        self.path_tmp = path_tmp#os.path.join(path_tmp,os.path.split(self.currentSession)[-1])
 
         print('process',self.currentSession)
+        print(f'tmp path: {self.path_tmp}')
         t_start = time.time()
 
-        print('paths:',self.cluster.paths)
         self.obtain_footprints(s)
         print('### --------- footprints constructed - time took: %5.3fs ---------- ###'%(time.time()-t_start))
 
-        self.prepare_CNMF(n_processes=0,ssh_alias=ssh_alias)    ## for some reason, motion correction gets slower with parallel processing
+        self.prepare_CNMF(n_processes=n_processes,ssh_alias=ssh_alias)    ## for some reason, motion correction gets slower with parallel processing
         self.run_detection(s,n_processes,cleanup=True)
         print('### --------- rerun completed - time took: %5.3fs ---------- ###'%(time.time()-t_start))
 
@@ -223,13 +226,23 @@ class silence_redetection:
                 s_ref[i,1] = s_post[0] if (s_post[0] - s) <= max_diff else -1
                 if s_ref[i,1]>=0:
                     n_ref[i,1] = self.cluster.matching['IDs'][c,int(s_ref[i,1])].astype(int)
+                
+            # if n_ref[i,1] == 510:
+                # print('@510:',s_ref[i,1],n_ref[i,1])
         s_load = np.unique(s_ref[s_ref>=0])
 
+        # print('s_ref:',s_ref)
+        # print('n:',n_ref)
+        # assert False, 'check n_ref!'
         ## construct footprint of silent cells as interpolation between footprints of adjacent sessions and adjust for shift & rotation
+        
         progress = tqdm.tqdm(s_load,total=len(s_load),desc='Loading footprints for processing Session %d...'%(s+1))
         for s_ld in progress:
 
+
             ld = load_data(self.cluster.paths['CaImAn_results'][s_ld])
+            # print(f"{s_ld=}, path={self.cluster.paths['CaImAn_results'][s_ld]}")
+            # print(f'n=,{n_ref[s_ref==s_ld]}')
             A_tmp = ld['A'].tocsc()
             # Cn = ld['Cn'].T
             if 'Cn' in ld.keys():
@@ -266,13 +279,12 @@ class silence_redetection:
         self.dataIn['A'] = scipy.sparse.vstack([a.multiply(a>(max_thr*a.max()))/a.sum() for a in self.dataIn['A'].T]).T
 
     def prepare_CNMF(self,
-                n_processes=0,
+                n_processes=8,
                 ssh_alias='hpc-sofja'):
         '''
             function to set up a CaImAn batch-processing instance
         '''
-        # self.currentSession_source = os.path.join(self.path_images,os.path.split(self.currentSession)[-1])
-        self.currentSession_source = self.paths_images[self.currentS]
+        
         isFolder = not len(os.path.splitext(self.currentSession_source)[1])
         
         if ssh_alias:
@@ -283,12 +295,16 @@ class silence_redetection:
         else:
             # path_tmp_images = os.path.join(self.currentSession_source,'images')
             path_tmp_images = self.currentSession_source
+
         
         ## if files present in single tifs, only (its the case for my data), run batch-creation
         if isFolder:
             path_to_stack = make_stack_from_single_tifs(path_tmp_images,self.path_tmp,data_type='float16',clean_after_stacking=True)
         else:
-            path_to_stack = path_tmp_images
+            path_to_stack = os.path.join(self.path_tmp,os.path.basename(self.currentSession_source))
+            shutil.copy(self.currentSession_source,path_to_stack)
+            
+            # path_to_stack = path_tmp_images
             
         print(f'{path_to_stack=}')
         # run motion correction separately (to not having to call everything manually...)
@@ -297,6 +313,8 @@ class silence_redetection:
         
         # path_to_motion_correct = os.path.join(self.currentSession,'20240607_58_ROI1_00001_els__d1_512_d2_512_d3_1_order_F_frames_13329.mmap')
         CaImAn_params['fnames'] = [path_to_motion_correct]
+        for key in self.params_in:
+            CaImAn_params[key] = self.params_in[key]
 
         self.opts = cnmf.params.CNMFParams(params_dict=CaImAn_params)
 
@@ -377,10 +395,10 @@ class silence_redetection:
             cm.cluster.stop_server(dview=self.dview)      ## restart server to clean up memory
 
         print(f'done! after {time.time()-t_start}s')
-        if cleanup:
-            os.remove(CaImAn_params['fnames'][0])
-            if os.path.isdir(self.path_tmp):
-                shutil.rmtree(self.path_tmp)
+        # if cleanup:
+        #     os.remove(CaImAn_params['fnames'][0])
+        #     if os.path.isdir(self.path_tmp):
+        #         shutil.rmtree(self.path_tmp)
 
 
     def analyze_traces(self,redo=False):
@@ -453,14 +471,14 @@ class silence_redetection:
         idx_matched[matches[:,1]] = True
 
         # cast prev active to new idxes and update arrays accordingly
-        self.idxes['in']['match_to_out'] = np.full(nC_in,np.NaN)
+        self.idxes['in']['match_to_out'] = np.full(nC_in,-1,dtype='int')
         self.idxes['in']['match_to_out'][matches[:,0]] = matches[:,1]
 
-        self.idxes['out']['match_to_in'] = np.full(nC_out,np.NaN)
+        self.idxes['out']['match_to_in'] = np.full(nC_out,-1,dtype='int')
         self.idxes['out']['match_to_in'][matches[:,1]] = matches[:,0]
         
         idx_out_active_before = np.zeros(nC_out,'bool')
-        idx_out_active_before[self.idxes['in']['match_to_out'][np.isfinite(self.idxes['in']['match_to_out']) & self.idxes['in']['active']].astype('int')] = True
+        idx_out_active_before[self.idxes['in']['match_to_out'][(self.idxes['in']['match_to_out']>=0) & self.idxes['in']['active']].astype('int')] = True
         
 
         self.idxes['out']['active_still'] = self.idxes['out']['active'] & idx_out_active_before
@@ -609,8 +627,7 @@ class silence_redetection:
             'cnn_preds':self.dataOut['cnn_preds']
         }
         save_data(results,svPath)
-               
-        
+
         compares = {
             'Ain':self.dataIn['A'],
             'Cin':self.dataIn['C'],

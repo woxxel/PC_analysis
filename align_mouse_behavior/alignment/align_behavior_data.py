@@ -70,7 +70,9 @@ def align_data_on_hpc(datapath_in,datapath_out,dataset,mouse,session,
         plt.close()
 
     if ssh_alias:
-        cmd = f"scp {figure_path} {results_path} {ssh_alias}:{datapath_out}/{dataset}/{mouse}/{session}/"
+        cmd = f"scp {results_path} {ssh_alias}:{datapath_out}/{dataset}/{mouse}/{session}/"
+        os.system(cmd)
+        cmd = f"scp {figure_path} {ssh_alias}:{datapath_out}/{dataset}/{mouse}/behavior_alignment/"
         os.system(cmd)
 
     # return data_resampled

@@ -7,14 +7,15 @@ def get_file_path(ssh_alias,session_path):
     '''
         
     '''
+    
     host_cmd = f"ssh {ssh_alias} " if ssh_alias else ""
 
     ## behavior data is provided in two different ways (named a* or crop*)
     try:
-        bh_path = os.popen(f"{host_cmd}find {session_path}/a* -maxdepth 0 -type f").read()
+        bh_path = os.popen(f"{host_cmd}find {session_path}/*.txt -maxdepth 0 -type f").read()
         assert len(bh_path)>0
     except:
-        bh_path = os.popen(f"{host_cmd}find {session_path}/crop* -maxdepth 0 -type f").read()
+        bh_path = os.popen(f"{host_cmd}find {session_path}/*.mat -maxdepth 0 -type f").read()
     if not len(bh_path):
         raise Exception('No behavior file found')
     bh_path = bh_path[:-1]

@@ -6,12 +6,11 @@
     launched remotely to process data on slurm.
 '''
 
-import os
-
+import os,time
 from .utils.connections import *
 
 
-def run_neuron_detection_Subhodeep(path_source, path_target=None,specific_sessions=[],ssh_config_file_name='id_ed25519_GWDG'):
+def run_neuron_detection_Subhodeep(path_source, path_target=None,specific_sessions=[],resultFile_name='results_CaImAn',suffix='',hpc='sofja'):
     """
         Run neuron detection on the GWDG cluster
 
@@ -31,24 +30,14 @@ def run_neuron_detection_Subhodeep(path_source, path_target=None,specific_sessio
     cpus = 8
     mouse = os.path.basename(path_source)
 
-    path_code = '~/program_code/PC_analysis'
-    submit_file = f"{path_code}/sbatch_submit.sh"
+    client, path_code, batch_params = set_hpc_params(hpc)
 
     if path_target is None:
         path_target = path_source
 
+    # sftp_client = client.open_sftp()
 
-    ## setting up connection to server
-    username = 'schmidt124'
-    proxyServerName = 'login.gwdg.de'
-    serverName = 'login-dbn02.hpc.gwdg.de'
-    
-    ssh_key_file = f'/home/wollex/.ssh/{ssh_config_file_name}'
-
-    client = establish_connection(serverName,username,ssh_key_file,proxyJump=proxyServerName)
-    sftp_client = client.open_sftp()
-
-    neuron_detection_script = f'{path_code}/neuron_detection_Subhodeep.py'
+    neuron_detection_script = f'{path_code}/neuron_detection.py'
     ## first, write the neuron detection script to the server
 
 # params['dxy']: 512./520.
@@ -69,26 +58,31 @@ print('copying ', path_source, ' to ', tmp_file)
 
 shutil.copy(path_source, tmp_file)
 
+fileName = os.path.splitext(os.path.basename(path_source))[0]
+resultFile_name = '{resultFile_name}_%s{suffix}' % fileName
+print(f'finally, saving file to %s'%resultFile_name)
+
 ## enables possibility to change parameters
 params = copy.deepcopy(CaImAn_params)
-
+params['fr'] = 30.05
 
 path_to_motion_correct = motion_correct(tmp_file,params,n_processes=n_processes)
 print('motion_correct:',path_to_motion_correct)
-path_to_neuron_detection = neuron_detection(path_to_motion_correct,params,n_processes=n_processes,save_type='mat')
+path_to_neuron_detection = neuron_detection(path_to_motion_correct,params,saveName=resultFile_name,n_processes=n_processes,save_type='mat')
 print('neuron_detection:',path_to_neuron_detection)
                                             
 resultFile_name = os.path.split(path_to_neuron_detection)[-1]
 os.makedirs(path_target,exist_ok=True)
-print('copying to:',os.path.join(path_target,resultFile_name))
-shutil.copy(path_to_neuron_detection,os.path.join(path_target,resultFile_name))
+path_resultFile = os.path.join(path_target,resultFile_name)
+print('copying to:',path_resultFile)
+shutil.copy(path_to_neuron_detection,path_resultFile)
+
 print('Finished processing!')
 """)
 
     ## first, search all 'day folders' in the mouse source path
     _, stdout, stderr = client.exec_command(f"ls -d {os.path.join(path_source,'*/')}")
     directories = str(stdout.read(), encoding='utf-8').splitlines()
-
     s=1
     for dir in directories:
 
@@ -104,34 +98,37 @@ print('Finished processing!')
                 if not (s in specific_sessions):
                     s+=1
                     continue
-
-            path_results = os.path.join(path_target,f"Session{s:02d}")
-            print(f"{path_recording=}, {path_results=}")
             
-            ## make sure, path_results exists
-            try:
-                sftp_client.mkdir(path_results)
-            except:
-                pass
-
+            path_results = dir[:-1]
+            # path_results = os.path.join(path_target,f"Session{s:02d}")
+            print(f"{path_recording=}, {path_results=}")
+            # break
+            
+            # ## make sure, path_results exists
+            # try:
+            #     sftp_client.mkdir(path_results)
+            # except:
+            #     pass
+            base_name = os.path.splitext(os.path.basename(path_recording))[0]
 
             ## writing textfile with date and per-date-session number to results folder
-            date_file = os.path.basename(path_recording).split('_')[0]
-            date_file += f'_{ss}'
-            date_file = os.path.join(path_results,date_file)
+            # date_file = os.path.basename(path_recording).split('_')[0]
+            # date_file += f'_{ss}'
+            # date_file = os.path.join(path_results,date_file)
 
-            _, stdout, stderr = client.exec_command(f"touch {date_file}")
+            # _, stdout, stderr = client.exec_command(f"touch {date_file}")
 
+            print(f'writing log to: {path_results}/log_neuron_detection_{base_name}.log')
             ## write bash script to run neuron detection
-            _, stdout, stderr = client.exec_command(f"""cat > {submit_file} <<- EOF
+            _, stdout, stderr = client.exec_command(f"""cat > {batch_params['submit_file']} <<- EOF
 #!/bin/bash -l
 #SBATCH -J m{mouse}s{s}_detect
-#SBATCH -A cidbn_legacy
-#SBATCH -p cidbn
+#SBATCH -A {batch_params['A']}
+#SBATCH -p {batch_params['p']}
 #SBATCH -c {cpus}
 #SBATCH -t 04:00:00
-#SBATCH -o {path_results}/log_neuron_detection.log
-#SBATCH -e {path_results}/log_neuron_detection_error.log
+#SBATCH -o {path_results}/log_neuron_detection_{base_name}.log
+#SBATCH -e {path_results}/log_neuron_detection_{base_name}.log
 #SBATCH --mem=64000
 
 export MKL_NUM_THREADS=1
@@ -143,8 +140,8 @@ python3 {neuron_detection_script} {path_recording} {path_results} {cpus}
 EOF
 """)
             ## requires absolute path to command, as $PATH is not set for client login
-            _, stdout, stderr = client.exec_command(f'/usr/local/slurm/current/install/bin/sbatch {submit_file}')
-            # print(stdout.read(),stderr.read())
+            _, stdout, stderr = client.exec_command(f"/usr/local/slurm/current/install/bin/sbatch {batch_params['submit_file']}")
+            print(stdout.read(),stderr.read())
             # break
 
             s+=1
@@ -152,7 +149,7 @@ EOF
 
 
 
-def run_neuron_detection(path_source, path_target=None,specific_sessions=[],resultFile_name='results_CaImAn',suffix='',save_type='hdf5',ssh_config_file_name='id_ed25519_GWDG'):
+def run_neuron_detection(path_source, path_target=None,specific_sessions=[],resultFile_name='results_CaImAn',suffix='',save_type='hdf5',hpc='sofja'):
     """
         Run neuron detection on the GWDG cluster
 
@@ -172,23 +169,15 @@ def run_neuron_detection(path_source, path_target=None,specific_sessions=[],resu
     cpus = 8
     mouse = os.path.basename(path_source)
 
+    client, path_code, batch_params = set_hpc_params(hpc)
+
     if suffix:
         suffix = f'_{suffix}' if not suffix.startswith('_') else suffix
     
-    path_code = '~/program_code/PC_analysis'
-    submit_file = f"{path_code}/sbatch_submit.sh"
 
     if path_target is None:
         path_target = path_source
 
-    ## setting up connection to server
-    username = 'schmidt124'
-    proxyServerName = 'login.gwdg.de'
-    serverName = 'login-dbn02.hpc.gwdg.de'
-    
-    ssh_key_file = f'/home/wollex/.ssh/{ssh_config_file_name}'
-
-    client = establish_connection(serverName,username,ssh_key_file,proxyJump=proxyServerName)
     sftp_client = client.open_sftp()
 
     neuron_detection_script = f'{path_code}/run_neuron_detection.py'
@@ -197,7 +186,6 @@ def run_neuron_detection(path_source, path_target=None,specific_sessions=[],resu
 # params['dxy']: 512./520.
 # params['fr']: 15.26
 # params['decay_time']: 1.75                  
-
     _, stdout, stderr = client.exec_command(f"""cat > {neuron_detection_script} <<- EOF
 import os, sys, shutil, copy
 from placefield_dynamics.neuron_detection import *
@@ -262,6 +250,7 @@ print('Finished processing!')
     ## first, search all session folders in the mouse folder
     _, stdout, stderr = client.exec_command(f"ls -d {os.path.join(path_source,'Session*/ | xargs -n 1 basename')}")
     sessions = str(stdout.read(), encoding='utf-8').splitlines()
+    print(sessions)
 
     for s,session in enumerate(sessions,start=1):
         sessionName = session
@@ -288,15 +277,15 @@ print('Finished processing!')
         # _, stdout, stderr = client.exec_command(f"touch {date_file}")
 
         ## write bash script to run neuron detection
-        _, stdout, stderr = client.exec_command(f"""cat > {submit_file} <<- EOF
+        _, stdout, stderr = client.exec_command(f"""cat > {batch_params['submit_file']} <<- EOF
 #!/bin/bash -l
 #SBATCH -J m{mouse}s{s}_detect
-#SBATCH -A cidbn_legacy
-#SBATCH -p cidbn
+#SBATCH -A {batch_params['A']}
+#SBATCH -p {batch_params['p']}
 #SBATCH -c {cpus}
 #SBATCH -t 04:00:00
 #SBATCH -o {pathSession_target}/log_neuron_detection.log
-#SBATCH -e {pathSession_target}/log_neuron_detection_error.log
+#SBATCH -e {pathSession_target}/log_neuron_detection.log
 #SBATCH --mem=64000
 
 export MKL_NUM_THREADS=1
@@ -308,15 +297,18 @@ python3 {neuron_detection_script} {pathSession_source} {pathSession_target} {cpu
 EOF
 """)
         ## requires absolute path to command, as $PATH is not set for client login
-        _, stdout, stderr = client.exec_command(f'/usr/local/slurm/current/install/bin/sbatch {submit_file}')
+        _, stdout, stderr = client.exec_command(f"/usr/local/slurm/current/install/bin/sbatch {batch_params['submit_file']}")
         # print(stdout.read(),stderr.read())
         # break
 
     # break
 
+# -p medium
+# -A scc_user
+# (oder scc_users ...)
 
 
-def run_neuron_matching(pathMouse,fileName='results_CaImAn*',suffix='',fileType='.hdf5',ssh_config_file_name='id_ed25519_GWDG'):
+def run_neuron_matching(pathMouse,fileName='results_CaImAn*',suffix='',exclude='xyzabc',fileType='.hdf5',ssh_config_file_name='id_ed25519_GWDG',hpc='sofja',subhodeep=False):
     """
         Run neuron matching on the GWDG cluster
 
@@ -327,21 +319,24 @@ def run_neuron_matching(pathMouse,fileName='results_CaImAn*',suffix='',fileType=
     cpus = 8
     mouse = os.path.basename(pathMouse)
 
-    path_code = '~/program_code/PC_analysis'
-    submit_file = f"{path_code}/sbatch_submit.sh"
+    if not suffix.startswith('_') and not(suffix==''):
+        suffix = '_' + suffix
 
-
-    ## setting up connection to server
-    username = 'schmidt124'
-    proxyServerName = 'login.gwdg.de'
-    serverName = 'login-dbn02.hpc.gwdg.de'
-    
-    ssh_key_file = f'/home/wollex/.ssh/{ssh_config_file_name}'
-
-    client = establish_connection(serverName,username,ssh_key_file,proxyJump=proxyServerName)
+    client, path_code, batch_params = set_hpc_params(hpc)
 
     neuron_matching_script = f'{path_code}/run_neuron_matching.py'
     ## first, write the neuron detection script to the server
+
+    if subhodeep:
+        construct_paths = f"""
+# pathsResults = sorted([os.path.join(pathMouse,path,file) for path in os.listdir(pathMouse) if os.path.isdir(os.path.join(pathMouse,path)) for file in os.listdir(os.path.join(pathMouse,path)) if (file.startswith('{fileName[:-1]}') and file.endswith('{fileType}') and not ('{exclude}' in file))])
+
+pathsResults = [path if os.path.exists(path) else False for path in sorted([os.path.join(pathMouse,path,'{fileName[:-1]}_' + os.path.splitext(file)[0] + '{suffix}.mat') for path in os.listdir(pathMouse) if os.path.isdir(os.path.join(pathMouse,path)) for file in os.listdir(os.path.join(pathMouse,path)) if (file.endswith('.tif') and not ('combined' in file))])]
+"""
+    else:
+        construct_paths = f"""
+_, pathsResults = set_paths_default(pathMouse=pathMouse,fileName_in=fileName,fileType='{fileType}',suffix='{suffix}',exclude='{exclude}')
+"""
 
     _, stdout, stderr = client.exec_command(f"""cat > {neuron_matching_script} <<- EOF
 import os, sys
@@ -351,9 +346,7 @@ assert len(sys.argv) == 3, "Need to provide two arguments, pathMouse and fileNam
 _, pathMouse, fileName = sys.argv
 
 print(pathMouse,fileName,'{suffix}')
-
-_, pathsResults = set_paths_default(pathMouse=pathMouse,fileName_in=fileName,fileType='{fileType}',suffix='{suffix}')
-                     
+{construct_paths}
 print(pathsResults)
                                             
 match = matching(pathMouse,paths=pathsResults,suffix='{suffix}',matlab={fileType.endswith('mat')})
@@ -362,63 +355,76 @@ match.run_matching(p_thr=[0.3,0.05])
 
 
     ## write bash script to run neuron detection
-    _, stdout, stderr = client.exec_command(f"""cat > {submit_file} <<- EOF
+    _, stdout, stderr = client.exec_command(f"""cat > {batch_params['submit_file']} <<- EOF
 #!/bin/bash -l
 #SBATCH -J m{mouse}_match
-#SBATCH -A cidbn_legacy
-#SBATCH -p cidbn
+#SBATCH -A {batch_params['A']}
+#SBATCH -p {batch_params['p']}
 #SBATCH -c {cpus}
 #SBATCH -t 02:00:00
 #SBATCH -o {pathMouse}/log_neuron_matching.log
-#SBATCH -e {pathMouse}/log_neuron_matching_error.log
+#SBATCH -e {pathMouse}/log_neuron_matching.log
 #SBATCH --mem=32000
 
 python3 {neuron_matching_script} {pathMouse} {fileName}
 EOF
 """)
     
-    _, stdout, stderr = client.exec_command(f'/usr/local/slurm/current/install/bin/sbatch {submit_file}')
+    _, stdout, stderr = client.exec_command(f"/usr/local/slurm/current/install/bin/sbatch {batch_params['submit_file']}")
     print(stdout.read(),stderr.read())
     
 
 
-def run_neuron_redetection(pathMouse,resultFiles='results_CaImAn*',specific_sessions=[],ssh_config_file_name='id_ed25519_GWDG'):
+def run_neuron_redetection(pathMouse,pathMouse_ref=None,resultFiles='results_CaImAn*',specific_sessions=[],hpc='sofja',subhodeep=False):
+    
     mouse = os.path.basename(pathMouse)
     cpus = 8
     
-    path_code = '~/program_code/PC_analysis'
-    submit_file = f"{path_code}/sbatch_submit.sh"
+    client, path_code, batch_params = set_hpc_params(hpc)
 
+    if pathMouse_ref is None:
+        pathMouse_ref = pathMouse
 
-    ## setting up connection to server
-    username = 'schmidt124'
-    proxyServerName = 'login.gwdg.de'
-    serverName = 'login-dbn02.hpc.gwdg.de'
-    
-    ssh_key_file = f'/home/wollex/.ssh/{ssh_config_file_name}'
+    neuron_redetection_script = f'{path_code}/neuron_redetection.py'
 
-    client = establish_connection(serverName,username,ssh_key_file,proxyJump=proxyServerName)
+#     if subhodeep:
+#         construct_paths = f"""
+# pathsResults = sorted([os.path.join(pathMouse,path,file) for path in os.listdir(pathMouse) if os.path.isdir(os.path.join(pathMouse,path)) for file in os.listdir(os.path.join(pathMouse,path)) if (file.startswith('{resultFiles[:-1]}') and file.endswith('.mat') and not ('redetected' in file))])
+# pathsSessions = pathsResults ## actually not really needed
 
-    neuron_redetection_script = f'{path_code}/neuron_redetection_Subhodeep.py'
+# session, file = os.path.split(pathsResults[s])
+# basename = os.path.splitext(file.split('{resultFiles[:-1]+'_'}')[-1])[0]
+# pathImage = os.path.join(session,(basename+'.tif'))
+# """
+#     else:
+    construct_paths = """
+pathsSessions, pathsResults = set_paths_default(pathMouse,fileName_in=resultFiles,exclude='redetected')
+
+thisSession = os.path.split(pathsSessions[s])[-1]
+try:
+    pathImage = [file for file in os.listdir(pathsSessions[s]) if file.endswith('.tif')][0]
+    pathImage = os.path.join(pathMouse,thisSession,pathImage)
+except:
+    thisSession = os.path.split(pathsSessions[s])[-1]
+    pathImage = [file for file in os.listdir(os.path.join(pathMouse_ref,thisSession)) if (file=='images' or file.endswith('.tif'))][0]
+    pathImage = os.path.join(pathMouse_ref,thisSession,pathImage)
+"""
 
     _, stdout, stderr = client.exec_command(f"""cat > {neuron_redetection_script} <<- EOF
 import os, sys
 from placefield_dynamics.silence_redetection import *
 
-_, pathMouse, resultFiles, s = sys.argv
+_, pathMouse, pathMouse_ref, resultFiles, s = sys.argv
 
-pathsImages = sorted([os.path.join(pathMouse,dir,fname) for dir in os.listdir(pathMouse) if (os.path.isdir(os.path.join(pathMouse,dir)) and dir.startswith('202')) for fname in os.listdir(os.path.join(pathMouse,dir)) if os.path.splitext(fname)[-1]=='.tif'])
+s = int(s)
+{construct_paths}
 
-pathsSession = sorted([os.path.join(pathMouse,session) for session in os.listdir(pathMouse) if session.startswith('Session')])
-
-pathsResults = [os.path.join(pathMouse,session,fname) for session in pathsSession for fname in os.listdir(os.path.join(pathMouse,session)) if (fname.startswith(resultFiles[:-1]) and not ('redetect' in fname))]
-
-print(pathsSession)
+print(pathsSessions)
 print(pathsResults)
-print(pathsImages)
+print(pathImage)
 
-sr = silence_redetection(pathsSession,pathsResults,pathsImages,matlab=True)
-sr.process_session(int(s),ssh_alias=None)
+sr = silence_redetection(pathsSessions,pathsResults)
+sr.process_session(s,path_tmp=os.environ['TMP_LOCAL'],pathImage=pathImage,ssh_alias=None)
 """)
 
     _, stdout, stderr = client.exec_command(f"ls -d {os.path.join(pathMouse,'Session*/')}")
@@ -430,26 +436,181 @@ sr.process_session(int(s),ssh_alias=None)
             if not ((s+1) in specific_sessions):
                 s+=1
                 continue
-        # print(s,dir)
-        # print(f'python3 {neuron_redetection_script} {pathMouse} {resultFiles} {s}')
+
+        print(f'{s}: {dir=}')
+        # os.path.splitext(os.path.basename(resultFiles[s]))[0].removeprefix(resultFiles[:-1])
 
         ## write bash script to run neuron detection
-        _, stdout, stderr = client.exec_command(f"""cat > {submit_file} <<- EOF
+        _, stdout, stderr = client.exec_command(f"""cat > {batch_params['submit_file']} <<- EOF
 #!/bin/bash -l
 #SBATCH -J m{mouse}s{s+1}_redetection
-#SBATCH -A cidbn_legacy
-#SBATCH -p cidbn
+#SBATCH -A {batch_params['A']}
+#SBATCH -p {batch_params['p']}
 #SBATCH -c {cpus}
 #SBATCH -t 2:00:00
 #SBATCH -o {dir}/log_neuron_redetection.log
-#SBATCH -e {dir}/log_neuron_redetection_error.log
-#SBATCH --mem=64000
+#SBATCH -e {dir}/log_neuron_redetection.log
+#SBATCH --mem=32000
 
-python3 {neuron_redetection_script} {pathMouse} {resultFiles} {s}
+python3 {neuron_redetection_script} {pathMouse} {pathMouse_ref} {resultFiles} {s}
 EOF
 """)
-        
-        _, stdout, stderr = client.exec_command(f'/usr/local/slurm/current/install/bin/sbatch {submit_file}')
+
+        _, stdout, stderr = client.exec_command(f"/usr/local/slurm/current/install/bin/sbatch {batch_params['submit_file']}")
         print(stdout.read(),stderr.read())
+        client.exec_command(f"sleep 2 && rm {batch_params['submit_file']}")
+        time.sleep(1)
 
         # break
+
+
+
+def run_neuron_redetection_Subhodeep(pathMouse,resultFiles='results_CaImAn*',specific_sessions=[],hpc='sofja'):
+    
+    mouse = os.path.basename(pathMouse)
+    cpus = 8
+    
+    client, path_code, batch_params = set_hpc_params(hpc)
+
+    neuron_redetection_script = f'{path_code}/neuron_redetection_subhodeep.py'
+
+    construct_paths = f"""
+pathsResults = sorted([os.path.join(pathMouse,path,file) for path in os.listdir(pathMouse) if os.path.isdir(os.path.join(pathMouse,path)) for file in os.listdir(os.path.join(pathMouse,path)) if (file.startswith('{resultFiles[:-1]}') and file.endswith('.mat') and not ('redetected' in file))])
+pathsSessions = [os.path.split(path)[0] for path in pathsResults] ## actually not really needed
+
+session, file = os.path.split(pathsResults[s])
+basename = os.path.splitext(file.split('{resultFiles[:-1]+'_'}')[-1])[0]
+pathImage = os.path.join(session,(basename+'.tif'))
+"""
+        
+    _, stdout, stderr = client.exec_command(f"""cat > {neuron_redetection_script} <<- EOF
+import os, sys
+from placefield_dynamics.silence_redetection import *
+
+_, pathMouse, s = sys.argv
+
+s = int(s)
+{construct_paths}
+
+print(pathsSessions)
+print(pathsResults)
+print(pathImage)
+
+sr = silence_redetection(pathsSessions,pathsResults,matlab=True,params_in=dict(fr=30.05))
+sr.process_session(s,path_tmp=os.environ['TMP_LOCAL'],pathImage=pathImage,ssh_alias=None)
+""")
+# sr = silence_redetection(pathsSessions,pathsResults,matlab=True,params_in=dict(fr=15.))
+
+    ## first, search all 'day folders' in the mouse source path
+    _, stdout, stderr = client.exec_command(f"ls -d {os.path.join(pathMouse,'*/')}")
+    directories = str(stdout.read(), encoding='utf-8').splitlines()
+    s=1
+    for dir in directories:
+        foldername = os.path.split(dir[:-1])[-1]
+        
+        if not foldername.startswith('202'):
+            continue
+        
+        _, stdout, stderr = client.exec_command(f"ls {os.path.join(dir,'*.tif')}")
+        recordings = str(stdout.read(), encoding='utf-8').splitlines()
+
+        # ss = 0
+        for path_recording in recordings:
+            
+            basename = os.path.splitext(os.path.split(path_recording)[-1])[0]
+            if 'combined' in basename:
+                continue
+            
+            if len(specific_sessions):
+                if not (s in specific_sessions):
+                    s+=1
+                    continue
+
+            resultsName = resultFiles[:-1] + '_' + basename + '.mat'
+            resultsPath = os.path.join(dir,resultsName)
+
+            _, stdout, stderr = client.exec_command(f'test -e {resultsPath} && echo "File exists" || echo "File does not exist"')
+            output = stdout.read().decode().strip()
+
+            if not ("File exists" in output):
+                print(f'original CNMF {resultsName} not yet present - process this first!')
+                s+=1
+                break
+            resultsName = resultFiles[:-1] + '_' + basename + '_redetected.mat'
+            resultsPath = os.path.join(dir,resultsName)
+            
+            _, stdout, stderr = client.exec_command(f'test -e {resultsPath} && echo "File exists" || echo "File does not exist"')
+            output = stdout.read().decode().strip()
+
+            # Check the result
+            if "File exists" in output:
+                print(f'file {resultsName} already exists!')
+                s+=1
+                continue
+
+            # print(f'{s}: {dir=}, {resultsPath=}')
+            # resultsPath = os.path.join(dir,resultsName)
+            # print(s,path_recording,resultsName)
+
+            print(f'processing session {s} in dir {dir} with basename {basename}')
+
+            ## write bash script to run neuron detection
+            # print(f'writing log to: {dir}log_neuron_redetection_{basename}.log')
+            _, stdout, stderr = client.exec_command(f"""cat > {batch_params['submit_file']} <<- EOF
+#!/bin/bash -l
+#SBATCH -J m{mouse}s{s}_redetect
+#SBATCH -A {batch_params['A']}
+#SBATCH -p {batch_params['p']}
+#SBATCH -c {cpus}
+#SBATCH -t 04:00:00
+#SBATCH -o {dir}log_neuron_redetection_{basename}.log
+#SBATCH -e {dir}log_neuron_redetection_{basename}.log
+#SBATCH --mem=64000
+
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1
+export OMP_NUM_THREADS=1
+
+python3 {neuron_redetection_script} {pathMouse} {s-1}
+EOF
+""")
+
+            _, stdout, stderr = client.exec_command(f"/usr/local/slurm/current/install/bin/sbatch {batch_params['submit_file']}")
+            print(stdout.read(),stderr.read())
+            client.exec_command(f"sleep 2 && rm {batch_params['submit_file']}")
+            s += 1
+            time.sleep(1)
+            
+
+
+def set_hpc_params(hpc='sofja'):
+
+    ## setting up connection to server
+    ssh_key_file = f'/home/wollex/.ssh/id_ed25519_GWDG'
+    username = 'schmidt124'
+    if hpc=='sofja':
+        proxyServerName = 'login.gwdg.de'
+        serverName = 'login-dbn02.hpc.gwdg.de'
+        client = establish_connection(serverName,username,ssh_key_file,proxyJump=proxyServerName)
+    else:
+        proxyServerName = 'login.gwdg.de'
+        serverName = 'gwdu101.gwdg.de'
+        client = establish_connection(serverName,username,ssh_key_file,proxyJump=proxyServerName)
+
+
+    path_code = '~/program_code/PC_analysis'
+
+
+    ## setting sbatch parameters
+    batch_params = {}
+    batch_params['submit_file'] = f"{path_code}/sbatch_submit.sh"
+
+    if hpc=='sofja':
+        batch_params['A'] = 'cidbn_legacy'
+        batch_params['p'] = 'cidbn'
+    else:
+        batch_params['A'] = 'scc_users'
+        batch_params['p'] = 'medium'
+
+    return client, path_code, batch_params

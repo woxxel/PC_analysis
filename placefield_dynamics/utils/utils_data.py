@@ -22,8 +22,9 @@ class cluster_parameters:
 
             'field_count_max':            5,
 
-            'session_min_correlation':    s_corr_min,
-            'session_max_shift':          50,
+            # 'session_min_correlation':    s_corr_min,
+            'min_session_correlation_zscore':   3.,
+            'session_max_shift':          100,
             'border_margin':              5,
             'min_cluster_count':          2,
 
