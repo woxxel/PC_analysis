@@ -25,9 +25,9 @@ class cluster_parameters:
             "session_max_shift": 100,
             "border_margin": 5,
             "min_cluster_count": 2,
-            "SNR_thr": 2,
-            "rval_thr": 0.0,
-            "CNN_thr": 0.3,
+            # "SNR_thr": 2,
+            # "rval_thr": -1.,
+            # "CNN_thr": 0.3,
             "pm_thr": 0.3,
             "fr_thr": 0.01,
             "MI_alpha": 1,
@@ -40,7 +40,6 @@ class cluster_parameters:
             "sigma_thr": 0,
             "pmass_thr": 0.5,
             "CI_thr": 100,  ### was nbin before - what does it do?
-            "nCluster": 2,
             # 'pathMouse':pathMouse,
             # 'zone_idx':zone_idx,
             # 'zone_mask':zone_mask

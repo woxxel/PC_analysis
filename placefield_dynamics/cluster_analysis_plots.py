@@ -10,7 +10,6 @@ from collections import Counter
 from scipy.optimize import curve_fit
 
 from multiprocessing import get_context
-from caiman.utils.utils import load_dict_from_hdf5
 
 from .cluster_analysis import cluster_analysis
 
@@ -27,17 +26,31 @@ from .utils import (
     get_status_arr,
 )
 
+from .neuron_matching.utils import load_data
+
+
+from caiman.utils.visualization import get_contours
+
 from matplotlib.ticker import AutoMinorLocator, LogLocator, NullFormatter
 
 
 class cluster_analysis_plots(cluster_analysis):
     """
     TODO:
+        [ ] check old "TODO"s from below and update status
+        [ ] move most (costly) analysis parts to analysis class, detach from plotting if not directly needed (such as parameter-dependent stability analysis)
+            [ ] recurrence calculus
+            [ ] stability analysis
+            [ ] what else?
+        [ ] somehow cut down on complexitiy of file to make it more readable and processable...
+        [ ] run surrogate data testing for large scale PC-detection testing
+
+
+    TODO:
         * read measurement time from file
 
         * Plot 45 - missing keys self.stats [p_post_s] - get_transition_prob function has some bugs
         * Plot 22 - missing key - ‘zone_mask’
-        * Plot 25, 27 - missing key - ‘SNR’ - has the name changed to 'SNR_comp'?
         * Plot 41 - indexing issue
         * Plot 46 - missing key - ‘if_firingrate_adapt’
         * Plot 50, 52  - missing behaviour text file
@@ -89,18 +102,18 @@ class cluster_analysis_plots(cluster_analysis):
 
         # session_bool = np.pad(self.status['sessions'][ds:],(0,ds),constant_values=False) & np.pad(self.status['sessions'][:],(0,0),constant_values=False)
 
-        # s_bool = np.zeros(self.data['nSes'],'bool')
-        # s_bool[17:87] = True
-        # s_bool[~self.status['sessions']] = False
         s_bool = self.status["sessions"]
         state_label = "alpha" if (mode == "act") else "beta"
+
+        ## reduce arrays to good clusters and sessions
         status_act = self.status["activity"][self.status["clusters"], :, 1]
-        status_act = status_act[:, s_bool]
-        # status_act = status_act[:,session_bool]
+        status_act = status_act[:, self.status["sessions"]]
+
         status_PC = self.status["activity"][self.status["clusters"], :, 2]
-        status_PC = status_PC[:, s_bool]
+        status_PC = status_PC[:, self.status["sessions"]]
+
         nC_good, nSes_good = status_act.shape
-        nSes_max = np.where(s_bool)[0][-1]
+        nSes_max = np.where(self.status["sessions"])[0][-1]
 
         active_neurons = status_act.mean(0)
         silent_neurons = (~status_act).mean(0)
@@ -178,19 +191,14 @@ class cluster_analysis_plots(cluster_analysis):
             pathLoad = os.path.join(
                 self.paths["sessions"][10], self.paths["fileNameCNMF"]
             )
-            ld = load_dict_from_hdf5(pathLoad)
-            A1 = ld[
-                "A"
-            ]  # .toarray().reshape(self.params['dims'][0],self.params['dims'][1],-1)
-            # Cn = A1.sum(1).reshape(self.params['dims'])
+            ld = load_data(pathLoad)
+            A1 = ld["A"]
             Cn = ld["Cn"].transpose()
             Cn -= Cn.min()
             Cn /= Cn.max()
 
-            pathLoad = os.path.join(
-                self.paths["sessions"][s + 1], self.paths["fileNameCNMF"]
-            )
-            ld = load_dict_from_hdf5(pathLoad)
+            pathLoad = self.paths["neuron_detection"][s + 1]
+            ld = load_data(pathLoad)
             A2 = ld["A"]
 
             # adjust to same reference frame
@@ -255,42 +263,26 @@ class cluster_analysis_plots(cluster_analysis):
             )
 
             if mode == "act":
-                [
-                    ax_ROI.contour(
-                        (a / a.max()).reshape(512, 512).toarray(),
-                        levels=[0.3],
-                        colors="w",
-                        linewidths=[0.3],
-                        linestyles=["dashed"],
-                    )
-                    for a in A1[:, n_s1].T
-                ]
-                [
-                    ax_ROI.contour(
-                        (a / a.max()).reshape(512, 512).toarray(),
-                        levels=[0.3],
-                        colors="w",
-                        linewidths=[0.3],
-                        linestyles=["solid"],
-                    )
-                    for a in A1[:, n_s12].T
-                ]
-                [
-                    ax_ROI.contour(
-                        (a / a.max()).reshape(512, 512).toarray(),
-                        levels=[0.3],
-                        colors="w",
-                        linewidths=[0.3],
-                        linestyles=["dotted"],
-                    )
-                    for a in A_tmp.T
-                ]
+                for style, footprints in zip(
+                    ["dashed", "solid", "dotted"], [A1[:, n_s1], A1[:, n_s12], A_tmp]
+                ):
+                    [
+                        ax_ROI.contour(
+                            (a / a.max()).reshape(512, 512).toarray(),
+                            levels=[0.3],
+                            colors="w",
+                            linewidths=[0.3],
+                            linestyles=[style],
+                        )
+                        for a in footprints.T
+                    ]
+
             elif mode == "PC":
                 # print(np.where(idx_s1)[0])
                 # print(n_s1)
                 for c, n in zip(np.where(idx_s1)[0], n_s1):
                     a = A1[:, n]
-                    f = np.where(self.fields["status"][c, s, :] > 2)[0][0]
+                    f = np.where(self.status["fields"][c, s, :] > 2)[0][0]
                     colVal = scalarMap.to_rgba(self.fields["location"][c, s, f, 0])
                     ax_ROI.contour(
                         (a / a.max()).reshape(512, 512).toarray(),
@@ -299,11 +291,10 @@ class cluster_analysis_plots(cluster_analysis):
                         linewidths=[0.5],
                         linestyles=["dashed"],
                     )
-                # print(np.where(idx_s2)[0])
-                # print(n_s2)
+
                 for i, (c, n) in enumerate(zip(np.where(idx_s2)[0], n_s2)):
                     a = A_tmp[:, i]
-                    f = np.where(self.fields["status"][c, s + 1, :] > 2)[0][0]
+                    f = np.where(self.status["fields"][c, s + 1, :] > 2)[0][0]
                     colVal = scalarMap.to_rgba(self.fields["location"][c, s + 1, f, 0])
                     ax_ROI.contour(
                         (a / a.max()).reshape(512, 512).toarray(),
@@ -314,7 +305,7 @@ class cluster_analysis_plots(cluster_analysis):
                     )
                 for c, n in zip(np.where(idx_s12)[0], n_s12):
                     a = A1[:, n]
-                    f = np.where(self.fields["status"][c, s, :] > 2)[0][0]
+                    f = np.where(self.status["fields"][c, s, :] > 2)[0][0]
                     colVal = scalarMap.to_rgba(self.fields["location"][c, s, f, 0])
                     ax_ROI.contour(
                         (a / a.max()).reshape(512, 512).toarray(),
@@ -404,7 +395,7 @@ class cluster_analysis_plots(cluster_analysis):
                 width=1,
             )
             res = sstats.ks_2samp(status_act.sum(1), status_act_test_rnd.sum(1))
-            print(res)
+            # print(res)
         elif mode == "PC":
             ax.hist(
                 (status_PC_test_rnd).sum(1),
@@ -414,7 +405,7 @@ class cluster_analysis_plots(cluster_analysis):
                 width=1,
             )
             res = sstats.ks_2samp(status_PC.sum(1), status_PC_test_rnd.sum(1))
-            print(res)
+            # print(res)
 
         ax.set_xlabel("$N_{\\%s^+}$" % state_label)
         ax.set_ylabel("# neurons")
@@ -425,8 +416,7 @@ class cluster_analysis_plots(cluster_analysis):
         elif mode == "PC":
             ax.set_ylim([0, 500])
 
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+        ax.spines[["top", "right"]].set_visible(False)
 
         ### calculating ICPI
         status_alt = np.zeros_like(self.status["activity"][..., 1], "int")
@@ -436,13 +426,13 @@ class cluster_analysis_plots(cluster_analysis):
         for c in np.where(self.status["clusters"])[0]:
             s0 = 0
             inAct = False
-            for s in np.where(s_bool)[0]:
+            for s in np.where(self.status["sessions"])[0]:
                 if inAct:
                     if ~self.status["activity"][c, s, 1]:
-                        La = s_bool[s0:s].sum()
+                        La = self.status["sessions"][s0:s].sum()
                         status_alt[c, s0:s] = La
                         IPI_test[La] += 1
-                        # print(s_bool[s:s0].sum())
+                        # print(self.status["sessions"][s:s0].sum())
                         inAct = False
                 else:
                     if self.status["activity"][c, s, 1]:
@@ -450,11 +440,11 @@ class cluster_analysis_plots(cluster_analysis):
                         s0 = s
                         inAct = True
             if inAct:
-                La = s_bool[s0 : s + 1].sum()
+                La = self.status["sessions"][s0 : s + 1].sum()
                 status_alt[c, s0 : s + 1] = La
                 IPI_test[La] += 1
 
-        status_alt[:, ~s_bool] = 0
+        status_alt[:, ~self.status["sessions"]] = 0
         # print(IPI_test)
         ### obtain inter-coding intervals
         ICI = np.zeros((nSes_good, 2))  # inter-coding-interval
@@ -465,7 +455,7 @@ class cluster_analysis_plots(cluster_analysis):
 
         t_start = time.time()
         ICI[:, 0] = get_ICPI(status, mode="ICI")
-        print("time taken: %.2f" % (time.time() - t_start))
+        # print("time taken: %.2f" % (time.time() - t_start))
         t_start = time.time()
         ICI[:, 1] = get_ICPI(status_test, mode="ICI")
 
@@ -681,13 +671,21 @@ class cluster_analysis_plots(cluster_analysis):
         status = status_act if mode == "act" else status_PC
         status_dep = None if mode == "act" else status_act
 
-        status[:, ~s_bool] = False
+        status[:, ~self.status["sessions"]] = False
         ds = 1
         dp_pos, p_pos = get_dp(
-            status, status_dep=status_dep, status_session=s_bool, ds=ds, mode=mode
+            status,
+            status_dep=status_dep,
+            status_session=self.status["sessions"],
+            ds=ds,
+            mode=mode,
         )
         dp_neg, p_neg = get_dp(
-            ~status, status_dep=status_dep, status_session=s_bool, ds=ds, mode=mode
+            ~status,
+            status_dep=status_dep,
+            status_session=self.status["sessions"],
+            ds=ds,
+            mode=mode,
         )
 
         status_dep = None if mode == "act" else status_act_test
@@ -697,8 +695,8 @@ class cluster_analysis_plots(cluster_analysis):
         dp_neg_test, p_neg_test = get_dp(
             ~status_test, status_dep=status_dep, ds=ds, mode=mode
         )
-        # dp_pos,p_pos = get_dp(status,status_act,status_dep=status_dep,status_session=s_bool,ds=ds,mode=mode)
-        # dp_neg,p_neg = get_dp(~status,status_act,status_dep=status_dep,status_session=s_bool,ds=ds,mode=mode)
+        # dp_pos,p_pos = get_dp(status,status_act,status_dep=status_dep,status_session=self.status["sessions"],ds=ds,mode=mode)
+        # dp_neg,p_neg = get_dp(~status,status_act,status_dep=status_dep,status_session=self.status["sessions"],ds=ds,mode=mode)
         #
         # status_dep = None if mode=='act' else status_act_test
         # dp_pos_test,p_pos_test = get_dp(status_test,status_act_test,status_dep=status_dep,ds=ds,mode=mode)
@@ -730,8 +728,8 @@ class cluster_analysis_plots(cluster_analysis):
         self.pl_dat.remove_frame(ax, ["top", "right"])
 
         res = sstats.ks_2samp(dp_pos, dp_pos_test)
-        print("IPI")
-        print(res)
+        # print("IPI")
+        # print(res)
         # print(np.nanmean(dp_pos),np.nanstd(dp_pos))
         # print(np.nanpercentile(dp_pos,[2.5,97.5]))
         # print(np.nanmean(dp_pos_test),np.nanstd(dp_pos_test))
@@ -740,8 +738,8 @@ class cluster_analysis_plots(cluster_analysis):
         # print(res)
 
         res = sstats.ks_2samp(dp_neg, dp_neg_test)
-        print("IAI")
-        print(res)
+        # print("IAI")
+        # print(res)
         # print(np.nanmean(dp_neg),np.nanstd(dp_neg))
         # print(np.nanmean(dp_neg_test),np.nanstd(dp_neg_test))
 
@@ -967,14 +965,14 @@ class cluster_analysis_plots(cluster_analysis):
         # print(IPI_stats)
         # print(IPI*np.arange(self.data['nSes']))
         # print((IPI*np.arange(self.data['nSes'])).sum())
-        status_act = status_act[:, s_bool]
-        status_PC = status_PC[:, s_bool]
-        status = status[:, s_bool]
+        status_act = status_act[:, self.status["sessions"]]
+        status_PC = status_PC[:, self.status["sessions"]]
+        status = status[:, self.status["sessions"]]
         recurr = np.zeros((nSes_good, nSes_good)) * np.NaN
         N_active = status_act.sum(0)
-        # session_bool = np.pad(s_bool[1:],(0,1),constant_values=False) & np.pad(s_bool[:],(0,0),constant_values=False)
+        # session_bool = np.pad(self.status["sessions"][1:],(0,1),constant_values=False) & np.pad(self.status["sessions"][:],(0,0),constant_values=False)
 
-        for s in range(nSes_good):  # np.where(s_bool)[0]:
+        for s in range(nSes_good):  # np.where(self.status["sessions"])[0]:
             overlap = status[status[:, s], :].sum(0).astype("float")
             N_ref = N_active if mode == "act" else status_act[status_PC[:, s], :].sum(0)
             recurr[s, 1 : nSes_good - s] = (overlap / N_ref)[s + 1 :]
@@ -1001,8 +999,8 @@ class cluster_analysis_plots(cluster_analysis):
         rec_mean = np.nanmean(np.nanmean(recurr, 0))
         rec_var = np.sqrt(np.nansum(np.nanvar(recurr, 0)) / (recurr.shape[1] - 1))
 
-        print(rec_mean)
-        print(rec_var)
+        # print(rec_mean)
+        # print(rec_var)
 
         if mode == "act":
             ax_sketch = plt.axes([0.675, 0.875, 0.15, 0.1])
@@ -1231,6 +1229,9 @@ class cluster_analysis_plots(cluster_analysis):
 
         # ax1.plot(t_ses[self.status['sessions']],np.ones(self.status['sessions'].sum())*nC,color='k',linestyle=':',label='# neurons')
         t_ses = np.arange(self.data["nSes"])
+        ax1.axhline(
+            self.status["clusters"].sum(), color="k", linestyle=":", linewidth=0.5
+        )
         ax1.scatter(
             t_ses[self.status["sessions"]],
             self.status["activity"][:, self.status["sessions"], 1].sum(0),
@@ -1240,9 +1241,8 @@ class cluster_analysis_plots(cluster_analysis):
             facecolor="none",
             label="# active neurons",
         )
-        ax1.set_ylim([0, self.data["nC"] * 1.2])
-        ax1.set_xlim([0, t_ses[-1]])
-        ax1.legend(loc="upper right")
+        ax1.set_ylim([0, self.data["nC"] * 1.3])
+        # ax1.set_xlim([0, t_ses[-1]])
 
         ax1.scatter(
             t_ses[self.status["sessions"]],
@@ -1266,9 +1266,9 @@ class cluster_analysis_plots(cluster_analysis):
         ax2.tick_params(axis="y", colors="red")
         ax2.set_ylabel("fraction PCs")
 
-        ax1.set_xlim([0, t_ses[-1]])
+        # ax1.set_xlim([-1, t_ses[-1]])
         ax1.set_xlabel("session s", fontsize=14)
-        ax1.legend(loc="upper right")
+        ax1.legend(loc="upper left")
         plt.tight_layout()
         plt.show(block=False)
 
@@ -1278,194 +1278,88 @@ class cluster_analysis_plots(cluster_analysis):
 
     def plot_recurrence(self, sv=False, n_processes=4):
 
-        # plt.figure()
-        # ax1 = plt.axes([0.2,0.3,0.75,0.65])
-        # ax1.plot([0,self.data['nSes']],[0.75,0.75],color='k',linestyle=':')
         t_ses = np.arange(self.data["nSes"])
-        recurrence = {
-            "active": {
-                "all": np.zeros((self.data["nSes"], self.data["nSes"])) * np.NaN,
-                "continuous": np.zeros((self.data["nSes"], self.data["nSes"])) * np.NaN,
-                "overrepresentation": np.zeros((self.data["nSes"], self.data["nSes"]))
-                * np.NaN,
-            },
-            "coding": {
-                "all": np.zeros((self.data["nSes"], self.data["nSes"])) * np.NaN,
-                "ofactive": np.zeros((self.data["nSes"], self.data["nSes"])) * np.NaN,
-                "continuous": np.zeros((self.data["nSes"], self.data["nSes"])) * np.NaN,
-                "overrepresentation": np.zeros((self.data["nSes"], self.data["nSes"]))
-                * np.NaN,
-            },
-        }
-
-        N = {
-            "active": self.status["activity"][:, :, 1].sum(0),
-            "coding": self.status["activity"][:, :, 2].sum(0),
-        }
-        L = 10  # 00
-
-        # for s in tqdm(range(self.data['nSes'])):#min(30,self.data['nSes'])):
-        if n_processes > 1:
-            pool = get_context("spawn").Pool(n_processes)
-            res = pool.starmap(
-                get_overlap,
-                zip(
-                    range(self.data["nSes"]),
-                    itertools.repeat((self.status["activity"], N, L)),
-                ),
-            )
-        # print(res)
-        for s, r in enumerate(res):
-            for pop in r.keys():
-                for key in r[pop].keys():
-                    recurrence[pop][key][s, :] = r[pop][key]
-
-        # for pop in recurrence.keys():
-        # for key in recurrence[pop].keys():
-        # recurrence[pop][key][:,~self.status['sessions']] = np.NaN
-        # recurrence[pop][key][~self.status['sessions'],:] = np.NaN
-
-        # print(recurrence['active']['all'])
-        # for s in tqdm(range(self.data['nSes'])):#min(30,self.data['nSes'])):
-
-        # recurrence['active']['all'][s,np.where(~self.status['sessions'][s:])[0]] = np.NaN
-        # start_recurr = np.zeros(self.data['nSes'])*np.NaN
-        # for s in range(self.data['nSes']-1):
-        # if self.status['sessions'][s] and self.status['sessions'][s+1]:
-        # start_recurr[s] = self.status['activity'][self.status['activity'][:,s,2],s+1,2].sum()/self.status['activity'][:,s,2].sum()
-
-        # plt.figure()
-        # plt.plot(pl_dat.n_edges,start_recurr)#recurrence['active']['all'][:,1])
-        # plt.show(block=False)
 
         f, axs = plt.subplots(2, 2, figsize=(10, 4))
 
-        axs[1][0].axhline(0, color=[0.8, 0.8, 0.8], linestyle="--")
-        axs[1][1].axhline(0, color=[0.8, 0.8, 0.8], linestyle="--")
-
-        axs[0][0].scatter(
-            self.pl_dat.n_edges,
-            recurrence["active"]["all"][0, :],
-            5,
-            color=[0.8, 0.8, 0.8],
-            marker="o",
-            label="any",
-        )
-        axs[0][0].scatter(
-            self.pl_dat.n_edges,
-            recurrence["active"]["continuous"][0, :],
-            5,
-            color=[0.6, 1, 0.6],
-            marker="o",
-            label="continuous",
-        )
-
-        axs[0][1].scatter(
-            self.pl_dat.n_edges,
-            recurrence["coding"]["all"][0, :],
-            5,
-            color=[0.8, 0.8, 0.8],
-            marker="o",
-            label="any",
-        )
-        axs[0][1].scatter(
-            self.pl_dat.n_edges,
-            recurrence["coding"]["continuous"][0, :],
-            5,
-            color=[0.6, 1, 0.6],
-            marker="o",
-            label="continuous",
-        )
+        for axx in [axs[1][0], axs[1][1]]:
+            axx.axhline(0, color=[0.8, 0.8, 0.8], linestyle="--")
 
         for s in range(self.data["nSes"]):
-            axs[0][0].scatter(
-                self.pl_dat.n_edges,
-                recurrence["active"]["all"][s, :],
-                5,
-                color=[0.8, 0.8, 0.8],
-                marker="o",
-            )
-            axs[0][0].scatter(
-                self.pl_dat.n_edges,
-                recurrence["active"]["continuous"][s, :],
-                5,
-                color=[0.6, 1, 0.6],
-                marker="o",
-            )
+            for i, population in enumerate(["active", "coding"]):
+                for key, col in zip(
+                    ["all", "continuous"], [[0.8, 0.8, 0.8], [0.6, 1.0, 0.6]]
+                ):
+                    axs[0][i].scatter(
+                        self.pl_dat.n_edges,
+                        self.recurrence[population][key][s, :],
+                        5,
+                        color=col,
+                        marker="o",
+                        label=key if s == 0 else None,
+                    )
 
-            axs[0][1].scatter(
-                self.pl_dat.n_edges,
-                recurrence["coding"]["all"][s, :],
-                5,
-                color=[0.8, 0.8, 0.8],
-                marker="o",
-            )
-            axs[0][1].scatter(
-                self.pl_dat.n_edges,
-                recurrence["coding"]["continuous"][s, :],
-                5,
-                color=[0.6, 1, 0.6],
-                marker="o",
-            )
-
-            axs[1][0].scatter(
-                self.pl_dat.n_edges,
-                recurrence["active"]["overrepresentation"][s, :],
-                5,
-                color=[0.8, 0.8, 0.8],
-                marker="o",
-            )
-            axs[1][1].scatter(
-                self.pl_dat.n_edges,
-                recurrence["coding"]["overrepresentation"][s, :],
-                5,
-                color=[0.8, 0.8, 0.8],
-                marker="o",
-            )
+                axs[1][i].scatter(
+                    self.pl_dat.n_edges,
+                    self.recurrence[population]["overrepresentation"][s, :],
+                    5,
+                    color=[0.8, 0.8, 0.8],
+                    marker="o",
+                )
 
         axs[0][0].plot(
-            self.pl_dat.n_edges, np.nanmean(recurrence["active"]["all"], 0), color="k"
+            self.pl_dat.n_edges,
+            np.nanmean(self.recurrence["active"]["all"], 0),
+            color="k",
         )
-
         axs[0][0].legend(loc="lower right", fontsize=12)
 
         axs[1][0].plot(
             self.pl_dat.n_edges,
-            np.nanmean(recurrence["active"]["overrepresentation"], 0),
+            np.nanmean(self.recurrence["active"]["overrepresentation"], 0),
             color="k",
         )
         axs[0][1].plot(
-            self.pl_dat.n_edges, np.nanmean(recurrence["coding"]["all"], 0), color="k"
+            self.pl_dat.n_edges,
+            np.nanmean(self.recurrence["coding"]["all"], 0),
+            color="k",
         )
         axs[1][1].plot(
             self.pl_dat.n_edges,
-            np.nanmean(recurrence["coding"]["overrepresentation"], 0),
+            np.nanmean(self.recurrence["coding"]["overrepresentation"], 0),
             color="k",
         )
 
-        axs[0][0].set_xticks([])
-        axs[0][0].set_title("active cells")
-        axs[0][1].set_xticks([])
-        axs[0][1].set_title("place cells")
-        axs[0][0].set_yticks(np.linspace(0, 1, 3))
-        axs[0][1].set_yticks(np.linspace(0, 1, 3))
-
-        axs[0][0].set_xlim([0, t_ses[-1]])
-        axs[0][1].set_xlim([0, t_ses[-1]])
-        axs[1][0].set_xlim([0, t_ses[-1]])
-        axs[1][1].set_xlim([0, t_ses[-1]])
-
-        axs[0][0].set_ylim([0, 1])
-        axs[0][1].set_ylim([0, 1])
-
-        axs[1][0].set_ylim([-10, 30])
-        axs[1][1].set_ylim([-10, 30])
-
-        axs[1][0].set_xlabel("session diff. $\Delta$ s", fontsize=14)
-        axs[1][1].set_xlabel("session diff. $\Delta$ s", fontsize=14)
-
-        axs[0][0].set_ylabel("fraction", fontsize=14)
-        axs[1][0].set_ylabel("overrepr.", fontsize=14)
+        plt.setp(
+            axs[0][0],
+            xlim=[0, t_ses[-1]],
+            ylim=[0, 1],
+            xticks=[],
+            yticks=np.linspace(0, 1, 3),
+            ylabel="fraction",
+            title="active cells",
+        )
+        plt.setp(
+            axs[0][1],
+            xlim=[0, t_ses[-1]],
+            ylim=[0, 1],
+            xticks=[],
+            yticks=np.linspace(0, 1, 3),
+            title="place cells",
+        )
+        plt.setp(
+            axs[1][0],
+            xlim=[0, t_ses[-1]],
+            ylim=[-10, 30],
+            xlabel="session diff. $\Delta$ s",
+            ylabel="overrepr.",
+        )
+        plt.setp(
+            axs[1][1],
+            xlim=[0, t_ses[-1]],
+            ylim=[-10, 30],
+            xlabel="session diff. $\Delta$ s",
+        )
 
         plt.tight_layout()
         plt.show(block=False)
@@ -1479,8 +1373,8 @@ class cluster_analysis_plots(cluster_analysis):
         self.pl_dat.plot_with_confidence(
             ax,
             self.pl_dat.n_edges - 1,
-            np.nanmean(recurrence["active"]["all"], 0),
-            1.96 * np.nanstd(recurrence["active"]["all"], 0),
+            np.nanmean(self.recurrence["active"]["all"], 0),
+            1.96 * np.nanstd(self.recurrence["active"]["all"], 0),
             col="k",
             ls="-",
             label="recurrence of active cells",
@@ -1510,15 +1404,15 @@ class cluster_analysis_plots(cluster_analysis):
         self.pl_dat.plot_with_confidence(
             ax,
             self.pl_dat.n_edges - 1,
-            np.nanmean(recurrence["coding"]["ofactive"], 0),
-            1.0 * np.nanstd(recurrence["coding"]["ofactive"], 0),
+            np.nanmean(self.recurrence["coding"]["ofactive"], 0),
+            1.0 * np.nanstd(self.recurrence["coding"]["ofactive"], 0),
             col="k",
             ls="-",
             label="recurrence of place cells (of active)",
         )
         ax.plot(
             self.pl_dat.n_edges - 1,
-            np.nanmean(recurrence["coding"]["all"], 0),
+            np.nanmean(self.recurrence["coding"]["all"], 0),
             "k--",
             label="recurrence of place cells",
         )
@@ -1659,8 +1553,6 @@ class cluster_analysis_plots(cluster_analysis):
         ### stats of PCs
         plt.figure(figsize=(4, 3), dpi=self.pl_dat.sv_opt["dpi"])
 
-        mask_fields = self.fields["status"] < 3
-
         ax = plt.subplot(2, 2, 1)
         nPC = self.status["activity"][..., 2].sum(0).astype("float")
         nPC[~self.status["sessions"]] = np.NaN
@@ -1680,10 +1572,14 @@ class cluster_analysis_plots(cluster_analysis):
             print(key)
             if len(self.fields[key].shape) == 4:
                 dat = np.ma.array(
-                    self.fields[key][..., 0], mask=mask_fields, fill_value=np.NaN
+                    self.fields[key][..., 0],
+                    mask=~self.status["fields"],
+                    fill_value=np.NaN,
                 )
             else:
-                dat = np.ma.array(self.fields[key], mask=mask_fields, fill_value=np.NaN)
+                dat = np.ma.array(
+                    self.fields[key], mask=~self.status["fields"], fill_value=np.NaN
+                )
 
             ax = plt.subplot(2, 2, i + 2)  # axes([0.1,0.6,0.35,0.35])
             dat_mean = np.zeros(nSes) * np.NaN
@@ -1759,7 +1655,7 @@ class cluster_analysis_plots(cluster_analysis):
         pathLoad = self.paths["neuron_detection"][s + 1]
         # ld = loadmat(pathLoad)
 
-        ld = load_dict_from_hdf5(pathLoad)
+        ld = load_data(pathLoad)
         A = ld["A"]
         # .toarray().reshape(self.params['dims'][0],self.params['dims'][1],-1)
         # Cn = A.sum(1).reshape(self.params['dims'])
@@ -1783,40 +1679,45 @@ class cluster_analysis_plots(cluster_analysis):
 
         # plot contours occuring in first and in second session, only, and...
         # plot contours occuring in both sessions (taken from first session)
-        idx_act = self.status["activity"][:, s, 1] & (~self.status["activity"][:, s, 2])
-        idx_PC = self.status["activity"][:, s, 2]
-        c_arr_PC = np.where(idx_PC)[0]
+        # idx_act = self.status["activity"][:, s, 1] & (~self.status["activity"][:, s, 2])
+        # idx_PC = self.status["activity"][:, s, 2]
+        # c_arr_PC = np.where(idx_PC)[0]
 
-        n_act = self.matching["IDs"][idx_act, s].astype("int")
-        n_PC = self.matching["IDs"][idx_PC, s].astype("int")
+        n_act = self.matching["IDs"][
+            self.status["activity"][:, s, 1] & (~self.status["activity"][:, s, 2]), s
+        ].astype("int")
+        n_PC = self.matching["IDs"][self.status["activity"][:, s, 2], s].astype("int")
+        idx_PC = np.where(self.status["activity"][:, s, 2])[0]
+        # print(n_PC)
 
         twilight = plt.get_cmap("hsv")
         cNorm = colors.Normalize(vmin=0, vmax=100)
         scalarMap = plt.cm.ScalarMappable(norm=cNorm, cmap=twilight)
 
-        if sv:  ## enable, when saving
-            [
-                ax_ROI.contour(
-                    (a / a.max()).reshape(512, 512).toarray(),
-                    levels=[0.3],
-                    colors="w",
-                    linewidths=[0.3],
-                    linestyles=["dotted"],
-                )
-                for a in A[:, n_act].T
-            ]
+        contours = get_contours(A[:, n_act], self.params["dims"])
+        for idx, contour in enumerate(contours):
+            n = n_act[idx]
+            ax_ROI.plot(
+                contour["coordinates"][:, 1],
+                contour["coordinates"][:, 0],
+                linewidth=0.3,
+                linestyle=":",
+                color="white",
+            )
 
-            for c, n in zip(np.where(idx_PC)[0], n_PC):
-                a = A[:, n]
-                f = np.where(self.fields["status"][c, s, :] > 2)[0][0]
-                colVal = scalarMap.to_rgba(self.fields["location"][c, s, f, 0])
-                ax_ROI.contour(
-                    (a / a.max()).reshape(512, 512).toarray(),
-                    levels=[0.3],
-                    colors=[colVal],
-                    linewidths=[0.5],
-                    linestyles=["solid"],
-                )
+        contours = get_contours(A[:, n_PC], self.params["dims"])
+        for idx, contour in enumerate(contours):
+            n = idx_PC[idx]
+            # print(n, s)
+            # print(self.status["fields"][n, s, :])
+            f = np.where(self.status["fields"][n, s, :])[0][0]
+            colVal = scalarMap.to_rgba(self.fields["location"][n, s, f, 0])
+            ax_ROI.plot(
+                contour["coordinates"][:, 1],
+                contour["coordinates"][:, 0],
+                linewidth=0.5,
+                color=colVal,
+            )
 
         cbaxes = plt.axes([0.345, 0.75, 0.01, 0.2])
         cb = fig.colorbar(scalarMap, cax=cbaxes, orientation="vertical")
@@ -1836,11 +1737,11 @@ class cluster_analysis_plots(cluster_analysis):
         add_number(fig, ax, order=6)
         fields = np.zeros((100, nSes))
         for i, s in enumerate(np.where(self.status["sessions"])[0]):
-            idx_PC = np.where(self.fields["status"][:, s, :] >= 3)
+            idx_PC = np.where(self.status["fields"][:, s, :])
             # fields[s,:] = np.nansum(self.fields['p_x'][:,s,:,:],1).sum(0)
             fields[:, s] = np.nansum(self.fields["p_x"][idx_PC[0], s, idx_PC[1], :], 0)
         fields /= fields.sum(0)
-        fields = gauss_smooth(fields, (2, 0))
+        fields = gauss_smooth(fields, (1, 0))
 
         im = ax.imshow(
             fields, origin="lower", aspect="auto", cmap="hot"
@@ -1984,12 +1885,12 @@ class cluster_analysis_plots(cluster_analysis):
                 # dat_nPC = np.ma.array(self.stats[key], mask=mask_active, fill_value=np.NaN)
                 dat_PC = np.ma.array(self.stats[key], mask=mask_PC, fill_value=np.NaN)
             else:
-                mask_PC = ~self.status_fields
-                #     # mask_active = ~(self.status['activity'][...,1][...,np.newaxis] & (~self.status_fields))
+                mask_PC = ~self.status["fields"]
+                #     # mask_active = ~(self.status['activity'][...,1][...,np.newaxis] & (~self.status["fields"]))
                 # dat_nPC = np.ma.array(self.fields['baseline'][...,0], mask=mask_active, fill_value=np.NaN)
                 dat_PC = np.ma.array(
-                    self.fields["amplitude"][..., 0]
-                    / self.fields["baseline"][..., 0, np.newaxis],
+                    self.fields["amplitude"][..., 0],
+                    # / self.fields["baseline"][..., 0, np.newaxis],
                     mask=mask_PC,
                     fill_value=np.NaN,
                 )
@@ -2116,7 +2017,7 @@ class cluster_analysis_plots(cluster_analysis):
 
         # if ordered:
         # print('aligned order')
-        idxes_tmp = np.where(self.status_fields[:, s_ref, :])
+        idxes_tmp = np.where(self.status["fields"][:, s_ref, :])
         idxes = idxes_tmp[0]
         sort_idx = np.argsort(
             self.fields["location"][idxes_tmp[0], s_ref, idxes_tmp[1], 0]
@@ -2150,7 +2051,7 @@ class cluster_analysis_plots(cluster_analysis):
         ):
             ax = plt.axes([0.1 + i * width, 0.525, width, 0.4])
             # ax = plt.subplot(2,n_plots+1,i+1)
-            idxes_tmp = np.where(self.status_fields[:, s, :])
+            idxes_tmp = np.where(self.status["fields"][:, s, :])
             idxes = idxes_tmp[0]
             sort_idx = np.argsort(
                 self.fields["location"][idxes_tmp[0], s, idxes_tmp[1], 0]
@@ -2161,10 +2062,10 @@ class cluster_analysis_plots(cluster_analysis):
             nID = len(sort_idx)
 
             firingmap = self.stats["firingmap"][sort_idx, s, :]
-            firingmap = gauss_smooth(firingmap, [0, 3])
+            firingmap = gauss_smooth(firingmap, [0, 1])
             firingmap = firingmap - np.nanmin(firingmap, 1)[:, np.newaxis]
             # firingmap = firingmap / np.nanmax(firingmap,1)[:,np.newaxis]
-            ax.imshow(firingmap, aspect="auto", origin="upper", cmap="jet", clim=[0, 5])
+            ax.imshow(firingmap, aspect="auto", origin="upper", cmap="jet", clim=[0, 2])
 
             title_str = "s"
             ds = s - s_ref
@@ -2194,11 +2095,11 @@ class cluster_analysis_plots(cluster_analysis):
             # if not ordered:
 
             firingmap = self.stats["firingmap"][sort_idx_ref, s, :]
-            firingmap = gauss_smooth(firingmap, [0, 3])
+            firingmap = gauss_smooth(firingmap, [0, 1])
             firingmap = firingmap - np.nanmin(firingmap, 1)[:, np.newaxis]
             # firingmap = firingmap / np.nanmax(firingmap,1)[:,np.newaxis]
             im = ax.imshow(
-                firingmap, aspect="auto", origin="upper", cmap="jet", clim=[0, 5]
+                firingmap, aspect="auto", origin="upper", cmap="jet", clim=[0, 2]
             )
 
             ax.set_xlim([0, nbin])
@@ -2227,10 +2128,10 @@ class cluster_analysis_plots(cluster_analysis):
         idx_PC = np.random.choice(idx_strong_PC)  ## 28,1081
         print(idx_PC)
         firingmap = self.stats["firingmap"][idx_PC, ...]
-        firingmap = gauss_smooth(firingmap, [0, 3])
+        firingmap = gauss_smooth(firingmap, [0, 1])
         firingmap = firingmap - np.nanmin(firingmap, 1)[:, np.newaxis]
         # firingmap = firingmap / np.nanmax(firingmap,1)[:,np.newaxis]
-        ax.imshow(firingmap, aspect="auto", origin="upper", cmap="jet", clim=[0, 5])
+        ax.imshow(firingmap, aspect="auto", origin="upper", cmap="jet", clim=[0, 2])
         ax.barh(
             range(nSes),
             -(self.status["activity"][idx_PC, :, 2] * 10.0),
@@ -2267,47 +2168,12 @@ class cluster_analysis_plots(cluster_analysis):
 
         bin_to_steps = steps / nbin
 
-        s_bool = np.ones(nSes, "bool")
-        s_bool[~self.status["sessions"]] = False
-
-        recurrence = {
-            "active": {
-                "all": np.zeros((nSes, nSes)) * np.NaN,
-                "continuous": np.zeros((nSes, nSes)) * np.NaN,
-                "overrepresentation": np.zeros((nSes, nSes)) * np.NaN,
-            },
-            "coding": {
-                "all": np.zeros((nSes, nSes)) * np.NaN,
-                "ofactive": np.zeros((nSes, nSes)) * np.NaN,
-                "continuous": np.zeros((nSes, nSes)) * np.NaN,
-                "overrepresentation": np.zeros((nSes, nSes)) * np.NaN,
-            },
-        }
-
-        N = {
-            "active": self.status["activity"][:, :, 1].sum(0),
-            "coding": self.status["activity"][:, :, 2].sum(0),
-        }
-        L = 100
-
-        # for s in tqdm(range(nSes)):#min(30,nSes)):
-        if n_processes > 1:
-            pool = get_context("spawn").Pool(n_processes)
-            res = pool.starmap(
-                get_overlap,
-                zip(range(nSes), itertools.repeat((self.status["activity"], N, L))),
-            )
-        for s, r in enumerate(res):
-            for pop in r.keys():
-                for key in r[pop].keys():
-                    recurrence[pop][key][s, :] = r[pop][key]
-
         ### ds = 0
         plt0 = True
         if plt0:
             p_shift = np.zeros(steps)
-            for s in np.where(s_bool)[0]:
-                idx_field = np.where(self.status_fields[:, s, :])
+            for s in np.where(self.status["sessions"])[0]:
+                idx_field = np.where(self.status["fields"][:, s, :])
                 for c, f in zip(idx_field[0], idx_field[1]):
                     roll = round(
                         (-self.fields["location"][c, s, f, 0] + nbin / 2) * bin_to_steps
@@ -2341,7 +2207,11 @@ class cluster_analysis_plots(cluster_analysis):
         if celltype == "reward":
             idx_celltype = self.status["activity"][c_shifts, s1_shifts, 4]
 
-        idx_celltype = idx_celltype & s_bool[s1_shifts] & s_bool[s2_shifts]
+        idx_celltype = (
+            idx_celltype
+            & self.status["sessions"][s1_shifts]
+            & self.status["sessions"][s2_shifts]
+        )
 
         if reprocess:
             self.stability = self.calculate_placefield_stability(
@@ -2362,7 +2232,10 @@ class cluster_analysis_plots(cluster_analysis):
 
             Ds = s2_shifts - s1_shifts
             idx_ds = np.where(
-                (Ds == ds) & idx_celltype & s_bool[s1_shifts] & s_bool[s2_shifts]
+                (Ds == ds)
+                & idx_celltype
+                & self.status["sessions"][s1_shifts]
+                & self.status["sessions"][s2_shifts]
             )[0]
 
             idx_shifts = self.compare["pointer"].data[idx_ds].astype("int") - 1
@@ -2407,7 +2280,11 @@ class cluster_analysis_plots(cluster_analysis):
         dx_arr = np.linspace(-L_track / 2 + 0.5, L_track / 2 - 0.5, nbin)
         for ds in range(1, nSes):  # min(nSes,30)):
             Ds = s2_shifts - s1_shifts
-            idx_ds = np.where((Ds == ds) & s_bool[s1_shifts] & s_bool[s2_shifts])[0]
+            idx_ds = np.where(
+                (Ds == ds)
+                & self.status["sessions"][s1_shifts]
+                & self.status["sessions"][s2_shifts]
+            )[0]
             N_data[ds] = len(idx_ds)
 
             idx_shifts = self.compare["pointer"].data[idx_ds].astype("int") - 1
@@ -2421,7 +2298,7 @@ class cluster_analysis_plots(cluster_analysis):
             session_bool = np.pad(
                 self.status["sessions"][ds:], (0, ds), constant_values=False
             ) & np.pad(self.status["sessions"][:], (0, 0), constant_values=False)
-            N_total[ds] = self.status_fields[:, session_bool, :].sum()
+            N_total[ds] = self.status["fields"][:, session_bool, :].sum()
             # if ds < 20:
             #     plt.subplot(5,4,ds)
             #     plt.plot(dx_arr,np.cumsum(shifts_distr),'k')
@@ -2435,9 +2312,12 @@ class cluster_analysis_plots(cluster_analysis):
                 self.stability["all"]["mean"][ds, 3],
             )
 
-            D_KS[ds] = np.abs(np.cumsum(shifts_distr) - np.cumsum(fun_distr)).max()
+            D_KS[ds] = np.abs(
+                np.nancumsum(shifts_distr) - np.nancumsum(fun_distr)
+            ).max()
 
             p_rec_alt[ds] = N_stable[ds] / N_data[ds]
+        print(D_KS)
         # plt.show(block=False)
 
         # plt.figure(fig_test.number)
@@ -2450,7 +2330,11 @@ class cluster_analysis_plots(cluster_analysis):
         ### obtain shift data
         Ds = s2_shifts - s1_shifts
         ds = 1
-        idx_ds = np.where((Ds == ds) & s_bool[s1_shifts] & s_bool[s2_shifts])[0]
+        idx_ds = np.where(
+            (Ds == ds)
+            & self.status["sessions"][s1_shifts]
+            & self.status["sessions"][s2_shifts]
+        )[0]
         for i, (ax, ax_shift) in enumerate(zip([ax_p1, ax_p2], [ax_shift1, ax_shift2])):
 
             ## choose random shift entry
@@ -2510,7 +2394,11 @@ class cluster_analysis_plots(cluster_analysis):
         ax_img.set_yticks([])
 
         # x_lim = np.where(self.status['sessions'])[0][-1] - np.where(self.status['sessions'])[0][0] + 1
-        x_lim = np.where(s_bool)[0][-1] - np.where(s_bool)[0][0] + 1
+        x_lim = (
+            np.where(self.status["sessions"])[0][-1]
+            - np.where(self.status["sessions"])[0][0]
+            + 1
+        )
         ax_D = plt.axes([0.6, 0.8, 0.375, 0.13])
         ax_D.plot(range(1, nSes + 1), D_KS, "k")
         ax_D.set_xlim([0, x_lim])
@@ -2682,8 +2570,8 @@ class cluster_analysis_plots(cluster_analysis):
         self.pl_dat.plot_with_confidence(
             ax,
             self.pl_dat.n_edges - 1,
-            np.nanmean(recurrence["active"]["all"], 0),
-            SD * np.nanstd(recurrence["active"]["all"], 0),
+            np.nanmean(self.recurrence["active"]["all"], 0),
+            SD * np.nanstd(self.recurrence["active"]["all"], 0),
             col="k",
             ls="-",
             label="recurrence of active cells",
@@ -2701,13 +2589,13 @@ class cluster_analysis_plots(cluster_analysis):
         self.pl_dat.plot_with_confidence(
             ax,
             self.pl_dat.n_edges - 1,
-            np.nanmean(recurrence["coding"]["ofactive"], 0),
-            1.0 * np.nanstd(recurrence["coding"]["ofactive"], 0),
+            np.nanmean(self.recurrence["coding"]["ofactive"], 0),
+            1.0 * np.nanstd(self.recurrence["coding"]["ofactive"], 0),
             col="k",
             ls="-",
             label="place cell recurrence (of rec. active)",
         )
-        # ax.plot(pl_dat.n_edges-1,np.nanmean(recurrence['coding']['all'],0),'b--',label='recurrence of place cells')
+        # ax.plot(pl_dat.n_edges-1,np.nanmean(self.recurrence['coding']['all'],0),'b--',label='recurrence of place cells')
         ax.legend(loc="lower right", fontsize=10, bbox_to_anchor=[1.05, 0.8])
         ax.set_xlim([0, t_ses[-1]])
         ax.set_ylim([0, 1.1])
@@ -2973,19 +2861,19 @@ class cluster_analysis_plots(cluster_analysis):
 
         s = 10
         idx_PCs = self.status["activity"][:, :, 2]
-        idx_fields = np.where(self.status_fields)
+        idx_fields = np.where(self.status["fields"])
         plt.figure(figsize=(4, 2.5))
         plt.scatter(
             self.stats["MI_p_value"][idx_fields[0], idx_fields[1]],
-            self.fields["Bayes_factor"][self.status_fields],
+            self.fields["Bayes_factor"][self.status["fields"]],
             color="r",
             s=5,
         )
 
-        idx_nfields = np.where(~self.status_fields)
+        idx_nfields = np.where(~self.status["fields"])
         plt.scatter(
             self.stats["MI_p_value"][idx_nfields[0], idx_nfields[1]],
-            self.fields["Bayes_factor"][~self.status_fields],
+            self.fields["Bayes_factor"][~self.status["fields"]],
             color=[0.6, 0.6, 0.6],
             s=3,
         )
@@ -3018,7 +2906,7 @@ class cluster_analysis_plots(cluster_analysis):
         for i, s in enumerate(range(0, 10)):
 
             if self.paths["neuron_detection"][s].exists():
-                ld = load_dict_from_hdf5(self.paths["neuron_detection"][s])
+                ld = load_data(self.paths["neuron_detection"][s])
                 n_arr = self.matching["IDs"][
                     self.status["activity"][:, s, 1], s
                 ].astype("int")
@@ -3137,7 +3025,7 @@ class cluster_analysis_plots(cluster_analysis):
         )
         # plt.hist(rel_nPC,np.linspace(0,1,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='k',linestyle=':')
         # rel_all = self.fields['reliability']
-        # rel_all[~self.status_fields] = np.NaN
+        # rel_all[~self.status["fields"]] = np.NaN
         # rel_all = rel_all[self.status['activity'][...,2],...]
         # ax.hist(rel_all.flat,np.linspace(0,1,51),alpha=0.5,density=True,cumulative=True,histtype='step',color='k')
         ax.set_xlabel("reliability [%]", fontsize=14)
@@ -3338,7 +3226,7 @@ class cluster_analysis_plots(cluster_analysis):
         idx_PC = np.random.choice(idx_PCs)
         print(idx_PC)
         for i, s in enumerate(np.where(self.status["sessions"])[0]):
-            # idx_PC = np.where(self.fields["status"][:, s, :] >= 3)
+            # idx_PC = np.where(self.status["fields"][:, s, :] >= 3)
             # fields[s,:] = np.nansum(self.fields['p_x'][:,s,:,:],1).sum(0)
             # fields[:, s] = np.nansum(self.fields["p_x"][idx_PC, s, 0, :], 0)
             fields[:, s] = self.fields["p_x"][idx_PC, s, 0, :]
@@ -3413,7 +3301,7 @@ class cluster_analysis_plots(cluster_analysis):
 
             self.paths["neuron_detection"][s + 1]
             if self.paths["neuron_detection"][s + 1].exists():
-                ld = load_dict_from_hdf5(self.paths["neuron_detection"][s + 1])
+                ld = load_data(self.paths["neuron_detection"][s + 1])
                 # ld = loadmat(pathLoad,variable_names=['C','A','SNR','CNN'],squeeze_me=True)
 
                 offset = 0
@@ -3519,13 +3407,13 @@ class cluster_analysis_plots(cluster_analysis):
                 self.paths["sessions"][s], self.paths["fileNameCNMF"]
             )
             if os.path.exists(pathLoad):
-                ld1 = load_dict_from_hdf5(pathLoad)
+                ld1 = load_data(pathLoad)
 
                 pathLoad = os.path.join(
                     self.paths["sessions"][s + 1], self.paths["fileNameCNMF"]
                 )
                 if os.path.exists(pathLoad):
-                    ld2 = load_dict_from_hdf5(pathLoad)
+                    ld2 = load_data(pathLoad)
 
                     # pathLoad = pathcat([self.params['pathMouse'],'Session%02d/results_redetect.mat'%(s)])
                     # ld1 = loadmat(pathLoad,variable_names=['A'])
@@ -3772,7 +3660,7 @@ class cluster_analysis_plots(cluster_analysis):
 
         high_corr = np.zeros(nC)
         for i, s in enumerate(range(0, 20), 1):
-            idx = np.where(self.status_fields)
+            idx = np.where(self.status["fields"])
 
             idx_s = idx[1] == s
             c = idx[0][idx_s]
@@ -4339,7 +4227,7 @@ class cluster_analysis_plots(cluster_analysis):
         IPI_La_start = np.zeros_like(self.status["activity"][..., 1], "bool")
         IPI_Lb_start = np.zeros_like(self.status["activity"][..., 2], "bool")
 
-        idx_fields = np.where(self.status_fields)
+        idx_fields = np.where(self.status["fields"])
 
         for c in range(nC):
             s0_act = 0
@@ -4436,10 +4324,10 @@ class cluster_analysis_plots(cluster_analysis):
 
         ax = plt.subplot(332)
         idx_med = (self.stats["field_stability"] > 0.5)[..., np.newaxis] & (
-            self.status_fields
+            self.status["fields"]
         )
         idx_high = (self.stats["field_stability"] > 0.9)[..., np.newaxis] & (
-            self.status_fields
+            self.status["fields"]
         )
         ax.hist(
             self.fields["location"][idx_med, 0],
@@ -4528,7 +4416,7 @@ class cluster_analysis_plots(cluster_analysis):
         # s_bool[17:87] = True
         s_bool[0:15] = True
 
-        idx_PF = self.status_fields & s_bool[np.newaxis, :, np.newaxis]
+        idx_PF = self.status["fields"] & s_bool[np.newaxis, :, np.newaxis]
 
         plt.figure(figsize=(7, 5), dpi=300)
         plt.subplot(221)
@@ -4632,7 +4520,7 @@ class cluster_analysis_plots(cluster_analysis):
         nC = self.data["nC"]
 
         nFields = np.ma.masked_array(
-            self.status_fields.sum(-1), mask=~self.status["activity"][..., 2]
+            self.status["fields"].sum(-1), mask=~self.status["activity"][..., 2]
         )
         idx = nFields > 1
         nMultiMode = nFields.mean(0)
@@ -4642,12 +4530,12 @@ class cluster_analysis_plots(cluster_analysis):
         overlap = np.zeros((nC, nSes)) * np.NaN
         for c, s in zip(np.where(idx)[0], np.where(idx)[1]):
             # pass
-            loc = self.fields["location"][c, s, self.status_fields[c, s, :], 0]
+            loc = self.fields["location"][c, s, self.status["fields"][c, s, :], 0]
             dLoc[c, s] = np.abs(
                 np.mod(loc[1] - loc[0] + nbin / 2, nbin) - nbin / 2
             )  # loc[1]-loc[0]
 
-            idx_loc = np.where(self.status_fields[c, s, :])[0]
+            idx_loc = np.where(self.status["fields"][c, s, :])[0]
 
             corr[c, s] = np.corrcoef(
                 self.fields["trial_act"][
@@ -4760,9 +4648,9 @@ class cluster_analysis_plots(cluster_analysis):
         )
         ax_fmap.set_ylabel("$\\bar{\\nu}$")
 
-        loc = self.fields["location"][c, s, self.status_fields[c, s, :], 0]
+        loc = self.fields["location"][c, s, self.status["fields"][c, s, :], 0]
         ax_trial = plt.axes([0.375, 0.525, 0.125, 0.1])
-        idx_loc = np.where(self.status_fields[c, s, :])[0]
+        idx_loc = np.where(self.status["fields"][c, s, :])[0]
         self.pl_dat.remove_frame(ax_fmap, ["top", "right"])
 
         col_arr = ["tab:green", "tab:blue"]
@@ -4836,9 +4724,9 @@ class cluster_analysis_plots(cluster_analysis):
         ax_fmap.set_ylabel("$\\bar{\\nu}$")
         ax_fmap.set_xlabel("position [bins]")
 
-        loc = self.fields["location"][c, s, self.status_fields[c, s, :], 0]
+        loc = self.fields["location"][c, s, self.status["fields"][c, s, :], 0]
         ax_trial = plt.axes([0.375, 0.225, 0.125, 0.1])
-        idx_loc = np.where(self.status_fields[c, s, :])[0]
+        idx_loc = np.where(self.status["fields"][c, s, :])[0]
         for i, f in enumerate(idx_loc):
 
             ax_fmap.plot(loc[i], 1, "v", color=col_arr[i], markersize=5)
@@ -4937,11 +4825,11 @@ class cluster_analysis_plots(cluster_analysis):
                 t_end = max(0, self.behavior["trial_ct"][s] - dt)
                 coding_s1_start = (
                     np.any(self.fields["trial_act"][:, s, :, :t_start], -1)
-                    & self.status_fields[:, s, :]
+                    & self.status["fields"][:, s, :]
                 )
                 coding_s1_end = (
                     np.any(self.fields["trial_act"][:, s, :, t_end:], -1)
-                    & self.status_fields[:, s, :]
+                    & self.status["fields"][:, s, :]
                 )
 
                 ### get first dt trials and last dt trials
@@ -4951,11 +4839,11 @@ class cluster_analysis_plots(cluster_analysis):
                 t_end = 0  # max(0,self.behavior['trial_ct'][s+1]-dt)
                 coding_s2_start = (
                     np.any(self.fields["trial_act"][:, s + 1, :, :t_start], -1)
-                    & self.status_fields[:, s + 1, :]
+                    & self.status["fields"][:, s + 1, :]
                 )
                 coding_s2_end = (
                     np.any(self.fields["trial_act"][:, s + 1, :, t_end:], -1)
-                    & self.status_fields[:, s + 1, :]
+                    & self.status["fields"][:, s + 1, :]
                 )
 
                 coding_overlap[s, 0, 0] = (
@@ -5298,8 +5186,8 @@ class cluster_analysis_plots(cluster_analysis):
         # ds_max = 1
 
         # need session average, not cluster average
-        # fields = np.any(self.status_fields[self.status['clusters'],...] & (self.fields['location'][self.status['clusters'],...,0]>self.params['zone_idx']['reward'][0]) & (self.fields['location'][self.status['clusters'],...,0]<self.params['zone_idx']['reward'][1]),2)
-        # fields = np.any(self.status_fields[self.status['clusters'],...] & (self.fields['location'][self.status['clusters'],...,0]<self.params['zone_idx']['reward'][0]) | (self.fields['location'][self.status['clusters'],...,0]>self.params['zone_idx']['reward'][1]),2)
+        # fields = np.any(self.status["fields"][self.status['clusters'],...] & (self.fields['location'][self.status['clusters'],...,0]>self.params['zone_idx']['reward'][0]) & (self.fields['location'][self.status['clusters'],...,0]<self.params['zone_idx']['reward'][1]),2)
+        # fields = np.any(self.status["fields"][self.status['clusters'],...] & (self.fields['location'][self.status['clusters'],...,0]<self.params['zone_idx']['reward'][0]) | (self.fields['location'][self.status['clusters'],...,0]>self.params['zone_idx']['reward'][1]),2)
 
         ax = plt.axes([0.7, 0.1, 0.25, 0.1])
         ax.plot(gauss_smooth(self.stats["p_post_s"]["act"]["act"][:, 1, 0], 1), "k")
@@ -5598,7 +5486,7 @@ class cluster_analysis_plots(cluster_analysis):
 
         p_shift = np.zeros(nbin)
         for s in np.where(s_bool)[0]:
-            idx_field = np.where(self.status_fields[:, s, :])
+            idx_field = np.where(self.status["fields"][:, s, :])
             for c, f in zip(idx_field[0], idx_field[1]):
                 roll = round(
                     (-self.fields["location"][c, s, f, 0] + self.data["nbin"] / 2)
@@ -5847,7 +5735,7 @@ class cluster_analysis_plots(cluster_analysis):
         IPI_La_start = np.zeros_like(self.status["activity"][..., 1], "bool")
         IPI_Lb_start = np.zeros_like(self.status["activity"][..., 2], "bool")
 
-        idx_fields = np.where(self.status_fields)
+        idx_fields = np.where(self.status["fields"])
 
         for c in range(nC):
             s0_act = 0
@@ -5931,7 +5819,7 @@ class cluster_analysis_plots(cluster_analysis):
                     idxes = (idx_fields[0] == c) & (idx_fields[1] < s)
                     idx_s = idx_fields[1][idxes]
 
-                    for f in np.where(self.status_fields[c, s, :])[0]:
+                    for f in np.where(self.status["fields"][c, s, :])[0]:
                         dLoc = np.abs(
                             np.mod(
                                 self.fields["location"][c, s, f, 0]
@@ -7149,7 +7037,7 @@ class cluster_analysis_plots(cluster_analysis):
         fields = np.zeros((nbin, nSes))
         for i, s in enumerate(np.where(self.status["sessions"])[0]):
             # idx_PC = np.where(self.fields['status'][:,s,:]>=3)
-            idx_PC = np.where(self.status_fields[:, s, :])
+            idx_PC = np.where(self.status["fields"][:, s, :])
             # idx_PC = np.where(~np.isnan(self.fields['location'][:,s,:]))
             # fields[s,:] = np.nansum(self.fields['p_x'][:,s,:,:],1).sum(0)
             fields[:, s] = np.nansum(self.fields["p_x"][idx_PC[0], s, idx_PC[1], :], 0)
@@ -7217,7 +7105,7 @@ class cluster_analysis_plots(cluster_analysis):
                 if j == 0:
                     self.pl_dat.add_number(fig, ax, order=1, offset=[-100, 50])
                 idxes_tmp = np.where(
-                    self.status_fields[:, s, :]
+                    self.status["fields"][:, s, :]
                     & (self.stats["SNR_comp"][:, s] > 2)[..., np.newaxis]
                     & (self.stats["r_values"][:, s] > 0)[..., np.newaxis]
                     & (self.matching["score"][:, s, 0] > 0.5)[..., np.newaxis]
@@ -7274,7 +7162,7 @@ class cluster_analysis_plots(cluster_analysis):
             for i in range(nbin):
                 idx = (
                     (loc == i)
-                    & self.status_fields
+                    & self.status["fields"]
                     & ((np.arange(nSes) < 15) & (np.arange(nSes) > 5))[
                         np.newaxis, :, np.newaxis
                     ]
@@ -7283,7 +7171,7 @@ class cluster_analysis_plots(cluster_analysis):
                     idx = np.any(idx, -1)
                 distr[key][i, 0] = np.nanmean(dat[idx])
                 distr[key][i, 1] = np.nanstd(dat[idx])
-            idx = np.where(self.status_fields)
+            idx = np.where(self.status["fields"])
             if key in ["oof_firingrate_adapt", "if_firingrate_adapt", "MI_value"]:
                 ax.plot(
                     self.fields["location"][idx[0], idx[1], idx[2], 0],
@@ -7401,7 +7289,7 @@ class cluster_analysis_plots(cluster_analysis):
         # # s_arr = np.array([0,5,17,50,87])
         #
         # for j in range(len(s_arr)-1):
-        #     idx = (self.status_fields & (self.stats['SNR']>2)[...,np.newaxis] & (self.stats['r_values']>0)[...,np.newaxis] & (self.matching['score'][...,0]>0.9)[...,np.newaxis] & ((np.arange(nSes)>=s_arr[j]) & (np.arange(nSes)<s_arr[j+1]))[np.newaxis,:,np.newaxis])
+        #     idx = (self.status["fields"] & (self.stats['SNR']>2)[...,np.newaxis] & (self.stats['r_values']>0)[...,np.newaxis] & (self.matching['score'][...,0]>0.9)[...,np.newaxis] & ((np.arange(nSes)>=s_arr[j]) & (np.arange(nSes)<s_arr[j+1]))[np.newaxis,:,np.newaxis])
         #     density = np.histogram(self.fields['location'][idx,0],np.linspace(0,nbin,nbin+1),density=True)
         #     print(idx.shape)
         #     col = [0.1+0.225*j,0.1+0.225*j,1]
@@ -7460,7 +7348,7 @@ class cluster_analysis_plots(cluster_analysis):
         fields = np.zeros((nbin, nSes))
         for i, s in enumerate(np.where(self.status["sessions"])[0]):
             # idx_PC = np.where(self.fields['status'][:,s,:]>=3)
-            idx_PC = np.where(self.status_fields[:, s, :])
+            idx_PC = np.where(self.status["fields"][:, s, :])
             # idx_PC = np.where(~np.isnan(self.fields['location'][:,s,:]))
             # fields[s,:] = np.nansum(self.fields['p_x'][:,s,:,:],1).sum(0)
             fields[:, s] = np.nansum(self.fields["p_x"][idx_PC[0], s, idx_PC[1], :], 0)
@@ -7522,7 +7410,7 @@ class cluster_analysis_plots(cluster_analysis):
                 if j == 0:
                     self.pl_dat.add_number(fig, ax, order=1, offset=[-100, 50])
                 idxes_tmp = np.where(
-                    self.status_fields[:, s, :]
+                    self.status["fields"][:, s, :]
                     & (self.stats["SNR_comp"][:, s] > 2)[..., np.newaxis]
                     & (self.stats["r_values"][:, s] > 0)[..., np.newaxis]
                     & (self.matching["score"][:, s, 0] > 0.5)[..., np.newaxis]
@@ -7573,7 +7461,7 @@ class cluster_analysis_plots(cluster_analysis):
             try:
                 RW_rec[s] = self.behavior["performance"][s]["RW_reception"].mean()
                 slowing[s] = self.behavior["performance"][s]["slowDown"].mean()
-                idx_fields = np.where(self.status_fields[:, s, :])
+                idx_fields = np.where(self.status["fields"][:, s, :])
             except:
                 # print('pass')
                 continue
@@ -7643,7 +7531,7 @@ class cluster_analysis_plots(cluster_analysis):
         self.pl_dat.plot_with_confidence(
             ax, range(nSes), sig[:, 0], sig[:, 1:].T, col="b"
         )
-        # mask_sig = np.ma.masked_array(self.fields['width'][...,0],mask=~self.status_fields)
+        # mask_sig = np.ma.masked_array(self.fields['width'][...,0],mask=~self.status["fields"])
         # ax.plot(mask_sig.mean(2).mean(0),'b')
         ax.set_ylim([0, 20])
         self.pl_dat.remove_frame(ax, ["top", "right"])
@@ -8367,7 +8255,7 @@ class cluster_analysis_plots(cluster_analysis):
                 ).sum()
 
                 p_rec["PF"][ds, s1] = N_stable / N_data
-                # N_total[ds] = self.status_fields[:,session_bool,:].sum()
+                # N_total[ds] = self.status["fields"][:,session_bool,:].sum()
         # print(p_rec['PF'])
         # print(np.nanmean(p_rec['PF'],1))
         # print(recurr)
@@ -8654,8 +8542,8 @@ class cluster_analysis_plots(cluster_analysis):
         s_bool = self.status["sessions"] if s_bool is None else s_bool
 
         field_stability = np.zeros(self.data["nC"]) * np.NaN
-        # idx_fields = np.where(self.status_fields & self.status['sessions'][np.newaxis,:,np.newaxis])
-        idx_fields = np.where(self.status_fields & s_bool[np.newaxis, :, np.newaxis])
+        # idx_fields = np.where(self.status["fields"] & self.status['sessions'][np.newaxis,:,np.newaxis])
+        idx_fields = np.where(self.status["fields"] & s_bool[np.newaxis, :, np.newaxis])
 
         for c in np.where(self.status["clusters"])[0]:  # [:10]
 
@@ -8670,7 +8558,7 @@ class cluster_analysis_plots(cluster_analysis):
                 for s in np.where(self.status["activity"][c, :, 1] & s_bool)[0]:
                     if self.status["activity"][c, s, 2]:
                         fields_compare = self.fields["location"][
-                            c, s, self.status_fields[c, s, :], 0
+                            c, s, self.status["fields"][c, s, :], 0
                         ]
                         count_ref = len(fields_ref) - len(fields_compare)
                         d = np.abs(
@@ -8788,7 +8676,7 @@ class cluster_analysis_plots(cluster_analysis):
         field_stability = np.zeros((self.data["nC"], self.data["nSes"])) * np.NaN
         # act_stability = np.zeros((nC,nSes))*np.NaN
         idx_fields = np.where(
-            self.status_fields & self.status["sessions"][np.newaxis, :, np.newaxis]
+            self.status["fields"] & self.status["sessions"][np.newaxis, :, np.newaxis]
         )
 
         for c in np.where(self.status["clusters"])[0]:
@@ -8812,7 +8700,7 @@ class cluster_analysis_plots(cluster_analysis):
                         ]
 
                         fields_compare = self.fields["location"][
-                            c, s, self.status_fields[c, s, :], 0
+                            c, s, self.status["fields"][c, s, :], 0
                         ]
                         count_ref = len(fields_ref) - len(fields_compare)
                         d = np.abs(
@@ -8836,7 +8724,7 @@ class cluster_analysis_plots(cluster_analysis):
                 # if self.status['activity'][c,s_min:s_max,2].sum()>1:
                 #     for s2 in range(s_min,s_max):#np.where(self.status['activity'][c,:,1])[0]:
                 #         if self.status['activity'][c,s2,2]:
-                #             fields_compare = self.fields['location'][c,s2,self.status_fields[c,s2,:],0]
+                #             fields_compare = self.fields['location'][c,s2,self.status["fields"][c,s2,:],0]
                 #             count_ref = len(fields_ref)-len(fields_compare)
                 #             d = np.abs(np.mod(fields_ref[np.newaxis,:]-fields_compare[:,np.newaxis]+nbin/2,nbin)-nbin/2)
                 #             # count_hit += (np.sum(d < stab_thr)-len(fields_compare))/(count_ref-1)
@@ -8954,84 +8842,8 @@ class plot_dat:
         print("Figure saved as %s" % path)
 
 
-def get_overlap(s, inVars):
-
-    status, N, L = inVars
-    nC, nSes = status.shape[:2]
-
-    recurr = {
-        "active": {
-            "all": np.zeros(nSes) * np.NaN,
-            "continuous": np.zeros(nSes) * np.NaN,
-            "overrepresentation": np.zeros(nSes) * np.NaN,
-        },
-        "coding": {
-            "all": np.zeros(nSes) * np.NaN,
-            "ofactive": np.zeros(nSes) * np.NaN,
-            "continuous": np.zeros(nSes) * np.NaN,
-            "overrepresentation": np.zeros(nSes) * np.NaN,
-        },
-    }
-    if N["active"][s] == 0:
-        return recurr
-    overlap_act = status[status[:, s, 1], :, 1].sum(0)
-    overlap_PC = status[status[:, s, 2], :, 2].sum(0)
-
-    recurr["active"]["all"][1 : (nSes - s)] = (
-        overlap_act[s + 1 :] / N["active"][s + 1 :]
-    )
-
-    recurr["coding"]["all"][1 : (nSes - s)] = overlap_PC[s + 1 :] / N["coding"][s + 1 :]
-    for i, s1 in enumerate(range(s + 1, nSes)):
-        recurr["coding"]["ofactive"][i + 1] = (
-            overlap_PC[s1] / status[status[:, s, 2], s1, 1].sum()
-        )
-
-    # print(recurr['active']['all'])
-    rand_pull_act = np.zeros((nSes - s, L)) * np.NaN
-    rand_pull_PC = np.zeros((nSes - s, L)) * np.NaN
-
-    for s2 in range(s + 1, nSes):
-        if (N["active"][s] == 0) or (N["active"][s2] == 0):
-            continue
-        rand_pull_act[s2 - s, :] = (
-            np.random.choice(nC, (L, N["active"][s])) < N["active"][s2]
-        ).sum(1)
-
-        offset = N["active"][s] - overlap_act[s2]
-        randchoice_1 = np.random.choice(N["active"][s], (L, N["coding"][s]))
-        randchoice_2 = np.random.choice(
-            np.arange(offset, offset + N["active"][s2]), (L, N["coding"][s2])
-        )
-        for l in range(L):
-            rand_pull_PC[s2 - s, l] = np.isin(
-                randchoice_1[l, :], randchoice_2[l, :]
-            ).sum()
-
-        ### find continuously coding neurons
-        recurr["active"]["continuous"][s2 - s] = (
-            status[:, s : s2 + 1, 1].sum(1) == (s2 - s + 1)
-        ).sum() / N["active"][
-            s2
-        ]  # (ic_vals[idx_ds,2] == 1).sum()/N['active'][s2]
-        recurr["coding"]["continuous"][s2 - s] = (
-            status[:, s : s2 + 1, 2].sum(1) == (s2 - s + 1)
-        ).sum() / N["coding"][
-            s2
-        ]  # (ic_vals[idx_ds,2] == 1).sum()/N['active'][s2]
-
-    recurr["active"]["overrepresentation"][: nSes - s] = (
-        overlap_act[s:] - np.nanmean(rand_pull_act, 1)
-    ) / np.nanstd(rand_pull_act, 1)
-    recurr["coding"]["overrepresentation"][: nSes - s] = (
-        overlap_PC[s:] - np.nanmean(rand_pull_PC, 1)
-    ) / np.nanstd(rand_pull_PC, 1)
-    return recurr
-
-
 def bootstrap_shifts(fun, shifts, N_bs, nbin):
 
-    L_track = 100
     N_data = len(shifts)
     if N_data == 0:
         return (

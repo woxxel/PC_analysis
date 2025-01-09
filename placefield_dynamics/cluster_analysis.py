@@ -42,9 +42,10 @@ class cluster_analysis:
                                                                                                                                                                                                                                                                                                         - processed behavior files (from... where? extra module?)
 
     TODO:
-        * where did calculation of 'rotation' (normal and anchor) go?
-        * fix calculation of oof_/if_firingrate and implement as being calculated on startup
-        * properly document and check cluster.status['activity'] - something's fishy there!
+        [ ] where did calculation of 'rotation' (normal and anchor) go?
+        [ ] fix calculation of oof_/if_firingrate and implement as being calculated on startup
+        [ ] properly document and check cluster.status['activity'] - something's fishy there!
+        [ ] (re?)add possibility to specify session range for analysis
     """
 
     def __init__(
@@ -106,26 +107,20 @@ class cluster_analysis:
         else:
             return path
 
-    def run_complete(self, sessions=None, n_processes=0, reprocess=False):
+    def run_complete(self, sessions=None, n_processes=8, reprocess=False):
 
         ### loading data from different states of the analysis process
         # if reprocess: #| (not os.path.exists(self.paths['assignments'])) |
 
-        self.get_matching()
-        # self.classify_sessions(sessions=sessions)
-
+        self.get_matching(sessions=sessions)
         self.get_behavior()
-
-        # self.process_sessions(sessions=sessions,n_processes=n_processes,reprocess=reprocess)
-
         self.get_stats()
-
-        # self.classify_cluster()
-
         self.get_PC_fields()
 
         self.update_status()
+
         self.calculate_field_firingrates()
+        self.calculate_recurrence(n_shuffles=1000)
 
         self.compareSessions(n_processes=n_processes)
 
@@ -295,28 +290,55 @@ class cluster_analysis:
         if "compare" in which and (not hasattr(self, "compare") or overwrite):
             self.compare = {}
 
-    def process_sessions(self, sessions=None, n_processes=0, reprocess=False):
+    # def process_sessions(self, sessions=None, n_processes=0, reprocess=False):
+    #     """
+    #     obtain basic information from sessions to allow processing and plotting
+    #     analyses combining results from different steps of the process
+    #     """
+
+    #     if reprocess | (not os.path.exists(self.paths["svSessions"])):
+
+    #         self.get_matching()
+    #         self.get_behavior()
+    #         # self.save([False,True,False,False,False])
+
+    # #         ## load originally detected data
+    # #         pathLoad = pathcat([path,'results_OnACID.mat'])
+    # # if os.path.exists(pathLoad):
+    # #     results_original = sio.whosmat(pathLoad)
+    # #     if results_original[1][0] == 'C':
+    # #         self.sessions['N_original'][s] = results_original[1][1][0]
+    # #     else:
+    # #         print('nope')
+
+    def set_thresholds(self, **kwargs):
         """
-        obtain basic information from sessions to allow processing and plotting
-        analyses combining results from different steps of the process
+        set thresholds for neuron and session classification
         """
 
-        if reprocess | (not os.path.exists(self.paths["svSessions"])):
+        self.thr = {
+            "SNR_lowest": kwargs.get("SNR_lowest") or matching_params["SNR_lowest"],
+            "SNR_min": kwargs.get("SNR_min") or matching_params["SNR_min"],
+            "rval_lowest": kwargs.get("rval_lowest") or matching_params["rval_lowest"],
+            "rval_min": kwargs.get("rval_min") or matching_params["rval_min"],
+            "cnn_lowest": kwargs.get("cnn_lowest") or matching_params["cnn_lowest"],
+            "cnn_min": kwargs.get("cnn_min") or matching_params["cnn_min"],
+            "p_matched": kwargs.get("pm_thr") or self.params["pm_thr"],
+            "firingrate": kwargs.get("fr_thr") or self.params["fr_thr"],
+            "Bayes": kwargs.get("Bayes_thr") or self.params["Bayes_thr"],
+            "reliability": kwargs.get("reliability_thr")
+            or self.params["reliability_thr"],
+            "A_0": kwargs.get("A0_thr") or self.params["A0_thr"],
+            "A": kwargs.get("A_thr") or self.params["A_thr"],
+            "A_rate": kwargs.get("Arate_thr") or self.params["Arate_thr"],
+            "sigma": kwargs.get("sigma_thr") or self.params["sigma_thr"],
+            # "alpha": self.params["MI_alpha"] if alpha is None else alpha,
+            # "MI": self.params["MI_thr"] if MI_thr is None else MI_thr,
+            "min_cluster_count": kwargs.get("min_cluster_count")
+            or self.params["min_cluster_count"],
+        }
 
-            self.get_matching()
-            self.get_behavior()
-            # self.save([False,True,False,False,False])
-
-    #         ## load originally detected data
-    #         pathLoad = pathcat([path,'results_OnACID.mat'])
-    # if os.path.exists(pathLoad):
-    #     results_original = sio.whosmat(pathLoad)
-    #     if results_original[1][0] == 'C':
-    #         self.sessions['N_original'][s] = results_original[1][1][0]
-    #     else:
-    #         print('nope')
-
-    def get_matching(self):
+    def get_matching(self, sessions=None):
         """
         loads information from matching algorithm, such as session-specifics (e.g. shift and session-correlation) and neuron specifics (e.g. center of mass, matching probability, IDs)
         """
@@ -394,8 +416,8 @@ class cluster_analysis:
         # 	#     self.matching['score'][idx_c,s,1] = [max(scores_now[c,np.where(scores_now[c,:]!=self.matching['score'][c,s,0])[0]]) for c in idx_c]
         # 	has_reference = True
 
-        self.classify_sessions()
-        self.classify_cluster()
+        self.classify_sessions(sessions=sessions)
+        self.classify_components()
 
     def classify_sessions(self, sessions=None):  # ,max_shift=None,min_corr=None):
         """
@@ -460,33 +482,70 @@ class cluster_analysis:
 
         self.alignment["borders"] = np.vstack([thr_low, thr_high])
 
-    def classify_cluster(self, idxes=None, min_cluster_count=None, border_margin=None):
+    def get_status_component_detected(self):
 
+        return (
+            (
+                ## minimum requirements for each neuron
+                (self.stats["SNR_comp"] > self.thr["SNR_lowest"])
+                & (self.stats["r_values"] > self.thr["rval_lowest"])
+                & (self.stats["cnn_preds"] > self.thr["cnn_lowest"])
+            )
+            & (
+                ## each neuron needs to exceed at least one of the following thresholds
+                (self.stats["SNR_comp"] > self.thr["SNR_min"])
+                | (self.stats["r_values"] > self.thr["rval_min"])
+                | (self.stats["cnn_preds"] > self.thr["cnn_min"])
+            )
+            & (self.matching["score"][..., 0] > self.thr["p_matched"])
+        )
+
+    def classify_components(self, border_margin=None):
+        """
+        checks all clusters to pass certain criteria to be considered in the analysis
+
+        Each cluster is required to:
+            * pass all "lowest" thresholds (SNR, r-value, CNN-prediction)
+            * at least one of the "min" thresholds (SNR, r-value, CNN-prediction)
+            * be present in at least 'min_cluster_count' sessions
+            * have a center of mass within the borders of the imaging window, leaving some margin of 'border_margin'
+        """
         self.prepare_dicts(which=["status"])
 
-        if not (min_cluster_count is None):
-            self.params["min_cluster_count"] = min_cluster_count
-        if not (border_margin is None):
-            self.params["border_margin"] = border_margin
+        self.params["border_margin"] = border_margin or self.params["border_margin"]
 
         self.status["clusters"] = np.ones(self.data["nC"]).astype("bool")
-        if idxes is None:
-            idxes = (
-                (self.stats["SNR_comp"] > matching_params["SNR_lowest"])
-                & (self.stats["r_values"] > matching_params["rval_lowest"])
-                & (self.stats["cnn_preds"] > matching_params["cnn_lowest"])
-            ) & (
-                (self.stats["SNR_comp"] > matching_params["min_SNR"])
-                | (self.stats["r_values"] > matching_params["rval_thr"])
-                | (self.stats["cnn_preds"] > matching_params["min_cnn_thr"])
-            )
 
-        # print(idxes.sum(0))
-        # self.status['clusters'][(~np.isnan(self.matching['IDs'])).sum(1)<self.params['min_cluster_count']] = False
+        ## check for neuron detection thresholds
+        if not hasattr(self, "thr"):
+            self.set_thresholds()
+
+        self.status["component_detected"] = (
+            (
+                ## minimum requirements for each neuron
+                (self.stats["SNR_comp"] > self.thr["SNR_lowest"])
+                & (self.stats["r_values"] > self.thr["rval_lowest"])
+                & (self.stats["cnn_preds"] > self.thr["cnn_lowest"])
+            )
+            & (
+                ## each neuron needs to exceed at least one of the following thresholds
+                (self.stats["SNR_comp"] > self.thr["SNR_min"])
+                | (self.stats["r_values"] > self.thr["rval_min"])
+                | (self.stats["cnn_preds"] > self.thr["cnn_min"])
+            )
+            & (self.matching["score"][..., 0] > self.thr["p_matched"])
+        )
+
+        ## remove components from sessions that are not included in the data
+        self.status["component_detected"][:, ~self.status["sessions"]] = False
+
+        ## check for presence in at least 'min_cluster_count' sessions
         self.status["clusters"][
-            idxes[:, self.status["sessions"]].sum(1) < self.params["min_cluster_count"]
+            self.status["component_detected"][:, self.status["sessions"]].sum(1)
+            < self.thr["min_cluster_count"]
         ] = False
-        # print(self.status['clusters'].sum())
+
+        ## check for distance from imaging window borders
         for i in range(2):
             idx_remove_low = self.matching["com"][:, self.status["sessions"], i] < (
                 self.alignment["borders"][0, i] + self.params["border_margin"]
@@ -497,11 +556,6 @@ class cluster_analysis:
                 self.alignment["borders"][1, i] - self.params["border_margin"]
             )
             self.status["clusters"][np.any(idx_remove_high, 1)] = False
-            # print(idx_remove_low)
-            # print(idx_remove_high)
-
-            # print(np.any(idx_remove_low,1).sum())
-            # print(np.any(idx_remove_high,1).sum())
 
     def get_behavior(self):
         """
@@ -738,7 +792,7 @@ class cluster_analysis:
         if n_processes > 1:
             pool = get_context("spawn").Pool(n_processes)
             loc = np.copy(self.fields["location"][..., 0])
-            loc[~self.status_fields] = np.NaN
+            loc[~self.status["fields"]] = np.NaN
             res = pool.starmap(
                 get_field_shifts,
                 zip(
@@ -751,7 +805,7 @@ class cluster_analysis:
 
         else:
             loc = np.copy(self.fields["location"][..., 0])
-            loc[~self.status_fields] = np.NaN
+            loc[~self.status["fields"]] = np.NaN
             res = []
             for c in range(self.data["nC"]):
                 res.append(
@@ -792,53 +846,15 @@ class cluster_analysis:
     def update_status(
         self,
         complete=True,
-        SNR_thr=None,
-        rval_thr=None,
-        CNN_thr=None,
-        pm_thr=None,
-        fr_thr=None,
-        Bayes_thr=None,
-        reliability_thr=None,
-        alpha=None,
-        MI_thr=None,
-        A0_thr=None,
-        A_thr=None,
-        Arate_thr=None,
-        sigma_thr=None,
-        pmass_thr=None,
-        CI_thr=None,
-        nCluster_thr=None,
+        **kwargs,
     ):
-
-        # print('further, implement method to calculate inter-coding intervals, etc, after updating statusses')
-
-        self.thr = {
-            "SNR_comp": matching_params["SNR_lowest"] if SNR_thr is None else SNR_thr,
-            "r_values": (
-                matching_params["rval_lowest"] if rval_thr is None else rval_thr
-            ),
-            "cnn_preds": matching_params["cnn_lowest"] if CNN_thr is None else CNN_thr,
-            "p_matched": self.params["pm_thr"] if pm_thr is None else pm_thr,
-            "firingrate": self.params["fr_thr"] if fr_thr is None else fr_thr,
-            "alpha": self.params["MI_alpha"] if alpha is None else alpha,
-            "MI": self.params["MI_thr"] if MI_thr is None else MI_thr,
-            "CNN": self.params["CNN_thr"] if CNN_thr is None else CNN_thr,
-            "Bayes": self.params["Bayes_thr"] if Bayes_thr is None else Bayes_thr,
-            "reliability": (
-                self.params["reliability_thr"]
-                if reliability_thr is None
-                else reliability_thr
-            ),
-            "A_0": self.params["A0_thr"] if A0_thr is None else A0_thr,
-            "A": self.params["A_thr"] if A_thr is None else A_thr,
-            "A_rate": self.params["Arate_thr"] if Arate_thr is None else Arate_thr,
-            "sigma": self.params["sigma_thr"] if sigma_thr is None else sigma_thr,
-            "p_mass": self.params["pmass_thr"] if pmass_thr is None else pmass_thr,
-            "CI": self.params["CI_thr"] if CI_thr is None else CI_thr,
-            "nCluster": (
-                self.params["nCluster"] if nCluster_thr is None else nCluster_thr
-            ),
-        }
+        """
+        TODO:
+            [ ] if there is time: remove first index (detected component) from status, as it is redundant with "component_detected" and not required for further analysis
+        """
+        # print('further, implement method to calculate inter-coding intervals, etc, after updating statuses')
+        self.set_thresholds(**kwargs)
+        self.classify_components()
 
         # t_start = time.time()
 
@@ -847,51 +863,28 @@ class cluster_analysis:
             (self.data["nC"], self.data["nSes"], 6), "bool"
         )
 
+        self.status["activity"][..., 0] = self.status["component_detected"]
+
         """
             status follows hierarchical structure: each index up to 2 is a subset of the previous one
             0: is active neuron (passing thresholds of SNR, r_val and cnn and matching probability to cluster)
             1: firing rate above some level
             2: is place cell
-
         """
-
-        ### appearance in cluster: defined by (SNR,r_values,CNN), p_matched
-        if np.any(~np.isnan(self.stats["SNR_comp"])):
-            self.status["activity"][..., 0] = (
-                (
-                    ## minimum requirements for each neuron
-                    (self.stats["SNR_comp"] > self.thr["SNR_comp"])
-                    & (self.stats["r_values"] > self.thr["r_values"])
-                    & (self.stats["cnn_preds"] > self.thr["cnn_preds"])
-                )
-                & (
-                    ## each neuron needs to exceed at least one of the following thresholds
-                    (self.stats["SNR_comp"] > matching_params["min_SNR"])
-                    | (self.stats["r_values"] > matching_params["rval_thr"])
-                    | (self.stats["cnn_preds"] > matching_params["min_cnn_thr"])
-                )
-                & (self.matching["score"][..., 0] > self.thr["p_matched"])
-            )
-        else:
-            self.status["activity"][..., 0] = (
-                (self.matching["score"][..., 0] - self.matching["score"][..., 1])
-                > self.thr["p_matched"]
-            ) | (self.matching["score"][..., 0] > 0.95)
 
         self.status["activity"][..., 1] = (
             self.stats["firingrate"] >= self.thr["firingrate"]
-        ) & self.status["activity"][..., 0]
-        self.classify_cluster(
-            idxes=self.status["activity"][..., 1], min_cluster_count=nCluster_thr
-        )
+        ) & self.status["component_detected"]
+
+        self.status["activity"][~self.status["clusters"], :, :] = False
 
         if complete:
             print("update fields")
 
-            self.fields["status"] = np.zeros(
-                (self.data["nC"], self.data["nSes"], self.params["field_count_max"]),
-                "int",
-            )
+            # self.fields["status"] = np.zeros(
+            #     (self.data["nC"], self.data["nSes"], self.params["field_count_max"]),
+            #     "int",
+            # )
             ### place field: amplitude, A_rate, p_mass, CI-width, width(?),
 
             ## characterize place cells by whether their field passes some thresholds:
@@ -912,14 +905,13 @@ class cluster_analysis:
                 # & (A_rate > self.thr["A_rate"])
                 & (self.fields["width"][..., 0] > self.thr["sigma"])
                 # & (self.fields["posterior_mass"] > self.thr["p_mass"])
-                # & (CI_width < self.thr["CI"])
                 & (self.fields["Bayes_factor"] > self.thr["Bayes"])
                 & (self.fields["reliability"] > self.thr["reliability"])
             )
 
-            self.fix_missed_loc()
+            # self.fix_missed_loc()
 
-            self.status_fields = idx_fields
+            self.status["fields"] = idx_fields
 
             ##   - Bayes factor, MI(val,p_val,z_score)
             # self.stats["MI_p_value"][self.stats["MI_p_value"] == 0.001] = 10 ** (
@@ -938,18 +930,16 @@ class cluster_analysis:
 
             self.status["activity"][..., 2] = idx_PC & self.status["activity"][..., 1]
 
-            self.status["activity"][:, ~self.status["sessions"], :] = False
-            self.status["activity"][~self.status["clusters"], :, :] = False
+            self.status["fields"] = (
+                self.status["fields"] & self.status["activity"][..., 2][..., np.newaxis]
+            )
 
             # print(self.status['activity'].sum(axis=0))
 
             location_dependent_PC = False
             if location_dependent_PC:
 
-                self.status_fields = (
-                    self.status_fields
-                    & self.status["activity"][..., 2][..., np.newaxis]
-                )  # & (~np.isnan(self.fields['location'][...,0]))
+                # & (~np.isnan(self.fields['location'][...,0]))
                 # idx_reward = (self.fields['location'][...,0]<=self.para['zone_idx']['reward'][-1]) & \
                 # (self.fields['location'][...,0]>=self.para['zone_idx']['reward'][0])
                 # self.fields['status'][idx_reward] = 4
@@ -974,7 +964,7 @@ class cluster_analysis:
 
                         if self.status["activity"][c, s, 2]:
 
-                            for f in np.where(self.status_fields[c, s, :])[
+                            for f in np.where(self.status["fields"][c, s, :])[
                                 0
                             ]:  # range(self.fields['nModes'][c,s]):
                                 break_it = False
@@ -992,7 +982,7 @@ class cluster_analysis:
                                     field_bool[:field_bin_r] = True
 
                                 ## if cell shows several place fields, check whether they are highly correlated and remove, if so
-                                for ff in np.where(self.status_fields[c, s, :])[0]:
+                                for ff in np.where(self.status["fields"][c, s, :])[0]:
                                     if f == ff:
                                         continue
                                     field2_loc = self.fields["location"][c, s, ff, 0]
@@ -1026,9 +1016,9 @@ class cluster_analysis:
                                     #         self.fields["Bayes_factor"][c, s, f]
                                     #         > self.fields["Bayes_factor"][c, s, ff]
                                     #     ):
-                                    #         self.status_fields[c, s, ff] = False
+                                    #         self.status["fields"][c, s, ff] = False
                                     #     else:
-                                    #         self.status_fields[c, s, f] = False
+                                    #         self.status["fields"][c, s, f] = False
                                     #         break_it = True
                                     #         break  ## continue, when this field is bad
 
@@ -1061,6 +1051,100 @@ class cluster_analysis:
                 print("fields removed: %d" % ct_field_remove)
         t_end = time.time()
         # print('PC-characterization done. Time taken: %7.5f'%(t_end-t_start))
+
+    def calculate_recurrence(self, n_shuffles=10):
+
+        self.recurrence = {
+            "active": {
+                "all": np.full((self.data["nSes"], self.data["nSes"]), np.NaN),
+                "continuous": np.full((self.data["nSes"], self.data["nSes"]), np.NaN),
+                "overrepresentation": np.full(
+                    (self.data["nSes"], self.data["nSes"]), np.NaN
+                ),
+            },
+            "coding": {
+                "all": np.full((self.data["nSes"], self.data["nSes"]), np.NaN),
+                "ofactive": np.full((self.data["nSes"], self.data["nSes"]), np.NaN),
+                "continuous": np.full((self.data["nSes"], self.data["nSes"]), np.NaN),
+                "overrepresentation": np.full(
+                    (self.data["nSes"], self.data["nSes"]), np.NaN
+                ),
+            },
+        }
+        N = {
+            "active": self.status["activity"][:, :, 1].sum(0),
+            "coding": self.status["activity"][:, :, 2].sum(0),
+        }
+
+        for s in tqdm(range(self.data["nSes"]), leave=False):
+
+            nC = self.status["clusters"].sum()
+
+            if N["active"][s] == 0:
+                continue
+            overlap_act = self.status["activity"][
+                self.status["activity"][:, s, 1], :, 1
+            ].sum(0)
+            overlap_PC = self.status["activity"][
+                self.status["activity"][:, s, 2], :, 2
+            ].sum(0)
+
+            self.recurrence["active"]["all"][s, 1 : (self.data["nSes"] - s)] = (
+                overlap_act[s + 1 :] / N["active"][s + 1 :]
+            )
+
+            self.recurrence["coding"]["all"][s, 1 : (self.data["nSes"] - s)] = (
+                overlap_PC[s + 1 :] / N["coding"][s + 1 :]
+            )
+            for i, s1 in enumerate(range(s + 1, self.data["nSes"])):
+                self.recurrence["coding"]["ofactive"][s, i + 1] = (
+                    overlap_PC[s1]
+                    / self.status["activity"][
+                        self.status["activity"][:, s, 2], s1, 1
+                    ].sum()
+                )
+
+            rand_pull_act = np.zeros((self.data["nSes"] - s, n_shuffles)) * np.NaN
+            rand_pull_PC = np.zeros((self.data["nSes"] - s, n_shuffles)) * np.NaN
+
+            for s2 in range(s + 1, self.data["nSes"]):
+                if (N["active"][s] == 0) or (N["active"][s2] == 0):
+                    continue
+                rand_pull_act[s2 - s, :] = (
+                    np.random.choice(nC, (n_shuffles, N["active"][s])) < N["active"][s2]
+                ).sum(1)
+
+                offset = N["active"][s] - overlap_act[s2]
+                randchoice_1 = np.random.choice(
+                    N["active"][s], (n_shuffles, N["coding"][s])
+                )
+                randchoice_2 = np.random.choice(
+                    np.arange(offset, offset + N["active"][s2]),
+                    (n_shuffles, N["coding"][s2]),
+                )
+                for l in range(n_shuffles):
+                    rand_pull_PC[s2 - s, l] = np.isin(
+                        randchoice_1[l, :], randchoice_2[l, :]
+                    ).sum()
+
+                ### find continuously coding neurons
+                self.recurrence["active"]["continuous"][s, s2 - s] = (
+                    self.status["activity"][:, s : s2 + 1, 1].sum(1) == (s2 - s + 1)
+                ).sum() / N["active"][s2]
+                self.recurrence["coding"]["continuous"][s, s2 - s] = (
+                    self.status["activity"][:, s : s2 + 1, 2].sum(1) == (s2 - s + 1)
+                ).sum() / N["coding"][s2]
+
+            self.recurrence["active"]["overrepresentation"][
+                s, : self.data["nSes"] - s
+            ] = (overlap_act[s:] - np.nanmean(rand_pull_act, 1)) / np.nanstd(
+                rand_pull_act, 1
+            )
+            self.recurrence["coding"]["overrepresentation"][
+                s, : self.data["nSes"] - s
+            ] = (overlap_PC[s:] - np.nanmean(rand_pull_PC, 1)) / np.nanstd(
+                rand_pull_PC, 1
+            )
 
     def calculate_field_firingrates(self, sd_r=-1):
 
@@ -1124,7 +1208,7 @@ class cluster_analysis:
 
                     if self.status["activity"][c, s, 2]:
 
-                        for f in np.where(self.status_fields[c, s, :])[0]:
+                        for f in np.where(self.status["fields"][c, s, :])[0]:
                             bool_arr = np.ones(S.shape[1], "bool")
                             field_bin = int(self.fields["location"][c, s, f, 0])
                             field_bin_l = (
@@ -1233,7 +1317,7 @@ class cluster_analysis:
             pool.close()
         else:
             res = []
-            for ds in range(1, 2):  # range(1, dsMax):
+            for ds in range(1, dsMax):
                 print((nSes, nbin, N_bs, idx_celltype, s1_shifts, s2_shifts, p_keys))
                 res.append(
                     get_shift_distribution(
@@ -1560,21 +1644,21 @@ class cluster_analysis:
                 )  # neurons turning from silence to coding
 
                 idx_fields = np.where(
-                    idx_recruit_silent[:, np.newaxis] & self.status_fields[:, s, :]
+                    idx_recruit_silent[:, np.newaxis] & self.status["fields"][:, s, :]
                 )
                 self.stats["transition"]["recruitment"][s, :, 0] = np.nansum(
                     self.fields["p_x"][idx_fields[0], s, idx_fields[1]], 0
                 )
 
                 idx_fields = np.where(
-                    idx_recruit_active[:, np.newaxis] & self.status_fields[:, s, :]
+                    idx_recruit_active[:, np.newaxis] & self.status["fields"][:, s, :]
                 )
                 self.stats["transition"]["recruitment"][s, :, 1] = np.nansum(
                     self.fields["p_x"][idx_fields[0], s, idx_fields[1]], 0
                 )
 
                 idx_fields = np.where(
-                    idx_recruit_coding[:, np.newaxis] & self.status_fields[:, s, :]
+                    idx_recruit_coding[:, np.newaxis] & self.status["fields"][:, s, :]
                 )
                 self.stats["transition"]["recruitment"][s, :, 2] = np.nansum(
                     self.fields["p_x"][idx_fields[0], s, idx_fields[1]], 0
@@ -1595,21 +1679,24 @@ class cluster_analysis:
                 )  # neurons turning from silence to coding
 
                 idx_fields = np.where(
-                    idx_dismiss_silent[:, np.newaxis] & self.status_fields[:, s - 1, :]
+                    idx_dismiss_silent[:, np.newaxis]
+                    & self.status["fields"][:, s - 1, :]
                 )
                 self.stats["transition"]["dismissal"][s, :, 0] = np.nansum(
                     self.fields["p_x"][idx_fields[0], s - 1, idx_fields[1], :], 0
                 )
 
                 idx_fields = np.where(
-                    idx_dismiss_active[:, np.newaxis] & self.status_fields[:, s - 1, :]
+                    idx_dismiss_active[:, np.newaxis]
+                    & self.status["fields"][:, s - 1, :]
                 )
                 self.stats["transition"]["dismissal"][s, :, 1] = np.nansum(
                     self.fields["p_x"][idx_fields[0], s - 1, idx_fields[1], :], 0
                 )
 
                 idx_fields = np.where(
-                    idx_dismiss_coding[:, np.newaxis] & self.status_fields[:, s - 1, :]
+                    idx_dismiss_coding[:, np.newaxis]
+                    & self.status["fields"][:, s - 1, :]
                 )
                 self.stats["transition"]["dismissal"][s, :, 2] = np.nansum(
                     self.fields["p_x"][idx_fields[0], s - 1, idx_fields[1], :], 0
@@ -1622,10 +1709,10 @@ class cluster_analysis:
                 )  # neurons turning from silence to coding
                 for c in np.where(idx_stabilization)[0]:
                     field_ref = self.fields["location"][
-                        c, s - 1, self.status_fields[c, s - 1, :], 0
+                        c, s - 1, self.status["fields"][c, s - 1, :], 0
                     ]
                     field_compare = self.fields["location"][
-                        c, s, self.status_fields[c, s, :], 0
+                        c, s, self.status["fields"][c, s, :], 0
                     ]
 
                     d = np.abs(
@@ -1814,7 +1901,7 @@ def get_shift_distribution(ds, compare, para):
     Ds = s2_shifts - s1_shifts
     idx_ds = np.where((Ds == ds) & idx_celltype)[0]
     N_data = len(idx_ds)
-    print(N_data)
+    # print(N_data)
 
     idx_shifts = compare["pointer"].data[idx_ds].astype("int") - 1
     # shifts = compare['shifts'][idx_shifts]
@@ -1869,6 +1956,7 @@ def bootstrap_shifts(fun, shifts, N_bs, nbin):
         shift_distr_bs[i, :] /= shift_distr_bs[i, :].sum()
         par[i, :], p_cov = fun(shift_distr_bs[i, :])
 
+    # print(shift_distr_bs)
     p = np.nanmean(par, 0)
     p_CI = np.percentile(par, [2.5, 97.5], 0)
     p_std = np.nanstd(par, 0)

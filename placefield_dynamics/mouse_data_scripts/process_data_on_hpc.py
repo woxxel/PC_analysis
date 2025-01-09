@@ -765,6 +765,3 @@ EOF
         print(stdout.read(), stderr.read())
         client.exec_command(f"sleep 0.5 && rm {batch_params['submit_file']}")
         time.sleep(0.5)
-
-
-"CaimanMeta.mat", "CaimanResults.mat", "results_AnalyseCaiman.mat",
