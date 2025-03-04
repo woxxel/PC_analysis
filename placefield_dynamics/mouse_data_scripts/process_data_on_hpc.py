@@ -46,7 +46,7 @@ def run_neuron_detection_Subhodeep(
 
     # sftp_client = client.open_sftp()
 
-    neuron_detection_script = f"{path_code}/neuron_detection.py"
+    neuron_detection_script = f"{path_code}/run_neuron_detection.py"
     ## first, write the neuron detection script to the server
 
     # params['dxy']: 512./520.
