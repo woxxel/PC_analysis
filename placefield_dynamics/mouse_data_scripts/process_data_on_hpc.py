@@ -17,6 +17,7 @@ def run_neuron_detection_Subhodeep(
     specific_sessions=[],
     resultFile_name="results_CaImAn",
     suffix="",
+    save_type="mat",
     hpc="sofja",
 ):
     """
@@ -77,7 +78,7 @@ params['fr'] = 30.05
 
 path_to_motion_correct = motion_correct(tmp_file,params,n_processes=n_processes)
 print('motion_correct:',path_to_motion_correct)
-path_to_neuron_detection = neuron_detection(path_to_motion_correct,params,saveName=resultFile_name,n_processes=n_processes,save_type='mat')
+path_to_neuron_detection = neuron_detection(path_to_motion_correct,params,saveName=resultFile_name,n_processes=n_processes,save_type='{save_type}')
 print('neuron_detection:',path_to_neuron_detection)
                                             
 resultFile_name = os.path.split(path_to_neuron_detection)[-1]
@@ -109,7 +110,8 @@ print('Finished processing!')
                     s += 1
                     continue
 
-            path_results = dir[:-1]
+            # path_results = dir[:-1]
+            path_results = Path(path_target) / Path(dir).stem
             # path_results = os.path.join(path_target,f"Session{s:02d}")
             print(f"{path_recording=}, {path_results=}")
             # break
@@ -143,6 +145,9 @@ print('Finished processing!')
 #SBATCH -o {path_results}/log_neuron_detection_{base_name}.log
 #SBATCH -e {path_results}/log_neuron_detection_{base_name}.log
 #SBATCH --mem=64000
+
+module use /usr/users/cidbn_sw/sw/modules
+module load cidbn_caiman-1.9.10_py-3.9
 
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
@@ -315,6 +320,9 @@ print('Finished processing!')
 #SBATCH -e {pathSession_target}/log_neuron_detection.log
 #SBATCH --mem=64000
 
+module use /usr/users/cidbn_sw/sw/modules
+module load cidbn_caiman-1.9.10_py-3.9
+
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
@@ -328,6 +336,8 @@ EOF
         _, stdout, stderr = client.exec_command(
             f"/usr/local/slurm/current/install/bin/sbatch {batch_params['submit_file']}"
         )
+        client.exec_command(f"sleep 1 && rm {batch_params['submit_file']}")
+        time.sleep(1)
         # print(stdout.read(),stderr.read())
         # break
 
@@ -519,7 +529,7 @@ EOF
             f"/usr/local/slurm/current/install/bin/sbatch {batch_params['submit_file']}"
         )
         print(stdout.read(), stderr.read())
-        client.exec_command(f"sleep 2 && rm {batch_params['submit_file']}")
+        client.exec_command(f"sleep 1 && rm {batch_params['submit_file']}")
         time.sleep(1)
 
         # break

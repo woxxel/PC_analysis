@@ -323,6 +323,7 @@ class cluster_analysis:
             "rval_min": kwargs.get("rval_min") or matching_params["rval_min"],
             "cnn_lowest": kwargs.get("cnn_lowest") or matching_params["cnn_lowest"],
             "cnn_min": kwargs.get("cnn_min") or matching_params["cnn_min"],
+            
             "p_matched": kwargs.get("pm_thr") or self.params["pm_thr"],
             "firingrate": kwargs.get("fr_thr") or self.params["fr_thr"],
             "Bayes": kwargs.get("Bayes_thr") or self.params["Bayes_thr"],
@@ -353,6 +354,7 @@ class cluster_analysis:
         m.load_model()
         m.dynamic_fit()
         m.load_registration()
+        m.load_data()
 
         # matching_data = load_data(path_matching)
         self.data["nC"], self.data["nSes"] = m.results["assignments"].shape
@@ -387,6 +389,13 @@ class cluster_analysis:
         self.alignment["corr_zscored"] = m.results["remap"][
             "corr_zscored"
         ]  # if has_reference else 1
+
+        self.alignment["flow"] = np.zeros((self.data["nSes"], 2) + self.params["dims"])
+        for s in range(self.data["nSes"]):
+            # if not self.status["sessions"][s]:
+            #     continue
+            self.alignment["flow"][s, ...] = m.data[s]["remap"]["flow"]
+
         # has_reference = False
         # for s in range(self.data['nSes']):
 

@@ -188,9 +188,7 @@ class cluster_analysis_plots(cluster_analysis):
         if sv:  ## enable, when saving
             ### plot contours of two adjacent sessions
             # load data from both sessions
-            pathLoad = os.path.join(
-                self.paths["sessions"][10], self.paths["fileNameCNMF"]
-            )
+            pathLoad = self.paths["neuron_detection"][s]
             ld = load_data(pathLoad)
             A1 = ld["A"]
             Cn = ld["Cn"].transpose()
@@ -282,7 +280,7 @@ class cluster_analysis_plots(cluster_analysis):
                 # print(n_s1)
                 for c, n in zip(np.where(idx_s1)[0], n_s1):
                     a = A1[:, n]
-                    f = np.where(self.status["fields"][c, s, :] > 2)[0][0]
+                    f = np.where(self.status["fields"][c, s, :])[0][0]
                     colVal = scalarMap.to_rgba(self.fields["location"][c, s, f, 0])
                     ax_ROI.contour(
                         (a / a.max()).reshape(512, 512).toarray(),
@@ -294,7 +292,7 @@ class cluster_analysis_plots(cluster_analysis):
 
                 for i, (c, n) in enumerate(zip(np.where(idx_s2)[0], n_s2)):
                     a = A_tmp[:, i]
-                    f = np.where(self.status["fields"][c, s + 1, :] > 2)[0][0]
+                    f = np.where(self.status["fields"][c, s + 1, :])[0][0]
                     colVal = scalarMap.to_rgba(self.fields["location"][c, s + 1, f, 0])
                     ax_ROI.contour(
                         (a / a.max()).reshape(512, 512).toarray(),
@@ -305,7 +303,7 @@ class cluster_analysis_plots(cluster_analysis):
                     )
                 for c, n in zip(np.where(idx_s12)[0], n_s12):
                     a = A1[:, n]
-                    f = np.where(self.status["fields"][c, s, :] > 2)[0][0]
+                    f = np.where(self.status["fields"][c, s, :])[0][0]
                     colVal = scalarMap.to_rgba(self.fields["location"][c, s, f, 0])
                     ax_ROI.contour(
                         (a / a.max()).reshape(512, 512).toarray(),
@@ -2002,7 +2000,7 @@ class cluster_analysis_plots(cluster_analysis):
 
     #      overrepr = occupancy(:,1:para.nbin)./(sum(nROI(:,3:5),2)/para.nbin);
 
-    def plot_firingmaps(self):
+    def plot_firingmaps(self, sv=True):
 
         nSes = self.data["nSes"]
         nbin = self.data["nbin"]
@@ -2152,8 +2150,8 @@ class cluster_analysis_plots(cluster_analysis):
         plt.tight_layout()
         plt.show(block=False)
 
-        # if sv:
-        # self.pl_dat.save_fig('PC_mapDynamics')
+        if sv:
+            self.pl_dat.save_fig("PC_mapDynamics")
 
     def plot_stability_dynamics(
         self, n_processes=8, reprocess=False, N_bs=10, sv=False
@@ -3403,15 +3401,11 @@ class cluster_analysis_plots(cluster_analysis):
             s = 1
             margin = 20
             nSteps = 9
-            pathLoad = os.path.join(
-                self.paths["sessions"][s], self.paths["fileNameCNMF"]
-            )
+            pathLoad = self.paths["neuron_detection"][s]
             if os.path.exists(pathLoad):
                 ld1 = load_data(pathLoad)
 
-                pathLoad = os.path.join(
-                    self.paths["sessions"][s + 1], self.paths["fileNameCNMF"]
-                )
+                pathLoad = self.paths["neuron_detection"][s + 1]
                 if os.path.exists(pathLoad):
                     ld2 = load_data(pathLoad)
 
