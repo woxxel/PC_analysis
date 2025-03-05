@@ -80,9 +80,6 @@ class cluster_analysis:
             "figures": Path(path_mouse) / "figures",
         }
 
-        ld = load_data(paths_place_field_detection[0])
-        self.data["nbin"] = ld["firingstats"]["map"].shape[1]
-
         self.matching_only = matching_only
 
         if not matching_only:
@@ -93,6 +90,9 @@ class cluster_analysis:
             assert (
                 paths_neuron_detection is not None
             ), "No neuron detection data provided"
+
+            ld = load_data(paths_place_field_detection[0])
+            self.data["nbin"] = ld["firingstats"]["map"].shape[1]
 
         # self.data["nSes"] = len(self.paths["behavior"])
 
