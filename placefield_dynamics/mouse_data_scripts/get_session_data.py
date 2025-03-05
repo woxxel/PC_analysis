@@ -31,21 +31,20 @@ def get_session_data(
     function to check for presence and logic of data
 
     1. check if files of
-                                                                                                    recording (?)
-                                                                                                    neuron detection
-                                                                                                    mouse behavior
-                                    are present
+                    recording (?)
+                    neuron detection
+                    mouse behavior
+            are present
 
     2. check if neuron matching is present
-                                                                                                    and use to check whether some data seems flawed
-                                                                                                    (e.g. large shifts, twice the same measurement, bad detection results, ...)
+            and use to check whether some data seems flawed
+            (e.g. large shifts, twice the same measurement, bad detection results, ...)
 
     3. check if data is consistent with the mouse
-
-    stores:
-                                                                                                    * paths to sessions and data
-                                                                                                    * whether all necessary files are present
-                                                                                                    * reward location
+            stores:
+            * paths to sessions and data
+            * whether all necessary files are present
+            * reward location
     """
 
     ## setting up connection to server
@@ -141,8 +140,6 @@ def get_session_data(
 
                 n_neurons[suffix] = np.isfinite(ld[suffix]["assignments"]).sum(axis=0)
                 resultsFiles[suffix] = ld[suffix]["filePath"]
-
-            print(n_neurons)
 
             shifts = ld[suffixes[0]]["remap"]["shift"]
             correlations = ld[suffixes[0]]["remap"]["corr"]
@@ -254,18 +251,11 @@ def get_session_data(
                                 time = fileparts[2][:2]
 
                                 new_data["mouse_from_behavior"] = fileparts[1]
-                                new_data["consistent"] &= (
-                                    new_data["mouse_from_behavior"] == mouse
-                                )
 
                                 new_data["date_from_behavior"] = date
 
                                 new_data["time_from_behavior"] = time
-                                if "time_from_recording" in new_data:
-                                    new_data["consistent"] &= (
-                                        new_data["time_from_behavior"]
-                                        == new_data["time_from_recording"]
-                                    )
+
                             if file.endswith("m.txt"):
                                 fileparts = os.path.splitext(file)[0].split("_")
                                 date = datetime.strptime(
@@ -279,11 +269,15 @@ def get_session_data(
 
                                 new_data["time_from_behavior"] = time
 
-                                if "time_from_recording" in new_data:
-                                    new_data["consistent"] &= (
-                                        new_data["time_from_behavior"]
-                                        == new_data["time_from_recording"]
-                                    )
+                            new_data["consistent"] &= (
+                                new_data["mouse_from_behavior"] == mouse
+                            )
+
+                            if "time_from_recording" in new_data:
+                                new_data["consistent"] &= (
+                                    new_data["time_from_behavior"]
+                                    == new_data["time_from_recording"]
+                                )
 
                     ## if data can be processed, check for further details
                     if new_data["files_behavior"] & new_data["files_recording"]:
