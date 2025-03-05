@@ -15,12 +15,15 @@ from .cluster_analysis import cluster_analysis
 
 class silence_redetection:
 
-    def __init__(self,
-            pathsSession,
-            pathsResults,
-            pathsImages=None,
-            matlab=False,
-            params_in={}):
+    def __init__(
+        self,
+        pathsSession,
+        pathsResults,
+        pathsImages=None,
+        suffix=None,
+        matlab=False,
+        params_in={},
+    ):
         # filePath_images=None,
         # fileName_suffix_out='_redetected',
         # fileName_results='results_CaImAn*'):
@@ -46,6 +49,7 @@ class silence_redetection:
             paths_neuron_detection=pathsResults,
             matlab=matlab,
             matching_only=True,
+            suffix=suffix,
         )
         self.cluster.get_matching()
 

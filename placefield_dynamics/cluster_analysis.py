@@ -60,6 +60,7 @@ class cluster_analysis:
         s_corr_min=0.2,
         matlab=False,
         matching_only=False,
+        suffix="redetected",
     ):
 
         self.matlab = matlab
@@ -79,6 +80,7 @@ class cluster_analysis:
             "neuron_detection": paths_neuron_detection,
             "figures": Path(path_mouse) / "figures",
         }
+        self.suffix = suffix
 
         self.matching_only = matching_only
 
@@ -358,7 +360,7 @@ class cluster_analysis:
             mousePath=self.path_mouse,
             paths=self.paths["neuron_detection"],
             matlab=self.matlab,
-            suffix="redetected",
+            suffix=self.suffix,
         )
         m.load_model()
         m.dynamic_fit()
