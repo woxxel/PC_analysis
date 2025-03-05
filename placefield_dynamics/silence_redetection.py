@@ -101,7 +101,7 @@ class silence_redetection:
             return
 
         self.currentS = s
-        self.currentSession = self.cluster.paths['sessions'][s]
+        self.currentSession = self.cluster.paths["neuron_detection"][s].parent
         self.currentSession_source = pathImage if pathImage else self.paths_images[s]
         self.path_tmp = path_tmp#os.path.join(path_tmp,os.path.split(self.currentSession)[-1])
 
@@ -154,7 +154,7 @@ class silence_redetection:
         self.dataIn = {}
         self.dataOut = {}
 
-        ld = load_data(self.cluster.paths['CaImAn_results'][s])
+        ld = load_data(self.cluster.paths["neuron_detection"][s])
         T = ld['C'].shape[1]
 
         self.dataIn['A'] = scipy.sparse.csc_matrix((np.prod(self.dims),self.nC))
@@ -178,7 +178,7 @@ class silence_redetection:
             print('silent:', self.idxes['in']['nSilent'], 'active:', self.idxes['in']['nActive'])
 
             ## load footprints of active cells from session s
-            ld = load_data(self.cluster.paths['CaImAn_results'][s])
+            ld = load_data(self.cluster.paths["neuron_detection"][s])
             if 'Cn' in ld.keys():
                 Cn_ref = ld['Cn'].T 
             else:
@@ -246,8 +246,8 @@ class silence_redetection:
         progress = tqdm.tqdm(s_load,total=len(s_load),desc='Loading footprints for processing Session %d...'%(s+1))
         for s_ld in progress:
 
-            ld = load_data(self.cluster.paths['CaImAn_results'][s_ld])
-            # print(f"{s_ld=}, path={self.cluster.paths['CaImAn_results'][s_ld]}")
+            ld = load_data(self.cluster.paths["neuron_detection"][s_ld])
+            # print(f"{s_ld=}, path={self.cluster.paths['neuron_detection'][s_ld]}")
             # print(f'n=,{n_ref[s_ref==s_ld]}')
             A_tmp = ld['A'].tocsc()
             # Cn = ld['Cn'].T
@@ -601,7 +601,9 @@ class silence_redetection:
 
         ### save everything important from running the detection
 
-        fileParts = os.path.splitext(self.cluster.paths['CaImAn_results'][self.currentS])
+        fileParts = os.path.splitext(
+            self.cluster.paths["neuron_detection"][self.currentS]
+        )
         svPath = os.path.join(f'{fileParts[0]}_redetected{fileParts[1]}')
 
         results = {
