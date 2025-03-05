@@ -20,7 +20,7 @@ class silence_redetection:
         pathsSession,
         pathsResults,
         pathsImages=None,
-        suffix=None,
+        suffix="",
         matlab=False,
         params_in={},
     ):
