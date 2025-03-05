@@ -369,6 +369,10 @@ class cluster_analysis:
 
         # matching_data = load_data(path_matching)
         self.data["nC"], self.data["nSes"] = m.results["assignments"].shape
+        if self.matching_only:
+            self.data["nbin"] = (
+                10  # just to provide some basic value for initialization
+            )
 
         self.prepare_dicts(which=["alignment", "matching", "stats"])
         self.matching["f_same"] = m.model["f_same"]
