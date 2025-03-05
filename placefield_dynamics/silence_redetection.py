@@ -307,7 +307,7 @@ class silence_redetection:
             path_tmp_images = self.currentSession_source
 
         ## if files present in single tifs, only (its the case for my data), run batch-creation
-        if self.currentSession_source.isdir():
+        if self.currentSession_source.is_dir():
             path_to_stack = make_stack_from_single_tifs(path_tmp_images,self.path_tmp,data_type='float16',clean_after_stacking=True)
         else:
             if self.currentSession_source.suffix == ".tif":
