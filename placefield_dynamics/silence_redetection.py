@@ -38,8 +38,8 @@ class silence_redetection:
         # mousePath = os.path.join(path_detected,dataset,mouse)
 
         # self.fileName_results = fileName_in#fileName_results
-        print(pathsSession)
-        print(pathsResults)
+        # print(pathsSession)
+        # print(pathsResults)
 
         pathMouse = Path(pathsSession[0]).parent
         print(f"{pathMouse=}")
@@ -295,7 +295,7 @@ class silence_redetection:
             function to set up a CaImAn batch-processing instance
         '''
 
-        isFolder = not len(os.path.splitext(self.currentSession_source)[1])
+        # isFolder = not len(os.path.splitext(self.currentSession_source)[1])
 
         if ssh_alias:
             ## if file(s) are on remote, copy over data, first
@@ -307,12 +307,23 @@ class silence_redetection:
             path_tmp_images = self.currentSession_source
 
         ## if files present in single tifs, only (its the case for my data), run batch-creation
-        if isFolder:
+        if self.currentSession_source.isdir():
             path_to_stack = make_stack_from_single_tifs(path_tmp_images,self.path_tmp,data_type='float16',clean_after_stacking=True)
         else:
-            path_to_stack = os.path.join(self.path_tmp,os.path.basename(self.currentSession_source))
-            shutil.copy(self.currentSession_source,path_to_stack)
+            if self.currentSession_source.suffix == ".tif":
+                path_to_stack = Path(self.path_tmp, self.currentSession_source.name)
+                shutil.copy(self.currentSession_source, path_to_stack)
+            elif self.currentSession_source.suffix == ".h5":
+                path_to_stack = make_stack_from_h5(
+                    self.currentSession_source,
+                    self.path_tmp,
+                    data_type="float16",
+                    clean_after_stacking=False,
+                )
+            else:
+                assert False, "File format not supported"
 
+            print(f"{path_to_stack=}")
             # path_to_stack = path_tmp_images
 
         # print(f'{path_to_stack=}')
