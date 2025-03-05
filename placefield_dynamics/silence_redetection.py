@@ -100,6 +100,10 @@ class silence_redetection:
             print(f'Session has not been included in matching or is skipped for another reason - skip redetection of "silent" cells on session {s+1}')
             return
 
+        print("images:")
+        print(self.paths_images)
+        print(pathImage)
+
         self.currentS = s
         self.currentSession = self.cluster.paths["neuron_detection"][s].parent
         self.currentSession_source = pathImage if pathImage else self.paths_images[s]
