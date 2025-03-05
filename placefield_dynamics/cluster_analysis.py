@@ -51,10 +51,10 @@ class cluster_analysis:
     def __init__(
         self,
         path_mouse,
-        path_matching,
-        paths_behavior,
-        paths_place_field_detection,
-        paths_neuron_detection,
+        # path_matching,
+        paths_behavior=None,
+        paths_place_field_detection=None,
+        paths_neuron_detection=None,
         mouse=None,
         # session_order=None,
         s_corr_min=0.2,
@@ -73,7 +73,7 @@ class cluster_analysis:
         self.params = paramsObj.params
 
         self.paths = {
-            "matching": path_matching,
+            # "matching": path_matching,
             "behavior": paths_behavior,
             "place_field_detection": paths_place_field_detection,
             "neuron_detection": paths_neuron_detection,
@@ -84,6 +84,15 @@ class cluster_analysis:
         self.data["nbin"] = ld["firingstats"]["map"].shape[1]
 
         self.matching_only = matching_only
+
+        if not matching_only:
+            assert paths_behavior is not None, "No behavior data provided"
+            assert (
+                paths_place_field_detection is not None
+            ), "No place field data provided"
+            assert (
+                paths_neuron_detection is not None
+            ), "No neuron detection data provided"
 
         # self.data["nSes"] = len(self.paths["behavior"])
 

@@ -21,9 +21,9 @@ class silence_redetection:
             pathsImages=None,
             matlab=False,
             params_in={}):
-            # filePath_images=None,
-            # fileName_suffix_out='_redetected',
-            # fileName_results='results_CaImAn*'):
+        # filePath_images=None,
+        # fileName_suffix_out='_redetected',
+        # fileName_results='results_CaImAn*'):
         '''
             find an as-complete-as-possible set of neurons active in this session by using input footprints from
                 1. neurons previously detected in this session
@@ -33,10 +33,15 @@ class silence_redetection:
         self.matlab = matlab
 
         # mousePath = os.path.join(path_detected,dataset,mouse)
-        
-        # self.fileName_results = fileName_in#fileName_results
 
-        self.cluster = cluster_analysis(pathsSession,pathsResults,matlab=matlab,matching_only=True)
+        # self.fileName_results = fileName_in#fileName_results
+        print(pathsSession)
+        print(pathsResults)
+
+        pathMouse = Path(pathsSession[0]).parent
+        print(f"{pathMouse=}")
+
+        self.cluster = cluster_analysis(pathMouse, matlab=matlab, matching_only=True)
         self.cluster.get_matching()
 
         self.paths_images = pathsImages
@@ -49,7 +54,6 @@ class silence_redetection:
 
         self.dims = self.cluster.params['dims']
 
-
     def run_all(self,n_processes=8,plt_bool=False):
 
         '''
@@ -60,7 +64,6 @@ class silence_redetection:
 
         for s,path in enumerate(self.cluster.paths['sessions']):
 
-            
             ## test some stuff (such as session correlation and shift distance)
             try:
                 self.process_session(s,n_processes=n_processes,ssh_alias=None,plt_bool=plt_bool)
@@ -81,9 +84,8 @@ class silence_redetection:
             #     # print('process this!')
             #     # pass
 
-    
     def process_session(self,s,n_processes=8,path_tmp='data/tmp',pathImage=None,ssh_alias='hpc-sofja',plt_bool=True):
-        
+
         print(self.cluster.status['sessions'])
         if not self.cluster.status['sessions'][s]:
             print(f'Session has not been included in matching or is skipped for another reason - skip redetection of "silent" cells on session {s+1}')
@@ -117,12 +119,10 @@ class silence_redetection:
             plt.close('all')
         print('### --------- plotting completed - time took: %5.3fs ---------- ###'%(time.time()-t_start))
 
-
     def obtain_footprints(self,s,max_diff=None,complete_new=False):
 
-        
         print(f'Run redetection of "silent" cells on session {s+1}')
-        
+
         ## prepare some dictionaries for storing in- and output data
         if max_diff is None:
             max_diff = self.cluster.data['nSes']
@@ -147,7 +147,7 @@ class silence_redetection:
 
         ld = load_data(self.cluster.paths['CaImAn_results'][s])
         T = ld['C'].shape[1]
-        
+
         self.dataIn['A'] = scipy.sparse.csc_matrix((np.prod(self.dims),self.nC))
         self.dataIn['C'] = np.random.rand(self.nC,T)
 
@@ -163,12 +163,11 @@ class silence_redetection:
             isActive = self.cluster.status['clusters'] & np.isfinite(self.cluster.matching['IDs'][:,s])
             self.idxes['in']['nActive'] = isActive.sum()
 
-            
             self.idxes['in']['active'][:self.idxes['in']['nActive']] = True
             self.idxes['in']['silent'][self.idxes['in']['nActive']:] = True
 
             print('silent:', self.idxes['in']['nSilent'], 'active:', self.idxes['in']['nActive'])
-            
+
             ## load footprints of active cells from session s
             ld = load_data(self.cluster.paths['CaImAn_results'][s])
             if 'Cn' in ld.keys():
@@ -176,7 +175,7 @@ class silence_redetection:
             else:
                 # self.log.warning('Cn not in result files. constructing own Cn from footprints!')
                 Cn_ref = np.array(ld['A'].sum(axis=1).reshape(*self.params['dims']))
-            
+
             # Cn_ref = ld['Cn'].T
 
             c_idx = np.concatenate([np.where(isActive)[0],np.where(isSilent)[0]])
@@ -190,13 +189,13 @@ class silence_redetection:
                 self.dataIn['A'][:,:self.idxes['in']['nActive']] = scipy.sparse.hstack([(a/a.sum()).reshape(self.dims).transpose().reshape(-1,1) for a in ld['A'][:,n_idx].T])
             else:
                 self.dataIn['A'][:,:self.idxes['in']['nActive']] = scipy.sparse.vstack([a/a.sum() for a in ld['A'][:,n_idx].T]).T
-            
-            #if not (ld['C'].shape[0] == ld['A'].shape[1]):
-                #ld['C'] = ld['C'].transpose()
+
+            # if not (ld['C'].shape[0] == ld['A'].shape[1]):
+            # ld['C'] = ld['C'].transpose()
             ## load temporal components of active cells from session s
             T1 = ld['C'].shape[1]   # adjusted for a session, where T != T1
             self.dataIn['C'][:self.idxes['in']['nActive'],:T1] = ld['C'][n_idx,:]
-            
+
             ## load background components from session s
             if not (ld['b'].shape[0] == ld['A'].shape[0]):
                 ld['b'] = ld['b'].transpose()
@@ -204,7 +203,6 @@ class silence_redetection:
             if not (ld['f'].shape[1] == self.dataIn['C'].shape[1]):
                 ld['f'] = ld['f'].transpose()
             self.dataIn['f'] = ld['f']
-            
 
         ## for each silent neuron identify footprints as close as possible before & after current session
         s_ref = np.full((self.idxes['in']['nSilent'],2),-1,'int')
@@ -226,19 +224,18 @@ class silence_redetection:
                 s_ref[i,1] = s_post[0] if (s_post[0] - s) <= max_diff else -1
                 if s_ref[i,1]>=0:
                     n_ref[i,1] = self.cluster.matching['IDs'][c,int(s_ref[i,1])].astype(int)
-                
+
             # if n_ref[i,1] == 510:
-                # print('@510:',s_ref[i,1],n_ref[i,1])
+            # print('@510:',s_ref[i,1],n_ref[i,1])
         s_load = np.unique(s_ref[s_ref>=0])
 
         # print('s_ref:',s_ref)
         # print('n:',n_ref)
         # assert False, 'check n_ref!'
         ## construct footprint of silent cells as interpolation between footprints of adjacent sessions and adjust for shift & rotation
-        
+
         progress = tqdm.tqdm(s_load,total=len(s_load),desc='Loading footprints for processing Session %d...'%(s+1))
         for s_ld in progress:
-
 
             ld = load_data(self.cluster.paths['CaImAn_results'][s_ld])
             # print(f"{s_ld=}, path={self.cluster.paths['CaImAn_results'][s_ld]}")
@@ -255,7 +252,7 @@ class silence_redetection:
                 # print('load transposed from session %d'%(s_ld+1))
                 A_tmp = scipy.sparse.hstack([img.reshape(self.dims).transpose().reshape(-1,1) for img in A_tmp.transpose()]).tocsc()
                 Cn = Cn.T
-    
+
             x_grid, y_grid = np.meshgrid(np.arange(0., dims[0]).astype(np.float32), np.arange(0., dims[1]).astype(np.float32))
             (x_shift,y_shift),flow,_,_ = get_shift_and_flow(Cn_ref,Cn,dims,projection=None,plot_bool=False)
 
@@ -273,7 +270,7 @@ class silence_redetection:
                 ])
 
             self.dataIn['A'][:,self.idxes['in']['nActive'] + np.where(s_ref==s_ld)[0]] += 1./abs(s_ld-s) * scipy.sparse.vstack([a/a.sum() for a in A_tmp.T]).T
-            #print('%d neuron footprints taken from session %d'%(A_tmp.shape[1],s_ld+1))
+            # print('%d neuron footprints taken from session %d'%(A_tmp.shape[1],s_ld+1))
 
         max_thr = 0.001
         self.dataIn['A'] = scipy.sparse.vstack([a.multiply(a>(max_thr*a.max()))/a.sum() for a in self.dataIn['A'].T]).T
@@ -284,9 +281,9 @@ class silence_redetection:
         '''
             function to set up a CaImAn batch-processing instance
         '''
-        
+
         isFolder = not len(os.path.splitext(self.currentSession_source)[1])
-        
+
         if ssh_alias:
             ## if file(s) are on remote, copy over data, first
             # path_tmp_images = os.path.join(self.path_tmp,'images')
@@ -296,21 +293,20 @@ class silence_redetection:
             # path_tmp_images = os.path.join(self.currentSession_source,'images')
             path_tmp_images = self.currentSession_source
 
-        
         ## if files present in single tifs, only (its the case for my data), run batch-creation
         if isFolder:
             path_to_stack = make_stack_from_single_tifs(path_tmp_images,self.path_tmp,data_type='float16',clean_after_stacking=True)
         else:
             path_to_stack = os.path.join(self.path_tmp,os.path.basename(self.currentSession_source))
             shutil.copy(self.currentSession_source,path_to_stack)
-            
+
             # path_to_stack = path_tmp_images
-            
-        print(f'{path_to_stack=}')
+
+        # print(f'{path_to_stack=}')
         # run motion correction separately (to not having to call everything manually...)
         CaImAn_params['fnames'] = None   # reset to remove previously set data
         path_to_motion_correct = motion_correct(path_to_stack,CaImAn_params,n_processes=n_processes)
-        
+
         # path_to_motion_correct = os.path.join(self.currentSession,'20240607_58_ROI1_00001_els__d1_512_d2_512_d3_1_order_F_frames_13329.mmap')
         CaImAn_params['fnames'] = [path_to_motion_correct]
         for key in self.params_in:
@@ -318,15 +314,14 @@ class silence_redetection:
 
         self.opts = cnmf.params.CNMFParams(params_dict=CaImAn_params)
 
-
     def run_detection(self,s,n_processes,as_c=False,cleanup=False):
-        
+
         '''
             calls cnmf to run redetection with predefined neuron footprints from current, as well as adjacent sessions
                 1. temporal trace updates on ROIs and background
                 2. spatial update on silent neurons (?) - rather not!
         '''
-        #if not self.preprocessed:
+        # if not self.preprocessed:
         use_parallel = n_processes>1
         if use_parallel:
             c, self.dview, n_processes = cm.cluster.setup_cluster(backend='local', n_processes=n_processes, single_thread=False)
@@ -334,7 +329,6 @@ class silence_redetection:
             self.dview=None
             n_processes=1
 
-    
         self.cnm = cnmf.CNMF(n_processes,dview=self.dview)
 
         Yr, dims, T = cm.load_memmap(CaImAn_params['fnames'][0])
@@ -348,13 +342,12 @@ class silence_redetection:
 
         self.cnm.estimates.A = self.dataIn['A']
 
-
         self.cnm.estimates.C = self.dataIn['C']
         self.cnm.estimates.b = self.dataIn['b']
         self.cnm.estimates.f = self.dataIn['f']
 
         Yr = np.transpose(np.reshape(images, (T, -1), order='F'))
-        
+
         t_start = time.time()
         if as_c:
             print('Switch memory order to C-style')
@@ -369,20 +362,18 @@ class silence_redetection:
             Yr.filename = images.filename
         except AttributeError:  # if no memmapping cause working with small data
             pass
-        
+
         if self.cnm.estimates.sn is None:
             print('preprocessing...')
             Yr = self.cnm.preprocess(Yr)
             self.preprocessed = True
             print(f'done! after {time.time()-t_start}s')
-        
 
         print('temporal and spatial update...')
         self.cnm.update_temporal(Yr)
         self.cnm.update_spatial(Yr)
         self.cnm.update_temporal(Yr)
         print(f'done! after {time.time()-t_start}s')
-
 
         print('deconvolving and evaluating...')
         self.cnm.deconvolve()
@@ -399,7 +390,6 @@ class silence_redetection:
         #     os.remove(CaImAn_params['fnames'][0])
         #     if os.path.isdir(self.path_tmp):
         #         shutil.rmtree(self.path_tmp)
-
 
     def analyze_traces(self,redo=False):
 
@@ -420,8 +410,7 @@ class silence_redetection:
         nC_out = self.cnm.estimates.A.shape[1]
         if nC_out < nC_in:
             print('\t %d neurons were removed ...'%(nC_in-nC_out))
-        
-        
+
         Cout = self.cnm.estimates.C - np.percentile(self.cnm.estimates.C,0.05,axis=1)[:,np.newaxis]
         ## find next footprints with low distance
 
@@ -429,7 +418,7 @@ class silence_redetection:
 
         self.idxes['out']['active'] = np.zeros(nC_out,'bool')
         self.idxes['out']['active'][self.cnm.estimates.idx_components] = True
-        
+
         ### check whether some neurons have significant overlap and need to be removed
         ## ?? run twice, once to calculate statistics for all, once to remove footprints from the pool of active neurons
         _,_,idx_remove = calculate_statistics(
@@ -444,7 +433,7 @@ class silence_redetection:
         #     binary=False)
         # print(idx_remove)
         self.idxes['out']['active'][idx_remove] = False
-        
+
         self.analysis['D_ROIs'],self.analysis['fp_corr'], _ = calculate_statistics(self.cnm.estimates.A,A_ref=self.dataIn['A'],binary=False,dims=dims)
         d_ROIs, fp_corr, _ = calculate_statistics(self.cnm.estimates.A,A_ref=self.dataIn['A'],idx_eval=self.idxes['out']['active'],binary=False,dims=dims)
 
@@ -476,23 +465,21 @@ class silence_redetection:
 
         self.idxes['out']['match_to_in'] = np.full(nC_out,-1,dtype='int')
         self.idxes['out']['match_to_in'][matches[:,1]] = matches[:,0]
-        
+
         idx_out_active_before = np.zeros(nC_out,'bool')
         idx_out_active_before[self.idxes['in']['match_to_out'][(self.idxes['in']['match_to_out']>=0) & self.idxes['in']['active']].astype('int')] = True
-        
 
         self.idxes['out']['active_still'] = self.idxes['out']['active'] & idx_out_active_before
         self.idxes['out']['active_new'] = self.idxes['out']['active'] & ~idx_out_active_before & idx_matched
         self.idxes['out']['silent_still'] = ~self.idxes['out']['active'] & ~idx_out_active_before
         self.idxes['out']['silent_new'] = ~self.idxes['out']['active'] & idx_out_active_before
-        
+
         self.idxes['out']['active_unmatched'] = self.idxes['out']['active'] & ~idx_out_active_before & ~idx_matched
 
         self.idxes['out']['silent'] = []
 
         nC_new = self.idxes['out']['active_unmatched'].sum()
         print('%d new neurons detected'%nC_new)
-
 
         print(f"active before: {self.idxes['in']['active'].sum()}, \t silent before: {(~self.idxes['in']['active']).sum()}")
         print(f"active still: {self.idxes['out']['active_still'].sum()}, \t active new: {self.idxes['out']['active_new'].sum()}")
@@ -502,7 +489,7 @@ class silence_redetection:
         for key in ['A','C','S','SNR_comp','r_values','cnn_preds']:
             self.dataOut[key] = getattr(self.cnm.estimates,key)
         self.dataOut['C'] -= np.percentile(self.dataOut['C'],0.05,axis=1)[:,np.newaxis] # correct for offset
-        
+
         # ### analyze active neurons: did they maintain same behavior? (correlation > 0.9)
         # #self.Cout[self.idxes['in'],:] = np.vstack([Ca/Ca.max() for Ca in self.cnm.estimates.C])
 
@@ -516,8 +503,6 @@ class silence_redetection:
         # #t_end = time.time()
         # #print('fitness computed - time took: %5.3g'%(t_end-t_start))
 
-
-
     def others(self):
 
         print('check this stuff for analysis')
@@ -527,16 +512,15 @@ class silence_redetection:
         #     a /= a.max()
         #     ax.contour(a,levels=[0.1,0.5],colors=col,linewidths=linewidth,linestyles=['--','-'])
 
-
         ### check, why some components are not matched
         # cols = ['r','g','b']
         # for i in np.where(new_comps)[0]:
 
         #     print('\n neuron ',i)
-            
+
         #     why_no_match = np.where(p_same[:,i].todense()>0.1)[0]
         #     if len(why_no_match):
-                
+
         #         print('why no match?',why_no_match)
         #         print(p_same[:,i].data)
 
@@ -544,13 +528,13 @@ class silence_redetection:
         #         idx_confused = np.where(p_same[why_no_match,:].todense())[1]
         #         print(idx_confused)
 
-        #         fig,ax = plt.subplots(1,2); 
+        #         fig,ax = plt.subplots(1,2);
         #         plot_contour(ax[0],self.dataIn['A'][:,why_no_match],'k')
         #         if self.idxes['in']['active'][why_no_match]:
         #             ax[1].plot(Cin[why_no_match,:],color='k')
         #         for a,j in enumerate(idx_confused):
         #             plot_contour(ax[0],self.cnm.estimates.A[:,j],cols[a],linewidth=p_same[why_no_match,j])
-                    
+
         #             ax[1].plot(Cout[j,:],color=cols[a])
 
         #         plt.show(block=False)
@@ -561,8 +545,6 @@ class silence_redetection:
         # plt.hist(ts.analysis['nu'][ts.idxes['out']['active_new']],np.linspace(0,1,51),facecolor='g',alpha=0.7)
         # plt.hist(ts.analysis['nu'][ts.idxes['out']['silent_still']],np.linspace(0,1,51),facecolor='r',alpha=0.3)
         # plt.show()
-
-    
 
     def analyze_pre_plot(self,redo=False):
 
@@ -601,11 +583,10 @@ class silence_redetection:
                     if self.idxes['out']['active_still'][cc]:
                         cc_in = int(self.idxes['out']['match_to_in'][cc])
                         # print(cc_in)
-                    #corr_tmp = np.cov(self.Cout[c,:],self.Cout[cc,:])[0,1]/(self.dataOut['C_std'][c]*self.dataOut['C_std'][cc])
+                        # corr_tmp = np.cov(self.Cout[c,:],self.Cout[cc,:])[0,1]/(self.dataOut['C_std'][c]*self.dataOut['C_std'][cc])
                         self.analysis['C_corr'][c,cc] = np.cov(self.dataOut['C'][c,:],self.dataIn['C'][cc_in,:])[0,1]/(self.dataOut['C_std'][c]*self.dataIn['C_std'][cc_in])
 
-        #self.analysis['fp_corr'].tocsc()
-
+        # self.analysis['fp_corr'].tocsc()
 
     def save_results(self):
 
@@ -636,25 +617,25 @@ class silence_redetection:
         svPath = os.path.join(f'{fileParts[0]}_redetected_compares{fileParts[1]}')
         save_data(compares,svPath)
         # with open(svPath,'wb') as f_open:
-            # pickle.dump(compares,f_open)
+        # pickle.dump(compares,f_open)
 
         ### analyze silent ones: do they show firing behavior at all? are they correlated with nearby active neurons?
 
     def load(self,s):
 
         pathData = os.path.join(self.currentSession,self.fileName_results)
-        #pathData = pathcat([pathSession,'results_postSilent.%s'%ext])
+        # pathData = pathcat([pathSession,'results_postSilent.%s'%ext])
         print('loading data from %s'%pathData)
-        
+
         ld = load_data(pathData)
-        
+
         self.dataOut = {'A':ld['A'],
                     'C':ld['C'],
                     'S':ld['S'],
                     'SNR':ld['SNR'],
                     'r_values':ld['r_values'],
                     'CNN':ld['CNN']}
-                    #'fitness':ld['fitness']}
+        #'fitness':ld['fitness']}
 
         self.dataIn = {'A':ld['Ain'],
                    #'Cn':ld['Cn'],
@@ -665,7 +646,6 @@ class silence_redetection:
                   'evaluate':ld['idx_evaluate'].astype('bool')}
 
         # self.data = {}
-
 
     def plot_analysis(self,SNR_thr=2,r_val_thr=0,CNN_thr=0.6):
 
@@ -685,7 +665,7 @@ class silence_redetection:
         ax = plt.axes([0.1,0.2,0.25,0.4])
         for i in range(2):
             ax.hist(acorr[idxs[i]],np.linspace(0.5,1,21),facecolor=col_arr[i],alpha=al,orientation='horizontal')
-        #ax.xlabel('$C_{Ca^{2+}}^{in-out}$',fontsize=14)
+        # ax.xlabel('$C_{Ca^{2+}}^{in-out}$',fontsize=14)
         ax.invert_xaxis()
         ax.set_xticks([])
         ax.set_yticks([])
@@ -693,10 +673,10 @@ class silence_redetection:
 
         ax = plt.axes([0.4,0.65,0.35,0.3])
         for i in range(2):
-            #if i==1:
-                #continue
+            # if i==1:
+            # continue
             plt.hist(fp_acorr[idxs[i]],np.linspace(0.5,1,21),facecolor=col_arr[i],alpha=al)
-        #plt.xlabel('$C_{fp}^{in-out}$',fontsize=14)
+        # plt.xlabel('$C_{fp}^{in-out}$',fontsize=14)
         ax.set_xticks([])
         ax.set_yticks([])
         ax.spines[['top','left']].set_visible(False)
@@ -722,33 +702,31 @@ class silence_redetection:
         plt.savefig(pathFigure,format=ext,dpi=300)
         print(f'Figure saved as {pathFigure}')
 
-
-
         ### plot goodness of detected ROIs
         plt.figure(figsize=(4,3))
 
         ax = plt.axes([0.15,0.65,0.4,0.25])
         for i in range(4):
             ax.hist(self.dataOut['r_values'][idxs[i]],np.linspace(-1,1,21),facecolor=col_arr[i],alpha=al)
-        #plt.xscale('log')
+        # plt.xscale('log')
         ax.set_xlim([-0.5,1])
         ax.set_xticks([])
         ax.set_yticks([])
         ax.spines['top'].set_visible(False)
         ax.spines['left'].set_visible(False)
-        #ax.set_xlabel('r value',fontsize=14)
+        # ax.set_xlabel('r value',fontsize=14)
 
         ax = plt.axes([0.65,0.2,0.25,0.4])
         for i in range(4):
             ax.hist(self.dataOut['SNR_comp'][idxs[i]],np.linspace(0,30,21),facecolor=col_arr[i],alpha=al,orientation='horizontal')
-        #ax.invert_xaxis()
+        # ax.invert_xaxis()
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-        #ax.yaxis.tick_right()
+        # ax.yaxis.tick_right()
         ax.set_xticks([])
         ax.set_yticklabels([])
         ax.yaxis.set_label_position("right")
-        #ax.set_ylabel('SNR',fontsize=14)
+        # ax.set_ylabel('SNR',fontsize=14)
         ax.set_ylim([0,20])
         ax.set_xlabel('occurence',fontsize=14)
         ax.legend(handles=[
@@ -767,10 +745,10 @@ class silence_redetection:
         ax.set_xlim([-0.5,1])
         ax.set_ylim([0,20])
         ax.spines['top'].set_visible(False)
-        #ax.spines['right'].set_visible(False)
+        # ax.spines['right'].set_visible(False)
         ax.spines['left'].set_visible(False)
 
-        #ax.set_yticks([])
+        # ax.set_yticks([])
 
         plt.tight_layout()
         plt.show(block=False)
@@ -778,7 +756,6 @@ class silence_redetection:
         pathFigure = os.path.join(self.currentSession,f'find_silent_evaluation.{ext}');
         plt.savefig(pathFigure,format=ext,dpi=300)
         print(f'Figure saved as {pathFigure}')
-
 
     def plot_traces(self,idxs=None,n=3,ext='png'):
 
@@ -813,21 +790,20 @@ class silence_redetection:
             if i==0:
                 plt.ylabel('$C_{in}$')
 
-        #plt.subplot(3,2,6)
-        #plt.plot(self.cnm.estimates.S[c,:])
-        #plt.ylabel('$S_{out}$')
+        # plt.subplot(3,2,6)
+        # plt.plot(self.cnm.estimates.S[c,:])
+        # plt.ylabel('$S_{out}$')
 
-        #plt.subplot(315)
-        #plt.plot(Cout[c,:])
-        #if not self.idxes['in']['silent'][c]:
-            #plt.plot(Cin[c,:])
+        # plt.subplot(315)
+        # plt.plot(Cout[c,:])
+        # if not self.idxes['in']['silent'][c]:
+        # plt.plot(Cin[c,:])
         plt.tight_layout()
         pathFigure = os.path.join(self.currentSession,f'find_silent_examples.{ext}');
         plt.savefig(pathFigure,format=ext,dpi=300)
         print('Figure saved as %s'%pathFigure)
 
         plt.show(block=False)
-
 
     def plot_detection(self):
 
@@ -854,16 +830,15 @@ class silence_redetection:
         [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='w', linewidths=0.5) for a in self.dataOut['A'][:,self.idxes['out']['active_still']].T]
         [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='w', linewidths=1.) for a in self.dataOut['A'][:,self.idxes['out']['active_new']].T]
         [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='tab:orange', linewidths=1.) for a in self.dataOut['A'][:,self.idxes['out']['active_unmatched']].T]
-        
+
         silents = np.copy(self.idxes['in']['silent'])
         silents[self.idxes['out']['match_to_in'][self.idxes['out']['active_still'] | self.idxes['out']['active_new']].astype('int')] = False
         [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='r', linewidths=0.5) for a in self.dataIn['A'][:,silents].T]
 
-
         # [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='r', linewidths=0.5) for a in self.dataOut['A'][:,self.idxes['out']['silent_still']].T]
         # [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='r', linewidths=1.) for a in self.dataOut['A'][:,self.idxes['out']['silent_new']].T]
 
-        #[ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='r', linewidths=1) for a in self.dataIn['A'][:,self.idxes['in']['silent']].T]
+        # [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='r', linewidths=1) for a in self.dataIn['A'][:,self.idxes['in']['silent']].T]
         ax.legend(handles=[
             mplines.Line2D([0],[0],color='k',linestyle='-',linewidth=0.5,label=f"active (still) ({self.idxes['out']['active_still'].sum()})"),
             mplines.Line2D([0],[0],color='k',linestyle='-',linewidth=1,label=f"active (new) ({self.idxes['out']['active_new'].sum()})"),

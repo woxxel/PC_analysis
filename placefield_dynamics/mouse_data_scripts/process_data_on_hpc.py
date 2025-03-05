@@ -412,7 +412,7 @@ match.run_matching(p_thr=[0.3,0.05])
 #SBATCH -A {batch_params['A']}
 #SBATCH -p {batch_params['p']}
 #SBATCH -c {cpus}
-#SBATCH -t 02:00:00
+#SBATCH -t 04:00:00
 #SBATCH -o {pathMouse}/log_neuron_matching.log
 #SBATCH -e {pathMouse}/log_neuron_matching.log
 #SBATCH --mem=32000
@@ -437,6 +437,7 @@ def run_neuron_redetection(
     resultFiles="results_CaImAn*",
     specific_sessions=[],
     hpc="sofja",
+    file_ext=".tif",
     subhodeep=False,
 ):
 
@@ -460,17 +461,22 @@ def run_neuron_redetection(
     # pathImage = os.path.join(session,(basename+'.tif'))
     # """
     #     else:
-    construct_paths = """
-pathsSessions, pathsResults = set_paths_default(pathMouse,fileName_in=resultFiles,exclude='redetected')
+    construct_paths = f"""
+pathsSessions, pathsResults, pathsImages = set_paths_default(pathMouse,pathMouse_ref,fileName_in=resultFiles,imageType='{file_ext}',exclude='redetected')
+pathImage = pathsImages[s]
+# print(pathImage)
 
-thisSession = os.path.split(pathsSessions[s])[-1]
-try:
-    pathImage = [file for file in os.listdir(pathsSessions[s]) if file.endswith('.tif')][0]
-    pathImage = os.path.join(pathMouse,thisSession,pathImage)
-except:
-    thisSession = os.path.split(pathsSessions[s])[-1]
-    pathImage = [file for file in os.listdir(os.path.join(pathMouse_ref,thisSession)) if (file=='images' or file.endswith('.tif'))][0]
-    pathImage = os.path.join(pathMouse_ref,thisSession,pathImage)
+# # print(pathsImageSessions)
+# thisSession = os.path.split(pathsSessions[s])[-1]
+# try:
+#     print(pathsSessions[s])
+#     print(os.listdir(pathsSessions[s]))
+#     pathImage = [file for file in os.listdir(pathsImageSessions[s]) if file.endswith('{file_ext}')][0]
+#     pathImage = os.path.join(pathMouse_ref,thisSession,pathImage)
+# except:
+#     thisSession = os.path.split(pathsSessions[s])[-1]
+#     pathImage = [file for file in os.listdir(os.path.join(pathMouse_ref,thisSession)) if (file=='images' or file.endswith('.tif'))][0]
+#     pathImage = os.path.join(pathMouse_ref,thisSession,pathImage)
 """
 
     _, stdout, stderr = client.exec_command(
@@ -515,10 +521,13 @@ sr.process_session(s,path_tmp=os.environ['TMP_LOCAL'],pathImage=pathImage,ssh_al
 #SBATCH -A {batch_params['A']}
 #SBATCH -p {batch_params['p']}
 #SBATCH -c {cpus}
-#SBATCH -t 2:00:00
+#SBATCH -t 4:00:00
 #SBATCH -o {dir}/log_neuron_redetection.log
 #SBATCH -e {dir}/log_neuron_redetection.log
 #SBATCH --mem=32000
+
+module use /usr/users/cidbn_sw/sw/modules
+module load cidbn_caiman-1.9.10_py-3.9
 
 python3 {neuron_redetection_script} {pathMouse} {pathMouse_ref} {resultFiles} {s}
 EOF
