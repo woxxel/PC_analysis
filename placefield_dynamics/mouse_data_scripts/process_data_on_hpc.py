@@ -449,7 +449,7 @@ def run_neuron_redetection(
     if pathMouse_ref is None:
         pathMouse_ref = pathMouse
 
-    neuron_redetection_script = f"{path_code}/neuron_redetection.py"
+    neuron_redetection_script = f"{path_code}/run_neuron_redetection.py"
 
     #     if subhodeep:
     #         construct_paths = f"""
