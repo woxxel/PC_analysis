@@ -41,7 +41,12 @@ class silence_redetection:
         pathMouse = Path(pathsSession[0]).parent
         print(f"{pathMouse=}")
 
-        self.cluster = cluster_analysis(pathMouse, matlab=matlab, matching_only=True)
+        self.cluster = cluster_analysis(
+            pathMouse,
+            paths_neuron_detection=pathsResults,
+            matlab=matlab,
+            matching_only=True,
+        )
         self.cluster.get_matching()
 
         self.paths_images = pathsImages
