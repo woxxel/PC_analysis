@@ -442,7 +442,7 @@ def plot_mouse_location(ax,data,rw_loc=0):
     min_val = np.nanmin(loc)
     max_val = np.nanmax(loc)
 
-    time = data["time"] - data["time"][0]
+    time = data["time"] - data["time"][data["recording"]][0]
 
     loc_dist = max_val - min_val
 
