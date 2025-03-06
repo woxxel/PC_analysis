@@ -442,18 +442,22 @@ def plot_mouse_location(ax,data,rw_loc=0):
     min_val = np.nanmin(loc)
     max_val = np.nanmax(loc)
 
+    time = data["time"] - data["time"][0]
+
     loc_dist = max_val - min_val
 
     # identify location of trial-starts
     trial_idx = np.where(np.diff(loc)<(-loc_dist/2))[0]
     for idx in trial_idx:
-        ax.axvline(data['time'][idx],color='b',lw=0.5)
+        ax.axvline(time[idx], color="b", lw=0.5)
 
     ax.axhline(rw_loc,color='k',ls='--',lw=0.5)
-    ax.plot(data['time'],loc,'k.',ms=0.5,label='active')
+    ax.plot(time, loc, "k.", ms=0.5, label="active")
     # idxs_reward_delivery = np.where(np.diff(data['reward'].astype('int'))==1)[0]
     # ax.plot(data['time'][idxs_reward_delivery],data['position'][idxs_reward_delivery],'b.',ms=5)
 
     if 'active' in data.keys():
-        ax.plot(data['time'][~data['active']],loc[~data['active']],'r.',ms=.5,label='inactive')
-    ax.plot(data['time'][data['reward']],loc[data['reward']],'b.',ms=5,label='reward')
+        ax.plot(
+            time[~data["active"]], loc[~data["active"]], "r.", ms=0.5, label="inactive"
+        )
+    ax.plot(time[data["reward"]], loc[data["reward"]], "b.", ms=5, label="reward")
