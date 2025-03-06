@@ -31,20 +31,20 @@ def get_session_data(
     function to check for presence and logic of data
 
     1. check if files of
-                    recording (?)
-                    neuron detection
-                    mouse behavior
-            are present
+                recording (?)
+                neuron detection
+                mouse behavior
+        are present
 
     2. check if neuron matching is present
-            and use to check whether some data seems flawed
-            (e.g. large shifts, twice the same measurement, bad detection results, ...)
+                and use to check whether some data seems flawed
+                (e.g. large shifts, twice the same measurement, bad detection results, ...)
 
     3. check if data is consistent with the mouse
-            stores:
-            * paths to sessions and data
-            * whether all necessary files are present
-            * reward location
+                stores:
+                * paths to sessions and data
+                * whether all necessary files are present
+                * reward location
     """
 
     ## setting up connection to server
@@ -103,7 +103,9 @@ def get_session_data(
         _, stdout, stderr = client.exec_command(f"ls {dataset_source_folder}")
         mice = str(stdout.read(), encoding="utf-8").splitlines()
         for m, mouse in enumerate(mice):
-            # if m==0: continue
+            if m == 0:
+                continue
+
             print("mouse: ", mouse)
             if not mouse[:2].isdigit():
                 continue
@@ -151,10 +153,28 @@ def get_session_data(
                 f"ls {mouseFolder_source} | grep Session"
             )
             sessions = str(stdout.read(), encoding="utf-8").splitlines()
-            iterate_sessions = enumerate(sessions)  # tqdm.tqdm(enumerate(sessions))
-            for s, session in iterate_sessions:
+            # iterate_sessions = enumerate(sessions)  # tqdm.tqdm(enumerate(sessions))
+            # for s, session in iterate_sessions:
+            print(resultsFiles[suffixes[0]])
+            for s, resultsFile in enumerate(resultsFiles[suffixes[0]]):
                 if s > 10:
                     break
+
+                if not resultsFile:
+                    continue
+
+                session = [
+                    session
+                    for session in sessions
+                    if Path(resultsFile).is_relative_to(
+                        Path(mouseFolder_processed, session)
+                    )
+                ]
+                if len(session) == 0:
+                    continue
+                session = session[0]
+
+                print(s, session, resultsFile)
 
                 sessionFolder_source = mouseFolder_source / session
                 sessionFolder_processed = mouseFolder_processed / session
@@ -169,207 +189,199 @@ def get_session_data(
                     "consistent": True,
                 }
 
-                if session:
-                    print(session)
+                # if session:
+                print(session)
 
-                    ## hand over matching data
-                    new_data["x_shift"] = shifts[s, 0]
-                    new_data["y_shift"] = shifts[s, 1]
-                    new_data["image_correlation"] = correlations[s]
+                ## hand over matching data
+                new_data["x_shift"] = shifts[s, 0]
+                new_data["y_shift"] = shifts[s, 1]
+                new_data["image_correlation"] = correlations[s]
 
-                    for suffix in suffixes:
-                        if n_neurons[suffix] is None:
-                            continue
-                        new_data[f"n_neurons{suffix}"] = n_neurons[suffix][s]
+                for suffix in suffixes:
+                    if n_neurons[suffix] is None:
+                        continue
+                    new_data[f"n_neurons{suffix}"] = n_neurons[suffix][s]
 
-                    ## find if duplicate are in here
-                    max_idx = np.where(ld[suffixes[0]]["Cn_corr"][s, :] > 0.9)[0]
-                    new_data["duplicate"] = (
-                        resultsFiles[max_idx[0]].parent.name if len(max_idx) else None
-                    )
+                ## find if duplicate are in here
+                max_idx = np.where(ld[suffixes[0]]["Cn_corr"][s, :] > 0.9)[0]
+                new_data["duplicate"] = (
+                    resultsFiles[max_idx[0]].parent.name if len(max_idx) else None
+                )
 
+                _, stdout, stderr = client.exec_command(f"ls {sessionFolder_source}")
+                files = str(stdout.read(), encoding="utf-8").splitlines()
+
+                ## check, whether imaging data is present
+                if "images" in files:
+                    # imagesPresent = True
+                    new_data["files_recording"] = True
+
+                    imageFolder = sessionFolder_source / "images"
                     _, stdout, stderr = client.exec_command(
-                        f"ls {sessionFolder_source}"
+                        f"ls -f1 {imageFolder} | head -5"
                     )
-                    files = str(stdout.read(), encoding="utf-8").splitlines()
-
-                    ## check, whether imaging data is present
-                    if "images" in files:
-                        # imagesPresent = True
-                        new_data["files_recording"] = True
-
-                        imageFolder = sessionFolder_source / "images"
-                        _, stdout, stderr = client.exec_command(
-                            f"ls -f1 {imageFolder} | head -5"
-                        )
-                        images = str(stdout.read(), encoding="utf-8").splitlines()
-                        for image in images:
-                            if image.endswith(".tif"):
-                                fileName = image
-                                break
-                    else:
-                        for file in files:
-                            remote_file_path = os.path.join(sessionFolder_source, file)
-                            sftp_file = sftp_client.stat(remote_file_path)
-                            if sftp_file.st_size > 4 * 10**9:  # 4GB in bytes
-                                new_data["files_recording"] = True
-                                fileName = file
-                                break
-
-                    ## get mouse name and recording time from name (hope it's all homogenoeusly named!)
-                    new_data["recording_names"] = fileName[:-8]
-                    fileparts = fileName.split("_")
-                    # print(image,fileparts)
-                    new_data["mouse_from_recording"] = fileName.split("#")[-1].split(
-                        "_"
-                    )[0]
-                    new_data["consistent"] &= (
-                        new_data["mouse_from_recording"]
-                        == mouse[: len(new_data["mouse_from_recording"])]
-                    )
-
-                    for j in range(3):
-                        if fileparts[-j].endswith("m"):
-                            new_data["time_from_recording"] = fileparts[-j]
+                    images = str(stdout.read(), encoding="utf-8").splitlines()
+                    for image in images:
+                        if image.endswith(".tif"):
+                            fileName = image
                             break
-                    # print(new_data['mouse_from_recording'],new_data['time_from_recording'])
-
+                else:
                     for file in files:
-                        if (
-                            file.startswith("aa")
-                            | file.startswith("crop")
-                            | file.endswith("m.txt")
-                        ):
-                            new_data["files_behavior"] = True
+                        remote_file_path = os.path.join(sessionFolder_source, file)
+                        sftp_file = sftp_client.stat(remote_file_path)
+                        if sftp_file.st_size > 4 * 10**9:  # 4GB in bytes
+                            new_data["files_recording"] = True
+                            fileName = file
+                            break
 
-                            if file.startswith("aa"):
-                                ## get date from name
-                                fileparts = file.split("_")
-                                date = datetime.strptime(
-                                    fileparts[0][2:8], "%m%d%y"
-                                ).date()
-                                time = fileparts[2][:2]
+                ## get mouse name and recording time from name (hope it's all homogenoeusly named!)
+                new_data["recording_names"] = fileName[:-8]
+                fileparts = fileName.split("_")
+                # print(image,fileparts)
+                new_data["mouse_from_recording"] = fileName.split("#")[-1].split("_")[0]
+                new_data["consistent"] &= (
+                    new_data["mouse_from_recording"]
+                    == mouse[: len(new_data["mouse_from_recording"])]
+                )
 
-                                new_data["mouse_from_behavior"] = fileparts[1]
+                for j in range(1, 4):
+                    if fileparts[-j].endswith("m"):
+                        new_data["time_from_recording"] = fileparts[-j]
+                        break
+                # print(new_data['mouse_from_recording'],new_data['time_from_recording'])
 
-                                new_data["date_from_behavior"] = date
+                for file in files:
+                    if (
+                        file.startswith("aa")
+                        | file.startswith("crop")
+                        | file.endswith("m.txt")
+                    ):
+                        new_data["files_behavior"] = True
 
-                                new_data["time_from_behavior"] = time
+                        if file.startswith("aa"):
+                            ## get date from name
+                            fileparts = file.split("_")
+                            date = datetime.strptime(fileparts[0][2:8], "%m%d%y").date()
+                            time = fileparts[2][:2]
 
-                            if file.endswith("m.txt"):
-                                fileparts = os.path.splitext(file)[0].split("_")
-                                date = datetime.strptime(
-                                    fileparts[0][:6], "%m%d%y"
-                                ).date()
-                                time = fileparts[-1][:2]
+                            new_data["mouse_from_behavior"] = fileparts[1]
 
-                                new_data["mouse_from_behavior"] = fileparts[1]
+                            new_data["date_from_behavior"] = date
 
-                                new_data["date_from_behavior"] = date
+                            new_data["time_from_behavior"] = time
 
-                                new_data["time_from_behavior"] = time
+                        if file.endswith("m.txt"):
+                            fileparts = os.path.splitext(file)[0].split("_")
+                            date = datetime.strptime(fileparts[0][:6], "%m%d%y").date()
+                            time = fileparts[-1][:2]
 
-                            new_data["consistent"] &= (
-                                new_data["mouse_from_behavior"] == mouse
-                            )
+                            new_data["mouse_from_behavior"] = fileparts[1]
 
-                            if "time_from_recording" in new_data:
-                                new_data["consistent"] &= (
-                                    new_data["time_from_behavior"]
-                                    == new_data["time_from_recording"]
-                                )
+                            new_data["date_from_behavior"] = date
 
-                    ## if data can be processed, check for further details
-                    if new_data["files_behavior"] & new_data["files_recording"]:
+                            new_data["time_from_behavior"] = time
 
-                        ## obtain
-                        ## 		behavior data: reward location (+ gate location, reward probability, delay)
-                        ## 		alignment data: shift and correlation
-                        ## 		neuron data: number of neurons & place cells
-
-                        sessionFolder_processed = os.path.join(
-                            dataset_processed_folder, mouse, session
+                        new_data["consistent"] &= (
+                            new_data["mouse_from_behavior"] == mouse
                         )
 
-                        ## find processed recording file and extract information
-                        # file = "OnACID_results.hdf5"
-                        # remote_file = os.path.join(sessionFolder_processed, file)
-                        for suffix in suffixes:
-                            if resultsFiles[suffix] is None:
-                                continue
-
-                            resultsFile = [
-                                f
-                                for f in resultsFiles[suffix]
-                                if Path(f).is_relative_to(sessionFolder_processed)
-                            ]
-                            if len(resultsFile) == 0:
-                                continue
-                            _, stdout, stderr = client.exec_command(
-                                f"test -e {resultsFile[0]} && echo exists"
+                        if "time_from_recording" in new_data:
+                            new_data["consistent"] &= (
+                                new_data["time_from_behavior"]
+                                == new_data["time_from_recording"]
                             )
-                            errs = stderr.read()
-                            if errs:
-                                raise Exception(
-                                    "Failed to check existence of {0}: {1}".format(
-                                        remote_file, errs
-                                    )
+
+                ## if data can be processed, check for further details
+                if new_data["files_behavior"] & new_data["files_recording"]:
+
+                    ## obtain
+                    ## 		behavior data: reward location (+ gate location, reward probability, delay)
+                    ## 		alignment data: shift and correlation
+                    ## 		neuron data: number of neurons & place cells
+
+                    sessionFolder_processed = os.path.join(
+                        dataset_processed_folder, mouse, session
+                    )
+
+                    ## find processed recording file and extract information
+                    # file = "OnACID_results.hdf5"
+                    # remote_file = os.path.join(sessionFolder_processed, file)
+                    for suffix in suffixes:
+                        if resultsFiles[suffix] is None:
+                            continue
+
+                        resultsFile = [
+                            f
+                            for f in resultsFiles[suffix]
+                            if Path(f).is_relative_to(sessionFolder_processed)
+                        ]
+                        if len(resultsFile) == 0:
+                            continue
+                        _, stdout, stderr = client.exec_command(
+                            f"test -e {resultsFile[0]} && echo exists"
+                        )
+                        errs = stderr.read()
+                        if errs:
+                            raise Exception(
+                                "Failed to check existence of {0}: {1}".format(
+                                    remote_file, errs
                                 )
-                            # print(resultsFile[0], stdout.read().strip().decode("ascii"))
-
-                            new_data[f"files_processed_recording{suffix}"] = (
-                                stdout.read().strip().decode("ascii") == "exists"
                             )
+                        # print(resultsFile[0], stdout.read().strip().decode("ascii"))
 
-                        ## find processed behavior file and extract information
-                        # read aligned_behavior.pkl to get reward location (and maybe reward_probability)
-                        file = "aligned_behavior.pkl"
-                        remote_file = os.path.join(sessionFolder_processed, file)
-                        tmp_file = os.path.join(tmp_folder, file)
-                        ran_alignment = False
-                        while True:
-                            try:
-                                # if ran_alignment:
-                                sftp_client.get(remote_file, tmp_file)
+                        new_data[f"files_processed_recording{suffix}"] = (
+                            stdout.read().strip().decode("ascii") == "exists"
+                        )
 
-                                with open(tmp_file, "rb") as f_open:
-                                    aligned_behavior = pickle.load(f_open)
-                                    new_data["reward_location"] = aligned_behavior[
-                                        "reward_location"
-                                    ]
-                                    new_data["reward_prob"] = aligned_behavior[
-                                        "reward_prob"
-                                    ]
-                                os.remove(tmp_file)
-                                new_data["files_processed_behavior"] = True
+                    ## find processed behavior file and extract information
+                    # read aligned_behavior.pkl to get reward location (and maybe reward_probability)
+                    file = "aligned_behavior.pkl"
+                    remote_file = os.path.join(sessionFolder_processed, file)
+                    tmp_file = os.path.join(tmp_folder, file)
+                    ran_alignment = False
+                    while True:
+                        try:
+                            # if ran_alignment:
+                            sftp_client.get(remote_file, tmp_file)
+
+                            with open(tmp_file, "rb") as f_open:
+                                aligned_behavior = pickle.load(f_open)
+                                new_data["reward_location"] = aligned_behavior[
+                                    "reward_location"
+                                ]
+                                new_data["reward_prob"] = aligned_behavior[
+                                    "reward_prob"
+                                ]
+                            os.remove(tmp_file)
+                            new_data["files_processed_behavior"] = True
+                            break
+                        except:
+                            # else:
+                            if ran_alignment:
+                                print("alignment failed - skipping")
                                 break
-                            except:
-                                # else:
-                                if ran_alignment:
-                                    print("alignment failed - skipping")
-                                    break
 
-                                print(
-                                    "no aligned_behavior.pkl found - attempting to align data"
+                            print(
+                                "no aligned_behavior.pkl found - attempting to align data"
+                            )
+                            try:
+                                align_data_on_hpc(
+                                    source_folder,
+                                    processed_folder,
+                                    dataset,
+                                    mouse,
+                                    session,
+                                    "hpc-sofja",
+                                    min_stretch=0.7,
                                 )
-                                try:
-                                    align_data_on_hpc(
-                                        source_folder,
-                                        processed_folder,
-                                        dataset,
-                                        mouse,
-                                        session,
-                                        "hpc-sofja",
-                                        min_stretch=0.7,
-                                    )
-                                except:
-                                    pass
-                                ran_alignment = True
+                            except:
+                                pass
+                            ran_alignment = True
 
-                    # new_idx = pd.MultiIndex.from_tuples([(mouse,session)],names=label_levels)
-                    # print(new_idx,new_data)
-                    # new_df = pd.DataFrame(new_data,index=new_idx)
-                    # df = pd.concat([df,new_df])
+                # new_idx = pd.MultiIndex.from_tuples([(mouse,session)],names=label_levels)
+                # print(new_idx,new_data)
+                # new_df = pd.DataFrame(new_data,index=new_idx)
+                # df = pd.concat([df,new_df])
                 df.loc[(mouse, session), :] = new_data
                 if (
                     (not new_data["files_recording"])

@@ -15,20 +15,20 @@ from .align_helper import *
 
 # def align_mouse(mouse,dataset='AlzheimerMice_Hayashi',ssh_alias=None):
 #
-    # server_path = "/usr/users/cidbn1/neurodyn"
-    # dirs = os.listdir(os.path.join(serverpath,dataset,mouse))
-    # dirs.sort()
-    # for dir in dirs:
-    #     if dir.startswith('Session'):
-    #         s = int(dir[-2:])
-    #         print('processing Session',s)
-    #         align_data(server_path,dataset,mouse,s,ssh_alias)
+# server_path = "/usr/users/cidbn1/neurodyn"
+# dirs = os.listdir(os.path.join(serverpath,dataset,mouse))
+# dirs.sort()
+# for dir in dirs:
+#     if dir.startswith('Session'):
+#         s = int(dir[-2:])
+#         print('processing Session',s)
+#         align_data(server_path,dataset,mouse,s,ssh_alias)
 
 
 def align_data_on_hpc(datapath_in,datapath_out,dataset,mouse,session,
                     ssh_alias=None,
                     T=8989,rw_delay=0,min_stretch=0.9,keep_plot=False):
-    
+
     '''
         TODO:
             - in some rare cases, the very last fractional trial is not aligned properly/shows weird behavior
@@ -62,10 +62,10 @@ def align_data_on_hpc(datapath_in,datapath_out,dataset,mouse,session,
         figure_path += f"/aligned_m={mouse}_s={session[-2:]}.png"
 
         results_path = f"{datapath_out}/{dataset}/{mouse}/{session}/aligned_behavior.pkl"
-    
+
     align_data(data_path,results_path,figure_path,T=T,
         rw_delay=rw_delay,min_stretch=min_stretch)
-    
+
     if not keep_plot:
         plt.close()
 
@@ -78,56 +78,109 @@ def align_data_on_hpc(datapath_in,datapath_out,dataset,mouse,session,
     # return data_resampled
 
     # return data,data_align,data_resampled,rw_col,rw_loc
-    #time.sleep(3)
+    # time.sleep(3)
 
-def align_data(data_path,results_path,figure_path,T=8989,
-            rw_delay=0,min_stretch=0.9):
 
-    data, rw_col = load_behavior_data(data_path,speed_gauss_sd=3)
+def plot_alignment(data_path=None, aligned_path=None, figure_path=None):
 
-    data_align, rw_loc, rw_prob = align_behavior_data(data,min_stretch)
-    data_resampled = resample_behavior_data(data_align,T)
+    n_plots = 0
+    n_plots += data_path is not None
+    n_plots += (aligned_path is not None) * 2
 
-    
-    fig,ax = plt.subplots(3,1,sharex=True,figsize=(10,4))
+    if data_path is not None:
+        data, rw_col = load_behavior_data(data_path, speed_gauss_sd=3)
 
-    plot_mouse_location(ax[0],data,rw_loc)
-    plt.setp(ax[0],ylabel='location')
+    if aligned_path is not None:
+        with open(aligned_path, "rb") as input_file:
+            data_resampled = pkl.load(input_file)
 
-    min_val,max_val = np.nanpercentile(data['position'],(0.1,99.9))
+        rw_loc = data_resampled["reward_location"]
+    else:
+        rw_loc = np.NaN
+
+    fig, ax = plt.subplots(n_plots, 1, sharex=True, figsize=(10, 4))
+
+    ax_idx = 0
+    if data_path is not None:
+        plot_mouse_location(ax[ax_idx], data, rw_loc)
+        plt.setp(ax[ax_idx], ylabel="location")
+
+        ax_idx += 1
+
+    if aligned_path is not None:
+        plot_mouse_location(ax[ax_idx], data_resampled, rw_loc)
+        plt.setp(ax[ax_idx], ylabel="bin (aligned)")
+
+        ax_idx += 1
+
+        ax[ax_idx].plot(
+            data_resampled["time"], data_resampled["velocity"], "k-", lw=0.5
+        )
+
+        velocity = gauss_filter(
+            np.maximum(
+                0,
+                np.diff(
+                    data_resampled["position"], prepend=data_resampled["position"][0]
+                ),
+            ),
+            2,
+        )
+        ax[ax_idx].plot(data_resampled["time"], velocity, "r-", lw=0.5)
+        plt.setp(ax[ax_idx], ylabel="velocity", xlabel="time [s]")
+
+    plt.tight_layout()
+    if figure_path:
+        plt.savefig(figure_path, dpi=150)
+    plt.show(block=False)
+
+
+def align_data(
+    data_path, results_path, figure_path, T=8989, rw_delay=0, min_stretch=0.9
+):
+
+    data, rw_col = load_behavior_data(data_path, speed_gauss_sd=3)
+
+    data_align, rw_loc, rw_prob = align_behavior_data(data, min_stretch)
+    data_resampled = resample_behavior_data(data_align, T)
+
+    # fig,ax = plt.subplots(3,1,sharex=True,figsize=(10,4))
+
+    # plot_mouse_location(ax[0],data,rw_loc)
+    # plt.setp(ax[0],ylabel='location')
+
+    min_val, max_val = np.nanpercentile(data["position"], (0.1, 99.9))
     environment_length = max_val - min_val
 
-    
+    # plot_mouse_location(ax[1],data_resampled,rw_loc)
+    # plt.setp(ax[1],ylabel='bin (aligned)')
 
-    plot_mouse_location(ax[1],data_resampled,rw_loc)
-    plt.setp(ax[1],ylabel='bin (aligned)')
-
-    ax[2].plot(data_resampled['time'],data_resampled['velocity'],'k-',lw=0.5)
-    velocity = gauss_filter(np.maximum(0,np.diff(data_resampled['position'],prepend=data_resampled['position'][0])),2)
-    ax[2].plot(data_resampled['time'],velocity,'r-',lw=0.5)
-    plt.setp(ax[2],ylabel='velocity',xlabel='time [s]')
+    # ax[2].plot(data_resampled['time'],data_resampled['velocity'],'k-',lw=0.5)
+    # velocity = gauss_filter(np.maximum(0,np.diff(data_resampled['position'],prepend=data_resampled['position'][0])),2)
+    # ax[2].plot(data_resampled['time'],velocity,'r-',lw=0.5)
+    # plt.setp(ax[2],ylabel='velocity',xlabel='time [s]')
 
     rw_loc = (rw_loc-min_val) / environment_length
     rw_loc = round(rw_loc*20)/20    ## round to next 5
     print(f'reward @{rw_loc} with prob {rw_prob}')
-    
+
     data_resampled['reward_location'] = rw_loc
     data_resampled['reward_prob'] = rw_prob
 
     with open(results_path, "wb") as output_file:
         pkl.dump(data_resampled, output_file)
 
+    plot_alignment(data_path, results_path, figure_path)
+
     # fileName = f"aligned_m={mouse}_s={session[-2:]}__reward_col={rw_col}_loc={rw_loc}.png"
 
-    plt.tight_layout()
+    # plt.tight_layout()
 
-    plt.savefig(figure_path,dpi=150)
-    plt.show(block=False)
+    # plt.savefig(figure_path,dpi=150)
+    # plt.show(block=False)
 
 
-def load_behavior_data(data_path,
-                       rw_col=None,mic_col=None,
-                       speed_gauss_sd=5):
+def load_behavior_data(data_path, rw_col=None, mic_col=None, speed_gauss_sd=5):
 
     """
         this function loads behavioral data either from .txt-, or from .mat-file
@@ -170,7 +223,6 @@ def load_behavior_data(data_path,
                     break
         if not rw_col:
             raise RuntimeError('No reward column could be found')
-
 
         cols = data_tmp.columns
 
@@ -218,7 +270,7 @@ def load_behavior_data(data_path,
             data['recording'] = binary_closing(data_tmp[:,mic_col]<1,np.ones(5))
         else:
             idx_start = np.where(data['frame']==1)[0][0]
-            
+
             if 8989 in data['frame']:
                 idx_end = min(np.where(data['frame']==8989)[0][0]+4,np.where(data['frame']==8989)[0][-1])
             else:
