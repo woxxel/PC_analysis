@@ -21,6 +21,7 @@ def get_session_data(
     source_folder="/usr/users/cidbn1/neurodyn",
     processed_folder="/usr/users/cidbn1/placefields",
     datasets=["Shank2Mice_Hayashi", "AlzheimerMice_Hayashi"],
+    mice=None,
     hpc="sofja",
     suffixes=["", "redetected"],
 ):
@@ -31,20 +32,20 @@ def get_session_data(
     function to check for presence and logic of data
 
     1. check if files of
-                recording (?)
-                neuron detection
-                mouse behavior
-        are present
+    recording (?)
+    neuron detection
+    mouse behavior
+    are present
 
     2. check if neuron matching is present
-                and use to check whether some data seems flawed
-                (e.g. large shifts, twice the same measurement, bad detection results, ...)
+    and use to check whether some data seems flawed
+    (e.g. large shifts, twice the same measurement, bad detection results, ...)
 
     3. check if data is consistent with the mouse
-                stores:
-                * paths to sessions and data
-                * whether all necessary files are present
-                * reward location
+    stores:
+    * paths to sessions and data
+    * whether all necessary files are present
+    * reward location
     """
 
     ## setting up connection to server
@@ -100,11 +101,12 @@ def get_session_data(
         # parse data from mice
         dataset_processed_folder = os.path.join(processed_folder, dataset)
         dataset_source_folder = os.path.join(source_folder, dataset)
-        _, stdout, stderr = client.exec_command(f"ls {dataset_source_folder}")
-        mice = str(stdout.read(), encoding="utf-8").splitlines()
+
+        if mice is None:
+            _, stdout, stderr = client.exec_command(f"ls {dataset_source_folder}")
+            mice = str(stdout.read(), encoding="utf-8").splitlines()
+
         for m, mouse in enumerate(mice):
-            if m == 0:
-                continue
 
             print("mouse: ", mouse)
             if not mouse[:2].isdigit():
@@ -157,24 +159,25 @@ def get_session_data(
             # for s, session in iterate_sessions:
             print(resultsFiles[suffixes[0]])
             for s, resultsFile in enumerate(resultsFiles[suffixes[0]]):
-                if s > 10:
-                    break
+                # if s > 10:
+                #     break
 
                 if not resultsFile:
-                    continue
+                    session = f"Session{s+1:02}"
+                    # continue
+                else:
+                    session = [
+                        session
+                        for session in sessions
+                        if Path(resultsFile).is_relative_to(
+                            Path(mouseFolder_processed, session)
+                        )
+                    ]
+                    if len(session) == 0:
+                        continue
+                    session = session[0]
 
-                session = [
-                    session
-                    for session in sessions
-                    if Path(resultsFile).is_relative_to(
-                        Path(mouseFolder_processed, session)
-                    )
-                ]
-                if len(session) == 0:
-                    continue
-                session = session[0]
-
-                print(s, session, resultsFile)
+                print(s + 1, session, resultsFile)
 
                 sessionFolder_source = mouseFolder_source / session
                 sessionFolder_processed = mouseFolder_processed / session
@@ -189,9 +192,6 @@ def get_session_data(
                     "consistent": True,
                 }
 
-                # if session:
-                print(session)
-
                 ## hand over matching data
                 new_data["x_shift"] = shifts[s, 0]
                 new_data["y_shift"] = shifts[s, 1]
@@ -205,12 +205,15 @@ def get_session_data(
                 ## find if duplicate are in here
                 max_idx = np.where(ld[suffixes[0]]["Cn_corr"][s, :] > 0.9)[0]
                 new_data["duplicate"] = (
-                    resultsFiles[max_idx[0]].parent.name if len(max_idx) else None
+                    Path(resultsFiles[suffixes[0]][max_idx[0]]).parent.name
+                    if len(max_idx)
+                    else None
                 )
 
                 _, stdout, stderr = client.exec_command(f"ls {sessionFolder_source}")
                 files = str(stdout.read(), encoding="utf-8").splitlines()
 
+                fileName = None
                 ## check, whether imaging data is present
                 if "images" in files:
                     # imagesPresent = True
@@ -229,70 +232,32 @@ def get_session_data(
                     for file in files:
                         remote_file_path = os.path.join(sessionFolder_source, file)
                         sftp_file = sftp_client.stat(remote_file_path)
-                        if sftp_file.st_size > 4 * 10**9:  # 4GB in bytes
+                        if sftp_file.st_size > 2 * 10**9:  # 4GB in bytes
                             new_data["files_recording"] = True
                             fileName = file
                             break
 
                 ## get mouse name and recording time from name (hope it's all homogenoeusly named!)
-                new_data["recording_names"] = fileName[:-8]
-                fileparts = fileName.split("_")
-                # print(image,fileparts)
-                new_data["mouse_from_recording"] = fileName.split("#")[-1].split("_")[0]
-                new_data["consistent"] &= (
-                    new_data["mouse_from_recording"]
-                    == mouse[: len(new_data["mouse_from_recording"])]
-                )
+                if fileName:
+                    new_data["recording_names"] = fileName[:-8]
+                    fileparts = fileName.split("_")
+                    # print(image,fileparts)
+                    new_data["mouse_from_recording"] = fileName.split("#")[-1].split(
+                        "_"
+                    )[0]
+                    new_data["consistent"] &= (
+                        new_data["mouse_from_recording"]
+                        == mouse[: len(new_data["mouse_from_recording"])]
+                    )
 
-                for j in range(1, 4):
-                    if fileparts[-j].endswith("m"):
-                        new_data["time_from_recording"] = fileparts[-j]
-                        break
+                    for j in range(1, 4):
+                        if fileparts[-j].endswith("m"):
+                            new_data["time_from_recording"] = fileparts[-j]
+                            break
                 # print(new_data['mouse_from_recording'],new_data['time_from_recording'])
 
-                for file in files:
-                    if (
-                        file.startswith("aa")
-                        | file.startswith("crop")
-                        | file.endswith("m.txt")
-                    ):
-                        new_data["files_behavior"] = True
-
-                        if file.startswith("aa"):
-                            ## get date from name
-                            fileparts = file.split("_")
-                            date = datetime.strptime(fileparts[0][2:8], "%m%d%y").date()
-                            time = fileparts[2][:2]
-
-                            new_data["mouse_from_behavior"] = fileparts[1]
-
-                            new_data["date_from_behavior"] = date
-
-                            new_data["time_from_behavior"] = time
-
-                        if file.endswith("m.txt"):
-                            fileparts = os.path.splitext(file)[0].split("_")
-                            date = datetime.strptime(fileparts[0][:6], "%m%d%y").date()
-                            time = fileparts[-1][:2]
-
-                            new_data["mouse_from_behavior"] = fileparts[1]
-
-                            new_data["date_from_behavior"] = date
-
-                            new_data["time_from_behavior"] = time
-
-                        new_data["consistent"] &= (
-                            new_data["mouse_from_behavior"] == mouse
-                        )
-
-                        if "time_from_recording" in new_data:
-                            new_data["consistent"] &= (
-                                new_data["time_from_behavior"]
-                                == new_data["time_from_recording"]
-                            )
-
                 ## if data can be processed, check for further details
-                if new_data["files_behavior"] & new_data["files_recording"]:
+                if new_data["files_recording"]:
 
                     ## obtain
                     ## 		behavior data: reward location (+ gate location, reward probability, delay)
@@ -304,7 +269,6 @@ def get_session_data(
                     )
 
                     ## find processed recording file and extract information
-                    # file = "OnACID_results.hdf5"
                     # remote_file = os.path.join(sessionFolder_processed, file)
                     for suffix in suffixes:
                         if resultsFiles[suffix] is None:
@@ -333,6 +297,45 @@ def get_session_data(
                             stdout.read().strip().decode("ascii") == "exists"
                         )
 
+                for file in files:
+                    if (
+                        file.startswith("aa")
+                        | file.startswith("crop")
+                        | file.endswith("m.txt")
+                    ):
+                        new_data["files_behavior"] = True
+
+                        if file.startswith("aa"):
+                            ## get date from name
+                            fileparts = file.split("_")
+                            date = datetime.strptime(fileparts[0][2:8], "%m%d%y").date()
+                            time = fileparts[2][:2]
+
+                            new_data["mouse_from_behavior"] = fileparts[1]
+                            new_data["date_from_behavior"] = date
+                            new_data["time_from_behavior"] = time
+
+                        elif file.endswith("m.txt"):
+                            fileparts = os.path.splitext(file)[0].split("_")
+                            date = datetime.strptime(fileparts[0][:6], "%m%d%y").date()
+                            time = fileparts[-1][:2]
+
+                            new_data["mouse_from_behavior"] = fileparts[1]
+                            new_data["date_from_behavior"] = date
+                            new_data["time_from_behavior"] = time
+
+                        if "mouse_from_behavior" in new_data:
+                            new_data["consistent"] &= (
+                                new_data["mouse_from_behavior"] == mouse
+                            )
+
+                        if "time_from_recording" in new_data:
+                            new_data["consistent"] &= (
+                                new_data["time_from_behavior"]
+                                == new_data["time_from_recording"]
+                            )
+
+                if new_data["files_behavior"]:
                     ## find processed behavior file and extract information
                     # read aligned_behavior.pkl to get reward location (and maybe reward_probability)
                     file = "aligned_behavior.pkl"
@@ -377,7 +380,6 @@ def get_session_data(
                             except:
                                 pass
                             ran_alignment = True
-
                 # new_idx = pd.MultiIndex.from_tuples([(mouse,session)],names=label_levels)
                 # print(new_idx,new_data)
                 # new_df = pd.DataFrame(new_data,index=new_idx)
@@ -388,13 +390,11 @@ def get_session_data(
                     | (not new_data["files_behavior"])
                     | (not new_data["files_processed_recording"])
                     | (not new_data["files_processed_behavior"])
+                    | (not new_data["consistent"])
                     | (not (new_data["duplicate"] is None))
                 ):
                     # print('missing data for session: ',new_data)
                     df_missing.loc[(mouse, session), :] = new_data
-
-            if m >= 1:
-                break
 
         for key in [
             "files_recording",
@@ -404,9 +404,10 @@ def get_session_data(
         ]:
             df[key] = df[key].astype("int")
 
-        write_data_to_xlsx(df, f"../data/{dataset}_data.xlsx")
+        suffix = "_test"
+        write_data_to_xlsx(df, f"../data/{dataset}_data{suffix}.xlsx")
 
-        with pd.ExcelWriter(f"../data/{dataset}_missing_data.xlsx") as writer:
+        with pd.ExcelWriter(f"../data/{dataset}_missing_data{suffix}.xlsx") as writer:
             # for mouse in df.index.unique('Mouse'):
             df_missing.to_excel(writer, sheet_name="mouse_missing_data")
         # write_data_to_xlsx(df_missing,f'{dataset}_missing_data.xlsx')

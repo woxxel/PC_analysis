@@ -281,7 +281,7 @@ print('Finished processing!')
         f"ls -d {os.path.join(path_source,'Session*/ | xargs -n 1 basename')}"
     )
     sessions = str(stdout.read(), encoding="utf-8").splitlines()
-    print(sessions)
+    # print(sessions)
 
     for s, session in enumerate(sessions, start=1):
         sessionName = session

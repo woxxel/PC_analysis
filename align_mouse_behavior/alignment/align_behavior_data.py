@@ -70,9 +70,14 @@ def align_data_on_hpc(datapath_in,datapath_out,dataset,mouse,session,
         plt.close()
 
     if ssh_alias:
+
         cmd = f"scp {results_path} {ssh_alias}:{datapath_out}/{dataset}/{mouse}/{session}/"
         os.system(cmd)
-        cmd = f"scp {figure_path} {ssh_alias}:{datapath_out}/{dataset}/{mouse}/behavior_alignment/"
+
+        bh_folder = f"{datapath_out}/{dataset}/{mouse}/behavior_alignment/"
+        cmd = f"ssh {ssh_alias} 'mkdir -p {bh_folder}'"
+        os.system(cmd)
+        cmd = f"scp {figure_path} {ssh_alias}:{bh_folder}"
         os.system(cmd)
 
     # return data_resampled
@@ -144,21 +149,8 @@ def align_data(
     data_align, rw_loc, rw_prob = align_behavior_data(data, min_stretch)
     data_resampled = resample_behavior_data(data_align, T)
 
-    # fig,ax = plt.subplots(3,1,sharex=True,figsize=(10,4))
-
-    # plot_mouse_location(ax[0],data,rw_loc)
-    # plt.setp(ax[0],ylabel='location')
-
     min_val, max_val = np.nanpercentile(data["position"], (0.1, 99.9))
     environment_length = max_val - min_val
-
-    # plot_mouse_location(ax[1],data_resampled,rw_loc)
-    # plt.setp(ax[1],ylabel='bin (aligned)')
-
-    # ax[2].plot(data_resampled['time'],data_resampled['velocity'],'k-',lw=0.5)
-    # velocity = gauss_filter(np.maximum(0,np.diff(data_resampled['position'],prepend=data_resampled['position'][0])),2)
-    # ax[2].plot(data_resampled['time'],velocity,'r-',lw=0.5)
-    # plt.setp(ax[2],ylabel='velocity',xlabel='time [s]')
 
     rw_loc = (rw_loc-min_val) / environment_length
     rw_loc = round(rw_loc*20)/20    ## round to next 5
@@ -171,13 +163,6 @@ def align_data(
         pkl.dump(data_resampled, output_file)
 
     plot_alignment(data_path, results_path, figure_path)
-
-    # fileName = f"aligned_m={mouse}_s={session[-2:]}__reward_col={rw_col}_loc={rw_loc}.png"
-
-    # plt.tight_layout()
-
-    # plt.savefig(figure_path,dpi=150)
-    # plt.show(block=False)
 
 
 def load_behavior_data(data_path, rw_col=None, mic_col=None, speed_gauss_sd=5):
@@ -442,7 +427,10 @@ def plot_mouse_location(ax,data,rw_loc=0):
     min_val = np.nanmin(loc)
     max_val = np.nanmax(loc)
 
-    time = data["time"] - data["time"][data["recording"]][0]
+    if "recording" in data.keys():
+        time = data["time"] - data["time"][data["recording"]][0]
+    else:
+        time = data["time"]
 
     loc_dist = max_val - min_val
 
