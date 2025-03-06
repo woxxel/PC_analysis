@@ -186,7 +186,6 @@ def get_session_data(
                 # iterate_sessions.set_description(f"now session: {session}")
                 new_data = {
                     "files_recording": False,
-                    "files_processed_recording": False,
                     "files_behavior": False,
                     "files_processed_behavior": False,
                     "consistent": True,
@@ -198,6 +197,7 @@ def get_session_data(
                 new_data["image_correlation"] = correlations[s]
 
                 for suffix in suffixes:
+                    new_data[f"files_processed_recording{suffix}"] = False
                     if n_neurons[suffix] is None:
                         continue
                     new_data[f"n_neurons{suffix}"] = n_neurons[suffix][s]
@@ -239,8 +239,8 @@ def get_session_data(
 
                 ## get mouse name and recording time from name (hope it's all homogenoeusly named!)
                 if fileName:
-                    new_data["recording_names"] = fileName[:-8]
-                    fileparts = fileName.split("_")
+                    new_data["recording_names"] = fileName
+                    fileparts = os.path.splitext(fileName)[0].split("_")
                     # print(image,fileparts)
                     new_data["mouse_from_recording"] = fileName.split("#")[-1].split(
                         "_"
@@ -251,7 +251,7 @@ def get_session_data(
                     )
 
                     for j in range(1, 4):
-                        if fileparts[-j].endswith("m"):
+                        if fileparts[-j][1] == "m":
                             new_data["time_from_recording"] = fileparts[-j]
                             break
                 # print(new_data['mouse_from_recording'],new_data['time_from_recording'])
@@ -301,7 +301,7 @@ def get_session_data(
                     if (
                         file.startswith("aa")
                         | file.startswith("crop")
-                        | file.endswith("m.txt")
+                        | file.endswith(".txt")
                     ):
                         new_data["files_behavior"] = True
 
@@ -315,7 +315,7 @@ def get_session_data(
                             new_data["date_from_behavior"] = date
                             new_data["time_from_behavior"] = time
 
-                        elif file.endswith("m.txt"):
+                        elif file.endswith(".txt"):
                             fileparts = os.path.splitext(file)[0].split("_")
                             date = datetime.strptime(fileparts[0][:6], "%m%d%y").date()
                             time = fileparts[-1][:2]
@@ -329,7 +329,9 @@ def get_session_data(
                                 new_data["mouse_from_behavior"] == mouse
                             )
 
-                        if "time_from_recording" in new_data:
+                        if ("time_from_recording" in new_data) & (
+                            "time_from_behavior" in new_data
+                        ):
                             new_data["consistent"] &= (
                                 new_data["time_from_behavior"]
                                 == new_data["time_from_recording"]

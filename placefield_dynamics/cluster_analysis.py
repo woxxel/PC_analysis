@@ -407,8 +407,8 @@ class cluster_analysis:
 
         self.alignment["flow"] = np.zeros((self.data["nSes"], 2) + self.params["dims"])
         for s in range(self.data["nSes"]):
-            # if not self.status["sessions"][s]:
-            #     continue
+            if not s in m.data:
+                continue
             self.alignment["flow"][s, ...] = m.data[s]["remap"]["flow"]
 
         # has_reference = False
