@@ -132,7 +132,7 @@ def plot_alignment(data_path=None, aligned_path=None, figure_path=None):
             2,
         )
         ax[ax_idx].plot(data_resampled["time"], velocity, "r-", lw=0.5)
-        plt.setp(ax[ax_idx], ylabel="velocity", xlabel="time [s]")
+        plt.setp(ax[ax_idx], ylabel="velocity", xlabel="time [s]", ylim=[0, 30])
 
     plt.tight_layout()
     if figure_path:

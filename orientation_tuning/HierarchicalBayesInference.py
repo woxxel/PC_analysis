@@ -15,12 +15,12 @@ from ultranest.stepsampler import (
     SpeedVariableGenerator,
     SpeedVariableRegionSliceSampler,
 )
-from ultranest.mlfriends import RobustEllipsoidRegion
+# from ultranest.mlfriends import RobustEllipsoidRegion
 
 from .HierarchicalModelDefinition import HierarchicalModel
 
 # from .utils import circmean as weighted_circmean, model_of_tuning_curve
-# from .analyze_results import build_inference_results_structure
+# from .analyze_results import build_inference_results
 
 os.environ["OMP_NUM_THREADS"] = "1"
 logging.basicConfig(level=logging.ERROR)
@@ -458,9 +458,10 @@ class HierarchicalBayesInference(HierarchicalModel):
         limit_execution_time=None,
     ):
         t_start = time.time()
-        self.inference_results = build_inference_results_structure(
+        self.inference_results = build_inference_results(
             N_f=2,
             nbin=self.nbin,
+            mode="bayesian",
             n_trials=self.nSamples,
             hierarchical=hierarchical,
         )
@@ -735,9 +736,10 @@ class HierarchicalBayesInference(HierarchicalModel):
         self.n_trials = self.nSamples
 
         if not hasattr(self, "inference_results"):
-            self.inference_results = build_inference_results_structure(
+            self.inference_results = build_inference_results(
                 N_f=2,
                 nbin=self.nbin,
+                mode="bayesian",
                 n_trials=self.nSamples,
                 n_steps=n_steps,
                 hierarchical=self.hierarchical,

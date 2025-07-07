@@ -407,7 +407,7 @@ class cluster_analysis:
 
         self.alignment["flow"] = np.zeros((self.data["nSes"], 2) + self.params["dims"])
         for s in range(self.data["nSes"]):
-            if not s in m.data:
+            if not s in m.data or not "remap" in m.data[s].keys():
                 continue
             self.alignment["flow"][s, ...] = m.data[s]["remap"]["flow"]
 
