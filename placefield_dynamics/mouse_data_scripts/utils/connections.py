@@ -30,7 +30,7 @@ def establish_connection(serverName, username, ssh_key_file, proxyJump=None):
 def set_hpc_params(hpc="sofja"):
 
     ## setting up connection to server
-    ssh_key_file = f"/home/wollex/.ssh/id_ed25519_GWDG"
+    ssh_key_file = f"/home/wollex/.ssh/id_CIDBN"
     username = "schmidt124"
     if hpc == "sofja":
         proxyServerName = "glogin.hpc.gwdg.de"

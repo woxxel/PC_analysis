@@ -12,15 +12,17 @@ class naive_Bayes:
 
     def __init__(self,cluster):
 
-        self.para = {'f':        15,                 ## frequency of measurement
-                'runthr':   10,            ## minimum distance travelled, to be considered "moving"
-                'sm':       np.ones(10+1),      ## size of dilation filter to smooth mouse-speed
-                'lr_min':   30,            ## minimum number of frames spent running, to be counted as "longrun"
-                'pad':      0,                ## number of border bins to be removed from data (not working properly, 0 = off)
-                'nbins':    100,
-                'T':        8989,       ## number of time steps
-                'nbin':     100,
-                'd':        1}      ## dimensionality of data
+        self.para = {
+            'f':   15,                 ## frequency of measurement
+            'runthr':   10,            ## minimum distance travelled, to be considered "moving"
+            'sm':       np.ones(10+1),      ## size of dilation filter to smooth mouse-speed
+            'lr_min':   30,            ## minimum number of frames spent running, to be counted as "longrun"
+            'pad':      0,                ## number of border bins to be removed from data (not working properly, 0 = off)
+            'nbins':    100,
+            'T':        8989,       ## number of time steps
+            'nbin':     100,
+            'd':        1
+        }      ## dimensionality of data
         self.cluster = cluster
 
     def training(self,s,T_cut=300,sig_smooth=5):

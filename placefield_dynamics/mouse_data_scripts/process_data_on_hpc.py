@@ -717,13 +717,13 @@ path_results = Path(path_results[int(s)])
 path_session = path_results.parent
 print(path_results)
 
-ps = placefield_detection.process_session(plot_it=False)
-results = ps.process_input_from_file(
+process_session = placefield_detection.process_session()
+results = process_session.from_file(
     path_data = path_results,
     path_behavior = path_session / 'aligned_behavior.pkl',
     path_results = path_session / 'placefield_detection{suffix}.hdf5',
-    mode_place_cell_detection=['peak','information'],
-    mode_place_field_detection=['bayesian'],
+    mode_place_cell_detection=['peak','information','stability'],
+    mode_place_field_detection=['bayesian','threshold'],
     nP={cpus},
 )
 """
