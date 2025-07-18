@@ -2,6 +2,7 @@
 *.npz
 *.txt
 *.mp4
+*.csv
 __pycache__
 
 .ipynb*
