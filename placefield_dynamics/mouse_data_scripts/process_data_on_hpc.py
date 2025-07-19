@@ -764,7 +764,7 @@ results = process_session.from_file(
 #SBATCH -A {batch_params['A']}
 #SBATCH -p {batch_params['p']}
 #SBATCH -c {cpus}
-#SBATCH -t 2:00:00
+#SBATCH -t 4:00:00
 #SBATCH -o {dir}/log_PC_detection.log
 #SBATCH -e {dir}/log_PC_detection.log
 #SBATCH --mem=64000
