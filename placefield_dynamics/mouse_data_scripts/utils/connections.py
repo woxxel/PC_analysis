@@ -4,9 +4,9 @@ import paramiko, socket
 def establish_connection(serverName, username, ssh_key_file, proxyJump=None):
 
     ## getting IP address of server, as hostname can not be directly used
-    serverIP = socket.getaddrinfo(serverName, None)[0][4][
-        0
-    ]  ## kinda hacky, but works...
+    serverIP = socket.getaddrinfo(
+            serverName, None
+        )[0][4][0]  ## kinda hacky, but works...
     pkey = paramiko.Ed25519Key.from_private_key_file(ssh_key_file)
 
     client = paramiko.SSHClient()
