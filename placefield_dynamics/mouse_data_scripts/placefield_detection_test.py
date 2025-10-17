@@ -41,20 +41,21 @@ track = dict(
     length = 100,
 )
 place_field_parameter = dict(
-    field_probabilities = [0.3,0.8],
+    field_probabilities = [0.2,0.7],
 
     A0 = [0,2],
     A = [0.5,10],
     sigma = [1,5],
     theta = [0,track['nbin']],
 
-    reliability = [0.3,1], 
+    reliability = [0.2,1], 
 )
 
 path_behavior = Path(path_session) / 'aligned_behavior.pkl'
 behavior = prepare_behavior_from_file(path_behavior,nbin=track['nbin'],f=15.)
 
 surrogate_data = SurrogateData(
+    None,
     n_neurons,track,
     place_field_parameter,behavior
 )
@@ -72,12 +73,12 @@ with open(Path('{path_target}') / ('surrogate_data_'+suffix+'.pkl'),'wb') as f:
     pickle.dump(data,f)
 
 ps = process_session(plot_it=False)
-results = ps.process_input(
+results = ps.from_input(
     behavior,
     surrogate_data.activity,
     path_results = Path('{path_target}') / ('surrogate_placefield_detection_' + suffix + '.hdf5'),
-    mode_place_cell_detection=['peak','information'],
-    mode_place_field_detection=['bayesian'],
+    mode_place_cell_detection=['peak','information','stability],
+    mode_place_field_detection=['bayesian','threshold'],
     nP={cpus},
 )
 """
