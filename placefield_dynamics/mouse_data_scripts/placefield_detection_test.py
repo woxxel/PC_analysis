@@ -15,9 +15,16 @@ def run_placefield_detection_test(
 
     cpus = 64
 
-    client, path_code, batch_params = set_hpc_params(hpc)
+    client, path_code, batch_params = set_hpc_params(
+        home_dir=Path("/mnt/vast-standard/home/schmidt124/u23010"),
+        hpc=hpc
+    )
+    print(client)
+    print(path_code)
+    print(batch_params)
 
-    placecell_detection_script = f"{path_code}/placecell_detection.py"
+    placecell_detection_script = path_code / "placecell_detection.py"
+    print(placecell_detection_script)
 
     _, stdout, stderr = client.exec_command(
         f"""cat > {placecell_detection_script} <<- EOF
@@ -77,23 +84,25 @@ results = ps.from_input(
     behavior,
     surrogate_data.activity,
     path_results = Path('{path_target}') / ('surrogate_placefield_detection_' + suffix + '.hdf5'),
-    mode_place_cell_detection=['peak','information','stability],
+    mode_place_cell_detection=['peak','information','stability'],
     mode_place_field_detection=['bayesian','threshold'],
     nP={cpus},
 )
 """
     )
 
+    print(stdout.read(), stderr.read())
+
     n_repeat = n_neurons // n_per_batch
     print(f"Running {n_repeat} batches of {n_per_batch} neurons each...")
+#SBATCH -A {batch_params['A']}
     ## write bash script to run neuron detection
     _, stdout, stderr = client.exec_command(
         f"""cat > {batch_params['submit_file']} <<- EOF
 #!/bin/bash -l
 #SBATCH -J test_PC_detection
-#SBATCH -a 1-{n_repeat}%20
-#SBATCH -A {batch_params['A']}
 #SBATCH -p {batch_params['p']}
+#SBATCH -a 1-{n_repeat}%20
 #SBATCH -c {cpus}
 #SBATCH -t 6:00:00
 #SBATCH -o log_test_PC_detection_%A_%a.log
@@ -102,6 +111,7 @@ results = ps.from_input(
 
 module use /usr/users/cidbn_sw/sw/modules
 module load cidbn_caiman-1.9.10_py-3.9
+module load cidbn_dynesty-2.1.4_py-3.11
 
 python3 {placecell_detection_script} {path_session} {n_per_batch}
 EOF
