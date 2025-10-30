@@ -61,14 +61,18 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         # nogate_mice = ["231","232","236","762","243","245","246"]#"231",,"243","245","246"
         # i = -1
 
-
-        recurr = {'act':    {'data':    np.zeros((nMice,200,2))*np.NaN,
-                             'test':    np.zeros((nMice,200,2))*np.NaN},
-                  'code':   {'data':    np.zeros((nMice,200,2))*np.NaN,
-                             'test':    np.zeros((nMice,200,2))*np.NaN}}
+        recurr = {
+            "act": {
+                "data": np.zeros((nMice, 200, 2)) * np.nan,
+                "test": np.zeros((nMice, 200, 2)) * np.nan,
+            },
+            "code": {
+                "data": np.zeros((nMice, 200, 2)) * np.nan,
+                "test": np.zeros((nMice, 200, 2)) * np.nan,
+            },
+        }
 
         pl_dat = plot_dat(folder='popDyn',sv_ext=sv_ext)
-
 
         fig = plt.figure(figsize=(7,5.5),dpi=300)
 
@@ -77,14 +81,12 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax_hist_PC = plt.axes([0.09,0.575,0.075,0.11])
         pl_dat.add_number(fig,ax_hist_PC,order=6)
 
-
         ax_dp_act = plt.axes([0.275,0.8,0.05,0.11])
         pl_dat.add_number(fig,ax_dp_act,order=2)
         ax_dp_code = plt.axes([0.275,0.575,0.05,0.11])
         pl_dat.add_number(fig,ax_dp_code,order=7)
         ax_sig = plt.axes([0.275,0.35,0.075,0.1])
         pl_dat.add_number(fig,ax_sig,order=11)
-
 
         ax_recurr_act = plt.axes([0.445,0.8,0.125,0.11])
         pl_dat.add_number(fig,ax_recurr_act,order=3,offset=[-150,50])
@@ -96,7 +98,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         pl_dat.add_number(fig,ax_recurr_PF,order=12,offset=[-150,50])
         ax_recurr_overall = plt.axes([0.445,0.125,0.125,0.11])
         pl_dat.add_number(fig,ax_recurr_overall,order=15,offset=[-150,50])
-
 
         ax_recurr_act_diff = plt.axes([0.695,0.8,0.1,0.11])
         pl_dat.add_number(fig,ax_recurr_act_diff,order=4,offset=[-150,50])
@@ -110,8 +111,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax_recurr_popvect = plt.axes([0.695,0.125,0.1,0.11])
         pl_dat.add_number(fig,ax_recurr_popvect,order=16)
 
-
-
         ax_corr_p1 = plt.axes([0.925,0.8,0.06,0.11])
         pl_dat.add_number(fig,ax_corr_p1,order=5,offset=[-150,50])
         ax_corr_p2 = plt.axes([0.925,0.575,0.06,0.11])
@@ -121,20 +120,21 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax_corr_p4 = plt.axes([0.925,0.125,0.06,0.11])
         pl_dat.add_number(fig,ax_corr_p4,order=17,offset=[-150,50])
 
-
-        mice_dp_pos = np.zeros((nMice,2,2,2))*np.NaN
+        mice_dp_pos = np.zeros((nMice, 2, 2, 2)) * np.nan
         nsteps = 9
         SD_arr = np.linspace(0,4,nsteps)
-        p_rec_SD = np.zeros((nMice,nsteps))*np.NaN
+        p_rec_SD = np.zeros((nMice, nsteps)) * np.nan
 
-        act_paras = {'act': np.zeros((nMice,4,2))*np.NaN,
-                    'code': np.zeros((nMice,4,2))*np.NaN,
-                    'stable': np.zeros((nMice,4,2))*np.NaN}
+        act_paras = {
+            "act": np.zeros((nMice, 4, 2)) * np.nan,
+            "code": np.zeros((nMice, 4, 2)) * np.nan,
+            "stable": np.zeros((nMice, 4, 2)) * np.nan,
+        }
 
-        overall_paras = np.zeros((nMice,4,2))*np.NaN
+        overall_paras = np.zeros((nMice, 4, 2)) * np.nan
 
-        para_act = np.zeros((len(mice),2))*np.NaN
-        para_code = np.zeros((len(mice),2))*np.NaN
+        para_act = np.zeros((len(mice), 2)) * np.nan
+        para_code = np.zeros((len(mice), 2)) * np.nan
 
         fit_fun = lambda x,a,tau,b,m : a*np.exp(-x/tau)+m*x+b
         p_bounds = ([0,0,0,-1],[1,10,1,0])
@@ -150,7 +150,7 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         # sig_arr = [0,4,9,19]
         sig_arr = np.arange(20)
         nSig = len(sig_arr)
-        mice_sigma = np.zeros((nMice,nSig,2))*np.NaN
+        mice_sigma = np.zeros((nMice, nSig, 2)) * np.nan
         # for i,mouse in enumerate(D.cMice.keys()):#D.cMice.keys()
         for m,mouse in enumerate(mice):
             print(mouse)
@@ -230,7 +230,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                 status_PC_test[c,np.where(status_act[c,:])[0][np.random.choice(nC_act,status_PC[c,:].sum(),replace=False)]] = True
                 status_PC_test_rnd[c,status_act[c,:]] = rnd_var_PC[c,status_act[c,:]] < p_PC
 
-
             data_hist_act = np.histogram(status_act.sum(1),np.linspace(-0.5,nSes_good+0.5,nSes_good+2))[0]/status_act.sum()
             test_hist_act = np.histogram(status_act_test_rnd.sum(1),np.linspace(-0.5,nSes_good+0.5,nSes_good+2))[0]/status_act_test_rnd.sum()
 
@@ -304,7 +303,7 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                 if mode=='code':
                     # ax_recurr_PC = plt.axes([0.3,0.82-0.14*m,0.15,0.08])
                     # if m==0:
-                        # pl_dat.add_number(fig,ax_recurr_PC,order=2)
+                    # pl_dat.add_number(fig,ax_recurr_PC,order=2)
                     pl_dat.plot_with_confidence(ax_recurr_PC,np.linspace(1,nSes_good,nSes_good),recurr[mode]['data'][m,:nSes_good,0],SD*recurr[mode]['data'][m,:nSes_good,1],col=col_m,ls='-',label='emp. data')
                     if mouse==mouse_ex:
                         ax_recurr_PC.plot(x_arr,fit_fun(x_arr,*res[0]),'k--',linewidth=0.5)
@@ -317,7 +316,7 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                         ax_recurr_PC.set_ylabel('$p(\\beta_{s+\Delta s}^+|\\beta_s^+)$',fontsize=8)
                     pl_dat.remove_frame(ax_recurr_PC,['top','right'])
                     # if m==nMice-1:
-                        # ax_recurr_PC.set_xlabel('$\Delta s$')
+                    # ax_recurr_PC.set_xlabel('$\Delta s$')
 
                     p_pos_code_list.extend(dp_pos[np.isfinite(dp_pos)])
                     p_pos_code_test_list.extend(dp_pos_test[np.isfinite(dp_pos_test)])
@@ -339,15 +338,15 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             Ds = s2_shifts-s1_shifts
 
             sig_theta = D.cMice[mouse].stability['all']['mean'][0,2]
-            p_rec = np.zeros((nSes,2))*np.NaN
-            p_rec_overall = np.zeros((nSes,2))*np.NaN
+            p_rec = np.zeros((nSes, 2)) * np.nan
+            p_rec_overall = np.zeros((nSes, 2)) * np.nan
 
             for ds in range(nSes):
                 idx_ds = (Ds==ds) & s_bool[s1_shifts] & s_bool[s2_shifts]
 
                 s_unique = np.unique(s1_shifts[idx_ds])
-                p_rec_temp = np.zeros(nSes)*np.NaN
-                p_rec_overall_temp = np.zeros(nSes)*np.NaN
+                p_rec_temp = np.zeros(nSes) * np.nan
+                p_rec_overall_temp = np.zeros(nSes) * np.nan
                 for s in s_unique:
                     idx_s = s1_shifts == s
                     N_data = (idx_s & idx_ds).sum()
@@ -363,7 +362,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                 p_rec[ds,1] = np.nanstd(p_rec_temp)
                 p_rec_overall[ds,0] = np.nanmean(p_rec_overall_temp)
                 p_rec_overall[ds,1] = np.nanstd(p_rec_overall_temp)
-
 
             mask = np.isfinite(p_rec[:,0])
             res = curve_fit(fit_fun,x_arr[np.where(mask)[0]],p_rec[mask,0],bounds=p_bounds)
@@ -388,7 +386,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             overall_paras[m,:,0] = res[0]
             overall_paras[m,:,1] = np.sqrt(np.diag(res[1]))
 
-
             # print('mouse %s'%mouse)
             # print(recurr['act']['data'][m,mask,0])
             # print(res)
@@ -405,9 +402,8 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
             ax_recurr_SD.plot(SD_arr,p_rec_SD[m,:],'-',color=col_m,linewidth=0.3)
 
-
             smooth_fact = 4
-            corr_popvect = np.zeros((nSes,nSes,nbin))*np.NaN
+            corr_popvect = np.zeros((nSes, nSes, nbin)) * np.nan
             for s in np.where(s_bool)[0]:
 
                 idx_PC = D.cMice[mouse].status[:,s,2]
@@ -502,7 +498,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             axx.plot([0,axx.get_xlim()[1]],[0,0],'--',color=[0.6,0.6,0.6],linewidth=0.5,zorder=0)
             pl_dat.remove_frame(axx,['top','right'])
             axx.set_ylabel('diff to rnd.',fontsize=8)
-
 
         for axx in [ax_recurr_act,ax_recurr_PC,ax_recurr_PF]:
             axx.set_ylim([0,1])
@@ -663,12 +658,10 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                 for p in para_arr:
                     ax[p][j].errorbar(range(nS),data[p][key][m,:,0],data[p][key][m,:,1],fmt='-',color=col,linewidth=0.3)
 
-
         for j,key in enumerate(region_arr):
             ax['density'][j].errorbar(range(nS),data['density'][key].mean(0),data['density'][key].std(0),fmt='-',color='k',linewidth=1)
             for p in para_arr:
                 ax[p][j].errorbar(range(nS),data[p][key][...,0].mean(0),data[p][key][...,1].std(0),fmt='-',color='k',linewidth=1)
-
 
         for axx in ax['density']:
             axx.plot([-2,nS],[1/nbin,1/nbin],'k--',zorder=0,linewidth=0.3)
@@ -722,7 +715,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         if sv:
             pl_dat.save_fig('learning_stats')
 
-
     if plot_fig[2]:
 
         print('### plot probabilities of interaction, etc ###')
@@ -751,14 +743,13 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             for i,key2 in enumerate(status_arr):
                 if (key=='act') & (key2=='stable'):
                     continue
-                p_post_bs[key][key2] = np.zeros((len(mice),ds_max,2,2))*np.NaN
-                p_ref[key][key2] = np.zeros(len(mice))*np.NaN
+                p_post_bs[key][key2] = np.zeros((len(mice), ds_max, 2, 2)) * np.nan
+                p_ref[key][key2] = np.zeros(len(mice)) * np.nan
 
                 ID = i+3*j
                 ax[key][key2] = plt.subplot(5,7,ID+1)
                 ax_range[key][key2] = plt.subplot(5,7,ID+10)
                 ax_abs[key][key2] = plt.subplot(5,7,ID+20)
-
 
         width1 = 0.075
         height1 = 0.1
@@ -795,11 +786,9 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax_range['stable']['code'].set_position([0.9,0.425,width2,height2])
         ax_range['stable']['stable'].set_position([0.9,0.1,width2,height2])
 
-
         cmap = get_cmap('tab10')
         cmap_cycle = iter(cmap.colors)
         pl_dat = plot_dat(folder='popDyn',sv_ext='png')
-
 
         for m,mouse in enumerate(mice):
             print(mouse)
@@ -849,9 +838,9 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                     # if key=="stable":
                     p_ref[key][key2][m] = np.nanmean(D.cMice[mouse].stats[p_key][key][key2][p_mask,1,1],0)
                     # else:
-                        # p_ref[key][key2][m] = np.nanmean(D.cMice[mouse].stats[p_key][key_ref][key2][p_mask,1,1],0)
+                    # p_ref[key][key2][m] = np.nanmean(D.cMice[mouse].stats[p_key][key_ref][key2][p_mask,1,1],0)
                     # else:
-                        # p_ref = np.nanmean(D.cMice[mouse].stats['p1_post_s'][key][key_ref][:,1,0],0)
+                    # p_ref = np.nanmean(D.cMice[mouse].stats['p1_post_s'][key][key_ref][:,1,0],0)
 
                     # print('p(%s,%s), ref (key=%s): %.2f'%(key2,key,key_ref,p_ref[key][key2][m]))
                     ax[key][key2].plot([0.5,2.5],[0,0],'k--',linewidth=0.5)
@@ -869,7 +858,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
                         p_post_bs[key][key2][m,ds,1,:] = bootstrap_data(np.nanmean,D.cMice[mouse].stats[p_key][key][key2][p_mask,ds,1],N_bs)
 
-
                     # ax_abs[key][key2].errorbar([1,2],p_post_bs[key][key2][m,1,:,0],p_post_bs[key][key2][m,1,:,1],fmt='-',color=col,linewidth=0.2,label='$\Delta p(\\%s_{s+\Delta s}^+|\\%s_s^{\pm})$'%(label_arr[i],label_arr[j]))
                     ax_abs[key][key2].errorbar([1,2],p_post_bs[key][key2][m,1,:,0],p_post_bs[key][key2][m,1,:,1],fmt='-',color=col,linewidth=0.2,label='$\Delta p(\\%s_{s+\Delta s}^+|\\%s_s^{\pm})$'%(label_arr[i],label_arr[j]))
 
@@ -877,7 +865,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
                     ### plot long-range interaction
                     ax_range[key][key2].errorbar(range(ds_max),p_post_bs[key][key2][m,:,0,0]-p_ref[key][key2][m],p_post_bs[key][key2][m,:,0,1],fmt='-',color=col,linewidth=0.2,label='$\Delta p(\\%s_{s+1}^+|\\%s_{s}^{+})$'%(label_arr[i],label_arr[j]) if (j==0) else None)
-
 
                     # ax.set_xlabel('$\Delta s$')
                     # ax_range[key][key2].legend(fontsize=8,loc='upper right',bbox_to_anchor=[1.4,1.1])
@@ -892,7 +879,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
                 ### plot long-range interaction
                 ax_range[key][key2].errorbar(range(ds_max),np.nanmean(p_post_bs[key][key2][:,:,0,0]-p_ref[key][key2][:,np.newaxis],0),np.nanstd(p_post_bs[key][key2][:,:,0,1],0),fmt='-',color='k',linewidth=1,label='$\Delta p(\\%s_{s+1}^+|\\%s_{s}^{+})$'%(label_arr[i],label_arr[j]) if (j==0) else None)
-
 
                 ax[key][key2].set_xticks([1,2])
                 ax[key][key2].set_xlim([0.75,2.25])
@@ -935,7 +921,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         if sv:
             pl_dat.save_fig('interaction_multiple')
 
-
     if plot_fig[3]:
 
         print('### plot stuff ###')
@@ -950,7 +935,7 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
         # ax = plt.axes([0.25,0.9,0.0,0.0])
         # for j,mouse in enumerate(mice):
-            # ax.plot(1,np.NaN,'o',color=col[j],label='m%s'%mouse)
+        # ax.plot(1,np.nan,'o',color=col[j],label='m%s'%mouse)
         # ax.legend()
         nbin = 100
         for m,mouse in enumerate(mice):
@@ -983,7 +968,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                 ax.set_ylabel('PC density')
                 ax.legend(fontsize=8,loc='upper left',bbox_to_anchor=[0.8,0.3])
 
-
             if nSes>50:
                 s_arr = np.array([0,5,17,30,87])
             else:
@@ -992,7 +976,7 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             print(s_arr)
             n_int = len(s_arr)-1
 
-            p_rec_loc = np.zeros((n_int,nbin,nSes))*np.NaN
+            p_rec_loc = np.zeros((n_int, nbin, nSes)) * np.nan
 
             s1_shifts,s2_shifts,f1,f2 = np.unravel_index(D.cMice[mouse].compare['pointer'].col,(nSes,nSes,D.cMice[mouse].meta['field_count_max'],D.cMice[mouse].meta['field_count_max']))
             Ds = s2_shifts-s1_shifts
@@ -1036,17 +1020,15 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                     ax_im.text(x=2,y=107,s='Sessions %d-%d'%(s_arr[j]+1,s_arr[j+1]),ha='right',va='bottom',bbox=props,fontsize=8)
                     ax_im.set_ylabel('pos.')
                 # if j==0:
-                    # ax_im.set_title('stable fraction',fontsize=8)
+                # ax_im.set_title('stable fraction',fontsize=8)
 
                 if j == (n_int-1):
                     ax_im.set_xlabel('$\Delta s$')
-
 
         plt.show(block=False)
 
         if sv:
             pl_dat.save_fig('timestab_multi')
-
 
     if plot_fig[4]:
 
@@ -1099,17 +1081,16 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         h_cb.set_ticks([0,5])
         h_cb.set_ticklabels(['low','high'])
 
-
         par_keys = ['reliability','rate','MI_p_value','width']#'oof_firingrate_adapt'
         par_labels = ['a','$A/A_0$','MI','$\sigma$']
         ranges = np.array([[0,1],[0,20],[0,0.5],[0,15]])
 
-        dense_mean = np.zeros((nMice,3,2))*np.NaN
+        dense_mean = np.zeros((nMice, 3, 2)) * np.nan
         distr = {}
         distr_mean = {}
         for key in par_keys:
-            distr[key] = np.zeros((nMice,nbin,2))*np.NaN
-            distr_mean[key] = np.zeros((nMice,3,2))*np.NaN
+            distr[key] = np.zeros((nMice, nbin, 2)) * np.nan
+            distr_mean[key] = np.zeros((nMice, 3, 2)) * np.nan
 
         ax_dense = plt.axes([0.9,0.825,0.075,0.1])
         ax_para1 = plt.axes([0.9,0.625,0.075,0.1])
@@ -1249,7 +1230,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                 # ax_para[j].errorbar(0+np.random.rand()*0.2,np.nanmean(distr[key][m,zone_nRnG,0]),np.nanstd(distr[key][m,zone_nRnG,0]),fmt='.',color=[0.6,0.6,0.6],linewidth=0.5,markersize=2)
                 # ax_para[j].errorbar(1+np.random.rand()*0.2,np.nanmean(distr[key][m,RW_pos[0]:RW_pos[1],0]),np.nanstd(distr[key][m,RW_pos[0]:RW_pos[1],0]),fmt='.',color=[0.6,0.6,0.6],linewidth=0.5,markersize=2)
 
-
         for j in range(len(ax_para)):
             ax_para[j].errorbar([0,1,2],np.nanmean(distr_mean[par_keys[j]][...,0],0),np.nanstd(distr_mean[par_keys[j]][...,1],0),fmt='-',color='k',linewidth=1,markersize=2)
 
@@ -1293,8 +1273,8 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
         return
 
-        p_mice = np.zeros((len(mice),120,3))*np.NaN
-        p_mice_region = np.zeros((len(mice),3,2,3))*np.NaN
+        p_mice = np.zeros((len(mice), 120, 3)) * np.nan
+        p_mice_region = np.zeros((len(mice), 3, 2, 3)) * np.nan
         ax_p1 = plt.axes([0.1,0.3,0.2,0.075])
         pl_dat.add_number(fig,ax_p1,order=5)
         ax_p2 = plt.axes([0.1,0.2,0.2,0.075])
@@ -1417,11 +1397,10 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
         di = 3
 
-
-        p_rec_loc = np.zeros((len(mice),n_int,nbin,ds_max))*np.NaN
+        p_rec_loc = np.zeros((len(mice), n_int, nbin, ds_max)) * np.nan
         N_rec_loc = np.zeros((len(mice),n_int,nbin,ds_max))
 
-        p_act_loc = np.zeros((len(mice),nSes_max,nbin,ds_max))*np.NaN
+        p_act_loc = np.zeros((len(mice), nSes_max, nbin, ds_max)) * np.nan
         N_act_loc = np.zeros((len(mice),nSes_max,nbin,ds_max))
 
         p_post = np.zeros((len(mice),4,n_int,3,3,2))
@@ -1615,7 +1594,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             ax22_region.errorbar(np.arange(n_int),p_post[m,2,:,idx,0,0]-p_post[m,1,:,idx,0,0],p_post[m,1,:,idx,0,1],fmt='ro',linewidth=0.5,markersize=1)
             ax23_region.errorbar(np.arange(n_int),p_post[m,3,:,idx,0,0]-p_post[m,1,:,idx,0,0],p_post[m,1,:,idx,0,1],fmt='go',linewidth=0.5,markersize=1)
 
-
             for j in range(n_int):
                 if s_arr[j] >= nSes:
                     continue
@@ -1655,7 +1633,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                 ax_act.plot(j,N_act_GT[m,j]/N_act_all[m,j],'o',color='tab:green',markersize=1)
                 ax_act.plot(j,(N_act_all[m,j]-N_act_RW[m,j]-N_act_GT[m,j])/N_act_all[m,j],'o',color='tab:blue',markersize=1)
 
-
         for k,axx in enumerate([[ax11_region,ax12_region,ax13_region],[ax21_region,ax22_region,ax23_region]]):
             for l,axxx in enumerate(axx):
                 axxx.set_xticks(np.arange(n_int))
@@ -1685,7 +1662,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax23_region.errorbar(np.arange(n_int),np.nanmean(p_post[:,3,:,idx,0,0]-p_post[:,1,:,idx,0,0],0),np.nanstd(p_post[:,3,:,idx,2,0]-p_post[:,1,:,idx,2,0],0),fmt='k-',linewidth=1,markersize=1)
 
         props = dict(boxstyle='round', facecolor='w', alpha=0.8)
-
 
         for j in range(n_int):
             ax_im = plt.axes([0.1+0.2*j,0.2,0.15,0.075])
@@ -1723,7 +1699,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax_dense.set_xticklabels([])
         ax_dense.set_ylabel('$\\left \\langle density \\right \\rangle$',fontsize=8)
 
-
         pl_dat.remove_frame(ax_rec,['top','right'])
         pl_dat.remove_frame(ax_act,['top','right'])
 
@@ -1749,13 +1724,10 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         plt.figure()
         # plt.subplot(221)
 
-
-
-            # plt.plot(np.nanmean(D.cMice[mouse_ex].stats['p_post_RW_s']['code']['stable'][s_arr[j]:s_arr[j+1],:,0],0),'r')
-            # plt.plot(np.nanmean(D.cMice[mouse_ex].stats['p_post_GT_s']['code']['stable'][s_arr[j]:s_arr[j+1],:,0],0),'g')
-            # plt.plot(np.nanmean(D.cMice[mouse_ex].stats['p_post_nRnG_s']['code']['stable'][s_arr[j]:s_arr[j+1],:,0],0),'b')
+        # plt.plot(np.nanmean(D.cMice[mouse_ex].stats['p_post_RW_s']['code']['stable'][s_arr[j]:s_arr[j+1],:,0],0),'r')
+        # plt.plot(np.nanmean(D.cMice[mouse_ex].stats['p_post_GT_s']['code']['stable'][s_arr[j]:s_arr[j+1],:,0],0),'g')
+        # plt.plot(np.nanmean(D.cMice[mouse_ex].stats['p_post_nRnG_s']['code']['stable'][s_arr[j]:s_arr[j+1],:,0],0),'b')
         plt.show(block=False)
-
 
     if plot_fig[6]:
 
@@ -1769,12 +1741,14 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         pl_dat = plot_dat(folder='popDyn',sv_ext='png')
         ds_max = 8
         nSD = 8
-        p_rec = {'all':       np.zeros((len(mice),ds_max,2))*np.NaN,
-                  'cont':       np.zeros((len(mice),ds_max,2))*np.NaN,
-                  'mix':        np.zeros((len(mice),ds_max,2))*np.NaN,
-                  'discont':    np.zeros((len(mice),ds_max,2))*np.NaN,
-                  'silent_mix': np.zeros((len(mice),ds_max,2))*np.NaN,
-                  'silent':     np.zeros((len(mice),ds_max,2))*np.NaN}
+        p_rec = {
+            "all": np.zeros((len(mice), ds_max, 2)) * np.nan,
+            "cont": np.zeros((len(mice), ds_max, 2)) * np.nan,
+            "mix": np.zeros((len(mice), ds_max, 2)) * np.nan,
+            "discont": np.zeros((len(mice), ds_max, 2)) * np.nan,
+            "silent_mix": np.zeros((len(mice), ds_max, 2)) * np.nan,
+            "silent": np.zeros((len(mice), ds_max, 2)) * np.nan,
+        }
         nsteps=51
         stab_loc = np.zeros((len(mice),nsteps,2))
         act_loc = np.zeros((len(mice),nsteps,3))
@@ -1932,9 +1906,11 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             inter_coding = D.cMice[mouse].compare['inter_coding'][idx_ds,:]
 
             ### coding -> field stability+
-            p_rec_bs = {'cont':       np.zeros((N_bs,ds_max))*np.NaN,
-                     'discont':    np.zeros((N_bs,ds_max))*np.NaN,
-                     'silent':     np.zeros((N_bs,ds_max))*np.NaN}
+            p_rec_bs = {
+                "cont": np.zeros((N_bs, ds_max)) * np.nan,
+                "discont": np.zeros((N_bs, ds_max)) * np.nan,
+                "silent": np.zeros((N_bs, ds_max)) * np.nan,
+            }
 
             N_data = len(s1_shifts)
             samples = np.random.randint(0,N_data,(N_bs,N_data))
@@ -1955,17 +1931,17 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                         for pop in key_arr:
 
                             # if pop=='all':
-                                # idxes = np.ones(len(idx_ds),'bool')
+                            # idxes = np.ones(len(idx_ds),'bool')
                             if pop=='cont':
                                 # idxes = D.cMice[mouse].compare['inter_coding'][idx_ds,1]==1
                                 idxes = inter_coding[samples[L,idx_shifts],1]==1
                             # elif pop=='mix':
-                                # idxes = ((D.cMice[mouse].compare['inter_coding'][idx_ds,1]>0) & (D.cMice[mouse].compare['inter_coding'][idx_ds,1]<1)) & (D.cMice[mouse].compare['inter_active'][idx_ds,1]==1)
+                            # idxes = ((D.cMice[mouse].compare['inter_coding'][idx_ds,1]>0) & (D.cMice[mouse].compare['inter_coding'][idx_ds,1]<1)) & (D.cMice[mouse].compare['inter_active'][idx_ds,1]==1)
                             elif pop=='discont':
                                 # idxes = (D.cMice[mouse].compare['inter_coding'][idx_ds,1]==0) & (D.cMice[mouse].compare['inter_active'][idx_ds,1]==1)
                                 idxes = (inter_coding[samples[L,idx_shifts],1]==0) & (inter_active[samples[L,idx_shifts],1]==1)
                             # elif pop=='silent_mix':
-                                # idxes =(D.cMice[mouse].compare['inter_active'][idx_ds,1]>0) & (D.cMice[mouse].compare['inter_active'][idx_ds,1]<1)
+                            # idxes =(D.cMice[mouse].compare['inter_active'][idx_ds,1]>0) & (D.cMice[mouse].compare['inter_active'][idx_ds,1]<1)
                             elif pop=='silent':
                                 # idxes = D.cMice[mouse].compare['inter_active'][idx_ds,1]==0
                                 idxes = inter_active[samples[L,idx_shifts],1]==0
@@ -1975,12 +1951,10 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
                             p_rec_bs[pop][L,ds] = N_stable/N_data
 
-
             for pop in key_arr:
                 for ds in range(1,ds_max):
                     p_rec[pop][m,ds,0] = np.nanmean(p_rec_bs[pop][:,ds])
                     p_rec[pop][m,ds,1] = np.nanstd(p_rec_bs[pop][:,ds])
-
 
             if True:
                 N_data = len(idx_ds)
@@ -2017,7 +1991,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                         # act_loc[m,i,0] += D.cMice[mouse].status[c,s+2:s+s_range,1].sum()
                         # act_loc[m,i,1] += D.cMice[mouse].status[c,s+2:s+s_range,2].sum()
                         # act_loc[m,i,2] += s_bool[s+2:s+s_range].sum()
-
 
                 # ax_recode.plot(np.linspace(0,4,nsteps),gauss_smooth(stab_loc[m,:,0]/stab_loc[m,:,1],0,mode='constant'),linewidth=0.3,color=[0.6,0.6,0.6])
                 ax_recode.plot(np.linspace(0,nSD,nsteps),stab_loc[m,:,0]/stab_loc[m,:,1],linewidth=0.3,color=[0.6,0.6,0.6])
@@ -2085,7 +2058,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         for ds in range(2,ds_max):
             test_significance(p_rec['silent'][:,ds,0],p_rec['discont'][:,ds,0],ax_dstable,ds,0.2)
 
-
         res = sstats.kruskal(rel[:,0,0],rel[:,1,0])
         ax_rel.text(x=0,y=0.7,s='*'*int(-np.log10(res.pvalue)),fontsize=6,ha='center')
         ax_rel.set_ylabel('a')
@@ -2129,8 +2101,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
         if sv:
             pl_dat.save_fig('fieldshift_impact')
-
-
 
     if plot_fig[7]:
 
@@ -2179,15 +2149,16 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax_d_shift = plt.axes([0.075,0.125,0.175,0.15])
         # ax_d_shift_SD = plt.axes([0.075,0.25,0.175,0.075])
         pl_dat.add_number(fig,ax_d_shift,order=6,offset=[-50,50])
-        d_remap_mean = np.zeros((nMice,nbin,2))*np.NaN
+        d_remap_mean = np.zeros((nMice, nbin, 2)) * np.nan
         F_shifts = lambda x,A0,A,sig,theta : A/(np.sqrt(2*np.pi)*sig)*np.exp(-(x-theta)**2/(2*sig**2)) + A0/len(x)     ## gaussian + linear offset
-
 
         status_key = ['silent','active','coding']
         trans_mean = {}
         for key in status_key:
-            trans_mean[key] = np.zeros((nMice,3,3,2))*np.NaN    ### mouse, transition-type (recruit/dismiss/diff), field-loc, mean/std
-        stab_mean = np.zeros((nMice,3,2))*np.NaN
+            trans_mean[key] = (
+                np.zeros((nMice, 3, 3, 2)) * np.nan
+            )  ### mouse, transition-type (recruit/dismiss/diff), field-loc, mean/std
+        stab_mean = np.zeros((nMice, 3, 2)) * np.nan
         smooth=1
         ls_arr = ['-','--',':']
         for m,mouse in enumerate(mice):
@@ -2223,9 +2194,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                 ax_edge.bar(np.arange(nbin),zone_edge*2,width=1,facecolor='tab:red',alpha=0.2)
                 ax_PC.bar(np.arange(nbin),zone_nRnG*2,width=1,facecolor='tab:blue',alpha=0.2)
 
-
-
-
             D.cMice[mouse].get_locTransition_prob()
 
             for j in range(3):
@@ -2258,7 +2226,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
                 ax_transitions[j].plot(range(nbin),gauss_smooth(np.nanmean(D.cMice[mouse].stats['transition']['recruitment'][s_bool,:,j]-D.cMice[mouse].stats['transition']['dismissal'][s_bool,:,j],0),smooth),color='k',linestyle='-',linewidth=0.3)
 
-
             for key in status_key:
 
                 for k in range(3):
@@ -2277,8 +2244,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
             ax_transitions_stable.plot(range(nbin),gauss_smooth(np.nanmean(D.cMice[mouse].stats['transition']['stabilization'][s_bool,:],0),smooth),color=col,linewidth=0.5,label='stabilizing')
             ax_trans_stable.errorbar([0,1,2],stab_mean[m,:,0],stab_mean[m,:,1],linestyle='-',marker='.',markersize=2,color=col,linewidth=0.3)
-
-
 
             ### calculate remapp distances
             s1_shifts,s2_shifts,f1,f2 = np.unravel_index(D.cMice[mouse].compare['pointer'].col,(nSes,nSes,D.cMice[mouse].meta['field_count_max'],D.cMice[mouse].meta['field_count_max']))
@@ -2330,7 +2295,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                 ax.set_ylabel('$\\theta_{s+1}$')#'$|\\Delta\\theta|$')
                 ax.yaxis.set_label_coords(-0.3,0.5)
 
-
                 F_field_shift = F_shifts(np.linspace(-50,50,100),*D.cMice[mouse].stability['all']['mean'][0,:])
                 F_total_RW = np.zeros(nbin)
                 for i in np.where(zone_RW)[0]:
@@ -2342,8 +2306,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                 ax_RW.plot(np.arange(nbin),F_total_RW,'k',linestyle='--',linewidth=0.75)
                 ax_RW.set_ylim([0,0.08])
                 ax_RW.set_xlabel('$\\theta_s$')
-
-
 
                 F_total_edge = np.zeros(nbin)
                 for i in np.where(zone_edge)[0]:
@@ -2379,8 +2341,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             ### get average remapping distances
 
             ### get rw specific remapping, compared with "theory"
-
-
 
         for axx in ax_transitions:
             axx.bar(np.arange(nbin),zone_RW*3,width=1,facecolor='tab:green',alpha=0.2,zorder=0)
@@ -2456,14 +2416,11 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         if sv:
             pl_dat.save_fig('steadystate_dynamics')
 
-
-
     if plot_fig[8]:
 
         pl_dat = plot_dat(folder='mapChanges',sv_ext=sv_ext)
 
         ds = 5
-
 
         # ax_sketch = plt.axes([0.075,0.85,0.15,0.1])
         print('sketch showing, how remapping is happening at some session (reward zone shifted by arrow?)')
@@ -2474,7 +2431,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             D.cMice[mouse].session_data = get_session_specifics(mouse,nSes)
 
             RW_changes = np.where(np.diff(D.cMice[mouse].session_data['RW_pos'][:,0]))[0] + 1
-
 
             ax_RW_density = plt.axes([0.1,0.1,0.35,0.35])
             ax_RW_density1 = plt.axes([0.6,0.1,0.125,0.35])
@@ -2534,18 +2490,16 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                 ax_RW_density1.plot(0,fields_pre[zone_RW_post].mean(),'r.',markersize=2,label='post-zone'if j==0 else None)
                 ax_RW_density1.plot(1,fields_post[zone_RW_post].mean(),'r.',markersize=2)
 
-
             ax_RW_density1.legend(fontsize=8)
             ax_RW_density.set_ylim([0,0.02])
             ax_RW_density1.set_ylim([0,0.02])
             plt.show(block=False)
 
-
     if plot_fig[9]:
 
         pl_dat = plot_dat(folder='mapChanges',sv_ext=sv_ext)
 
-        d_remap_mean = np.zeros((nMice,200,2))*np.NaN
+        d_remap_mean = np.zeros((nMice, 200, 2)) * np.nan
 
         plt.figure(figsize=(7,5),dpi=300)
         ax_d_shift = plt.axes([0.1,0.1,0.35,0.25])
@@ -2576,12 +2530,12 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
             # loc_ct = np.zeros(nbin)
             # for i in range(nbin):
-                # idx_i = loc_shifts==i
+            # idx_i = loc_shifts==i
 
-                # loc_ct[i] = idx_i.sum()
+            # loc_ct[i] = idx_i.sum()
 
-                # d_remap[:,i] = shifts_distr[idx_i,:].mean(0)
-                # remap[:,i] = loc_to_shifts[idx_i,:].mean(0)
+            # d_remap[:,i] = shifts_distr[idx_i,:].mean(0)
+            # remap[:,i] = loc_to_shifts[idx_i,:].mean(0)
             for s in range(nSes):
                 idx_s = s_ds==s
                 d_remap_mean[m,s,0] = np.abs(shifts[idx_s]).mean()
@@ -2595,7 +2549,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax_d_shift.set_ylim([0,30])
         ax_d_shift_SD.set_ylim([0,30])
         plt.show(block=False)
-
 
     if plot_fig[10]:
 
@@ -2651,8 +2604,7 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         sig_mean = np.zeros((nMice,3,2))
         rel_mean = np.zeros((nMice,3,2))
 
-        p_extremes = np.zeros((nMice,3,2))*np.NaN
-
+        p_extremes = np.zeros((nMice, 3, 2)) * np.nan
 
         nr = np.zeros((nMice,2))
         color_t = iter(plt.cm.get_cmap('rainbow')(np.linspace(0,1,nMice)))
@@ -2677,18 +2629,17 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             nC_good = act_clusters.sum()
 
             # if (not ('act_stability_temp' in D.cMice[mouse].stats.keys())) | reprocess:
-                # D.cMice[mouse].stats['act_stability_temp'] = get_act_stability_temp(D.cMice[mouse],ds=ds)
+            # D.cMice[mouse].stats['act_stability_temp'] = get_act_stability_temp(D.cMice[mouse],ds=ds)
             if (not ('field_stability_temp' in D.cMice[mouse].stats.keys())) | reprocess:
                 D.cMice[mouse].stats['field_stability_temp'] = get_field_stability_temp(D.cMice[mouse],SD=1.96,ds=ds)
             if (not ('field_stability' in D.cMice[mouse].stats.keys())) or reprocess:
                 D.cMice[mouse].stats['field_stability'] = get_field_stability(D.cMice[mouse],SD=1.96,s_bool=s_bool)
             # if (not ('act_stability' in D.cMice[mouse].stats.keys())):
-                # D.cMice[mouse].stats['act_stability'] = get_act_stability(D.cMice[mouse],s_bool=s_bool)
+            # D.cMice[mouse].stats['act_stability'] = get_act_stability(D.cMice[mouse],s_bool=s_bool)
 
             r_stab = D.cMice[mouse].stats['field_stability']
             r_stab_temp = gauss_smooth(D.cMice[mouse].stats['field_stability_temp'],(0,1))
             act_stab_temp = D.cMice[mouse].stats['act_stability_temp'][...,0]
-
 
             act_stab_thr = [0.5,0.8]
             r_stab_thr = [0.1,0.5]
@@ -2723,8 +2674,8 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             # plt.hist(loc_all,np.linspace(0,100,101),density=True,alpha=0.5)
             if mouse==mouse_ex:
                 ax_dense.bar(np.linspace(0,nbin-1,nbin),loc_high,width=1,alpha=0.5,color='tab:red')
-                ax_dense.plot(0,np.NaN,color='tab:red',label='high $r^5_{\\gamma}$')
-                ax_dense.plot(0,np.NaN,color='tab:blue',label='low $r^5_{\\gamma}$')
+                ax_dense.plot(0, np.nan, color="tab:red", label="high $r^5_{\\gamma}$")
+                ax_dense.plot(0, np.nan, color="tab:blue", label="low $r^5_{\\gamma}$")
             ax_dense.plot(np.linspace(0,nbin-1,nbin),loc_low,color='tab:blue',linewidth=0.5)
             # ax.bar(np.linspace(0,nbin-1,nbin),loc_all_low,width=1,alpha=0.5,color='k')
             # ax.bar(np.linspace(0,100,101),loc_high,alpha=0.5,color='tab:red')
@@ -2751,10 +2702,9 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
             if mouse==mouse_ex:
 
-
                 Nb = D.cMice[mouse].status[...,2]
                 Nb = Nb[:,s_bool].sum(1)
-                nb_diff = np.zeros((nC,3))*np.NaN
+                nb_diff = np.zeros((nC, 3)) * np.nan
                 for nb in range(1,80):
                     idx_c = Nb==nb
                     nb_diff[idx_c,0] = r_stab[idx_c] - exp_random[nb]
@@ -2788,7 +2738,12 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                         c = c0
                         # c = np.where(act_clusters)[0][c0]
                         firingmap = D.cMice[mouse].stats['firingmap'][c,D.cMice[mouse].sessions['bool'],:]
-                        firingmap[~D.cMice[mouse].status[c,D.cMice[mouse].sessions['bool'],1],:] = np.NaN
+                        firingmap[
+                            ~D.cMice[mouse].status[
+                                c, D.cMice[mouse].sessions["bool"], 1
+                            ],
+                            :,
+                        ] = np.nan
                         firingmap = gauss_smooth(firingmap,(0,4))
                         firingmap = firingmap - np.nanmin(firingmap,1)[:,np.newaxis]
                         im = ax.imshow(firingmap,aspect='auto',origin='upper',cmap='jet',clim=[0,5])
@@ -2803,7 +2758,7 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                         if (i==0):
                             ax.set_xlabel('position',fontsize=8)
                             # ax.xaxis.set_label_coords(1.25,-0.1)
-                        #r_{\\gamma^+}^{\infty} \\approx
+                        # r_{\\gamma^+}^{\infty} \\approx
                         ax.set_title('$\\approx %.2f$'%r_stab[c0],fontsize=6)
                         pl_dat.remove_frame(ax,['top','left','right'])
 
@@ -2823,8 +2778,7 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                         ax.set_xlabel('$r_{\gamma}^{%d}$'%ds,fontsize=8)
                         pl_dat.remove_frame(ax,['bottom','right'])
                     # except:
-                        # pass
-
+                    # pass
 
                 # print(np.histogram(np.nanmax(r_stab_temp[:,s_bool],1),np.linspace(0,1.,21)))
 
@@ -2889,7 +2843,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             Na_distr[:,0] = np.histogram(status.sum(1),np.linspace(0,nSes_good,nSes_good+1))[0]
             Na_distr[:,0] -= Na_distr[:,1:].sum(1)
 
-
             ax_Na_inset2.plot(Na_distr[:,0]/Na_distr.sum(1),color='tab:blue',linewidth=0.5)
             ax_Na_inset2.plot(Na_distr[:,2]/Na_distr.sum(1),color='tab:red',linewidth=0.5)
             ax_Na_inset2.set_ylim([0,1])
@@ -2898,9 +2851,9 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             # ax_Na_inset.set_ylabel('fraction',fontsize=8)
             pl_dat.remove_frame(ax_Na_inset2,['top','right'])
 
-            low_p = np.zeros(nSes)*np.NaN
-            high_p = np.zeros(nSes)*np.NaN
-            real_high_p = np.zeros(nSes)*np.NaN
+            low_p = np.zeros(nSes) * np.nan
+            high_p = np.zeros(nSes) * np.nan
+            real_high_p = np.zeros(nSes) * np.nan
             for i,s in enumerate(np.where(s_bool)[0]):
                 # col = next(color_act)
                 # act_s_range = np.any(D.cMice[mouse].status[:,s_arr[i]:s_arr[i+1],1],1)
@@ -2919,7 +2872,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             ax_extremes.errorbar(-0.2+np.random.rand()*0.4,p_extremes[m,0,0],p_extremes[m,0,1],marker='.',color=[0.6,0.6,0.6],markersize=2,linewidth=0.5)
             ax_extremes.errorbar(0.8+np.random.rand()*0.4,p_extremes[m,1,0],p_extremes[m,1,1],marker='.',color=[0.6,0.6,0.6],markersize=2,linewidth=0.5)
             # ax_extremes.errorbar(1.8+np.random.rand()*0.4,p_extremes[m,2,0],p_extremes[m,2,1],marker='.',color=col_m,markersize=2,linewidth=0.5)
-
 
             # ax = plt.axes([0.1,0.7,0.35,0.1])
             # c_all_low,s_all_low,f_all_low = np.where(cluster_high[:,np.newaxis,np.newaxis] & (r_stab<r_stab_thr[1])[...,np.newaxis] & s_bool[np.newaxis,:,np.newaxis] & D.cMice[mouse].status_fields)
@@ -3059,16 +3011,16 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             #     r_tau[m,0,0] = np.mean(r_list)
             #     r_tau[m,0,1] = np.std(r_list)/np.sqrt(len(r_list))
             # else:
-            #     r_tau[m,...] = np.NaN
+            #     r_tau[m,...] = np.nan
             # ax_tau.errorbar(r_tau[m,0,0],np.random.rand(),xerr=r_tau[m,0,1],fmt='k.',markersize=2,linewidth=0.5)
             # ax_tau.plot(r_tau[m,1,0],np.random.rand(),'r.',markersize=2)
             #
             # col = [0.6,0.6,0.6]
             # r_stab_high = r_stab_temp>r_stab_thr[1]
-            # r_stab_high_recurr = np.zeros((nSes,nSes))*np.NaN
+            # r_stab_high_recurr = np.zeros((nSes,nSes))*np.nan
             # for s in np.where(s_bool)[0]:
             #     r_stab_high_recurr[s,:nSes-s] = r_stab_high[r_stab_high[:,s],s:].sum(0) / r_stab_high[:,s].sum()
-            #     r_stab_high_recurr[s,np.where(~s_bool[s:])[0]] = np.NaN
+            #     r_stab_high_recurr[s,np.where(~s_bool[s:])[0]] = np.nan
             # pl_dat.plot_with_confidence(ax_stab,np.arange(nSes),np.nanmean(r_stab_high_recurr,0),np.nanstd(r_stab_high_recurr,0),col=col,label='$\delta s = %d$'%ds,lw=0.5)
 
         pl_dat.remove_frame(ax_dense,['top','right'])
@@ -3095,8 +3047,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax_extremes.set_xticklabels(['low $r_{\\gamma}^%d$'%ds,'high $r_{\\gamma}^%d$'%ds],rotation=60,fontsize=8)
         pl_dat.remove_frame(ax_extremes,['top','right'])
         ax_extremes.set_ylabel('fraction')
-
-
 
         # ax_stab.set_xlim([0,50])
         # pl_dat.remove_frame(ax_stab,['top','right'])
@@ -3147,7 +3097,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax_hist2.text(x=r_stab_thr[1]-0.05,y=ylim*1.1,s='high',fontsize=6)
         ax_hist2.set_xlabel('$max_s(r^%d_{\\gamma})$'%ds,fontsize=8)
 
-
         # tau_g = np.nanmean(r_tau[:,0,0])
         # ax_tau.text(tau_g,1.2,'$\\approx %.2f$'%tau_g,fontsize=6)
         # tau_max = np.nanmean(r_tau[:,1,0])
@@ -3170,10 +3119,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         if sv:
             pl_dat.save_fig('individual_coding_stats')
         plt.show(block=False)
-
-
-
-
 
     if plot_fig[11]:
 
@@ -3216,7 +3161,7 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax_nr = plt.axes([0.95,0.125,0.03,0.125])
         pl_dat.add_number(fig,ax_tau,order=7)
 
-        p_extremes = np.zeros((nMice,3,2))*np.NaN
+        p_extremes = np.zeros((nMice, 3, 2)) * np.nan
 
         locmin = LogLocator(base=10.0,subs=(0,1),numticks=8)
         locmaj = LogLocator(base=100.0,numticks=8)
@@ -3235,7 +3180,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             s_bool[~D.cMice[mouse].sessions['bool']] = False
 
             xlim = np.where(s_bool)[0][-1] - np.where(s_bool)[0][0]+1
-
 
             if (not ('act_stability_temp' in D.cMice[mouse].stats.keys())) | reprocess:
                 D.cMice[mouse].stats['act_stability_temp'] = get_act_stability_temp(D.cMice[mouse],ds=ds)
@@ -3272,7 +3216,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             ax_hist1.hist(act_stab[act_clusters],np.linspace(0,1.,51),cumulative=True,density=True,histtype='step',color=[0.6,0.6,0.6],label='$r^{\infty}_{\\alpha}$',linewidth=0.5)
             ax_hist2.hist(np.nanmax(act_stab_temp[act_clusters,:][:,s_bool],1),np.linspace(0,1,51),cumulative=True,density=True,histtype='step',color=[0.6,0.6,0.6],label='$max(r^%d_{\\alpha})$'%ds,linewidth=0.5)
 
-
             if mouse==mouse_ex:
                 status = D.cMice[mouse].status[...,1]#[D.cMice[mouse].stats['cluster_bool'],:,1]
                 status_dep = None
@@ -3307,7 +3250,9 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                     c = np.where(act_clusters)[0][c0]
                     # print(c0,c)
                     firingmap = D.cMice[mouse].stats['firingmap'][c,D.cMice[mouse].sessions['bool'],:]
-                    firingmap[~D.cMice[mouse].status[c,D.cMice[mouse].sessions['bool'],1],:] = np.NaN
+                    firingmap[
+                        ~D.cMice[mouse].status[c, D.cMice[mouse].sessions["bool"], 1], :
+                    ] = np.nan
                     firingmap = gauss_smooth(firingmap,(0,4))
                     firingmap = firingmap - np.nanmin(firingmap,1)[:,np.newaxis]
                     im = ax.imshow(firingmap,aspect='auto',origin='upper',cmap='jet',clim=[0,5])
@@ -3322,7 +3267,7 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                     # if (i==0):
                     ax.set_xlabel('position',fontsize=8)
                     # ax.xaxis.set_label_coords(1.25,-0.1)
-                    #r_{\\gamma^+}^{\infty} \\approx
+                    # r_{\\gamma^+}^{\infty} \\approx
                     ax.set_title('$\\approx %.2f$'%act_stab[c],fontsize=6)
                     pl_dat.remove_frame(ax,['top','left','right'])
 
@@ -3347,17 +3292,16 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
             # s_arr = np.arange(17,88,1)#[0,5,10,17,25,40,87,97,112]
             # n_int = len(s_arr)-1
-            low_p = np.zeros(nSes)*np.NaN
-            high_p = np.zeros(nSes)*np.NaN
-            low_p_test = np.zeros(nSes)*np.NaN
-            high_p_test = np.zeros(nSes)*np.NaN
+            low_p = np.zeros(nSes) * np.nan
+            high_p = np.zeros(nSes) * np.nan
+            low_p_test = np.zeros(nSes) * np.nan
+            high_p_test = np.zeros(nSes) * np.nan
 
             for i,s in enumerate(np.where(s_bool)[0]):
                 # act_s_range = np.any(D.cMice[mouse].status[:,s_arr[i]:s_arr[i+1],1],1)
                 c_act = D.cMice[mouse].status[:,s,1]
                 low_p[s] = (act_stab_temp[c_act,s]<act_stab_thr[0]).sum()/c_act.sum()
                 high_p[s] = (act_stab_temp[c_act,s]>act_stab_thr[1]).sum()/c_act.sum()
-
 
                 c_act = status_act_test[:,s]
                 low_p_test[s] = (act_stab_temp_test[c_act,s]<act_stab_thr[0]).sum()/c_act.sum()
@@ -3380,17 +3324,17 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             ax_extremes.errorbar(np.arange(2)+0.8+np.random.rand()*0.4,p_extremes[m,1:,0],p_extremes[m,1:,1],marker='.',color=col_m,markersize=2,linewidth=0.5)
             # ax_extremes.errorbar(1.8+np.random.rand()*0.4,p_extremes[m,2,0],p_extremes[m,2,1],marker='.',color=col_m,markersize=2,linewidth=0.5)
             color_t = iter(plt.cm.get_cmap('Greys')(np.linspace(1,0,5)))
-                # for ds in [1,3,5]:
+            # for ds in [1,3,5]:
             col = next(color_t)
 
-                # act_stab = get_act_stability_temp(D.cMice[mouse],ds=ds)[...,1]
-                # r_stab = gauss_smooth(get_field_stability_temp(D.cMice[mouse],SD=1.96,ds=ds),(0,1))
+            # act_stab = get_act_stability_temp(D.cMice[mouse],ds=ds)[...,1]
+            # r_stab = gauss_smooth(get_field_stability_temp(D.cMice[mouse],SD=1.96,ds=ds),(0,1))
 
             p_pos_high = act_stab_temp>act_stab_thr[1]
-            p_pos_high_recurr = np.zeros((nSes,nSes))*np.NaN
+            p_pos_high_recurr = np.zeros((nSes, nSes)) * np.nan
             for s in np.where(s_bool)[0]:
                 p_pos_high_recurr[s,:nSes-s] = p_pos_high[p_pos_high[:,s],s:].sum(0) / p_pos_high[:,s].sum()
-                p_pos_high_recurr[s,np.where(~s_bool[s:])[0]] = np.NaN
+                p_pos_high_recurr[s, np.where(~s_bool[s:])[0]] = np.nan
 
             # ax_act.plot(np.nanmean(p_pos_high_recurr,0),color=col)
             pl_dat.plot_with_confidence(ax_act,np.arange(nSes),np.nanmean(p_pos_high_recurr,0),np.nanstd(p_pos_high_recurr,0),col=col_m)
@@ -3414,13 +3358,12 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             patches[0].set_xy(patches[0].get_xy()[:-1])
             # ax_Lr.set_xlim([0,10])
 
-
             if len(act_list)>0:
                 r_tau[m,1,0] = np.percentile(act_list,95)
                 r_tau[m,0,0] = np.mean(act_list)
                 r_tau[m,0,1] = np.std(act_list)/np.sqrt(len(act_list))
             else:
-                r_tau[m,...] = np.NaN
+                r_tau[m, ...] = np.nan
             ax_tau.errorbar(r_tau[m,0,0],np.random.rand(),xerr=r_tau[m,0,1],color=col_m,fmt='.',markersize=2,linewidth=0.5)
             ax_tau.plot(r_tau[m,1,0],np.random.rand(),'x',color=col_m,markersize=2)
 
@@ -3522,7 +3465,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         if sv:
             pl_dat.save_fig('ind_activity')
 
-
     if plot_fig[12]:
 
         pl_dat = plot_dat(folder='individual',sv_ext=sv_ext)
@@ -3565,7 +3507,7 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax_nr = plt.axes([0.95,0.125,0.03,0.125])
         pl_dat.add_number(fig,ax_tau,order=7)
 
-        p_extremes = np.zeros((nMice,3,2))*np.NaN
+        p_extremes = np.zeros((nMice, 3, 2)) * np.nan
 
         locmin = LogLocator(base=10.0,subs=(0,1),numticks=8)
         locmaj = LogLocator(base=100.0,numticks=8)
@@ -3584,7 +3526,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             s_bool[~D.cMice[mouse].sessions['bool']] = False
 
             xlim = np.where(s_bool)[0][-1] - np.where(s_bool)[0][0]+1
-
 
             if (not ('code_stability_temp' in D.cMice[mouse].stats.keys())) | reprocess:
                 D.cMice[mouse].stats['code_stability_temp'] = get_code_stability_temp(D.cMice[mouse],ds=ds)
@@ -3660,14 +3601,9 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                     N_ratio[i,2] = (code_stab_temp[idx]>code_stab_thr[1]).sum()#N_abs2/idx.sum()
                     N_ratio[i,1] = idx.sum() - N_ratio[i,0] - N_ratio[i,2]
 
-
-
-
-
                 # ax_hist2.bar(act_stab_arr,N_ratio[:,0],width=1/nstep,color='tab:blue')
                 # ax_hist2.bar(act_stab_arr,N_ratio[:,1],bottom=N_ratio[:,:1].sum(1),width=1/nstep,color='k',alpha=0.5)
                 # ax_hist2.bar(act_stab_arr,N_ratio[:,2],bottom=N_ratio[:,:2].sum(1),width=1/nstep,color='tab:red')
-
 
                 ax_Np.bar(range(nSes),Np[:,0],width=1,color='tab:blue')
                 ax_Np.bar(range(nSes),Np[:,1],width=1,bottom=Np[:,:1].sum(1),alpha=0.5,color='k')
@@ -3697,7 +3633,9 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                     c = np.where(act_clusters)[0][c0]
                     print(c0,c)
                     firingmap = D.cMice[mouse].stats['firingmap'][c,D.cMice[mouse].sessions['bool'],:]
-                    firingmap[~D.cMice[mouse].status[c,D.cMice[mouse].sessions['bool'],1],:] = np.NaN
+                    firingmap[
+                        ~D.cMice[mouse].status[c, D.cMice[mouse].sessions["bool"], 1], :
+                    ] = np.nan
                     firingmap = gauss_smooth(firingmap,(0,4))
                     firingmap = firingmap - np.nanmin(firingmap,1)[:,np.newaxis]
                     im = ax.imshow(firingmap,aspect='auto',origin='upper',cmap='jet',clim=[0,5])
@@ -3712,7 +3650,7 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
                     # if (i==0):
                     ax.set_xlabel('position',fontsize=8)
                     # ax.xaxis.set_label_coords(1.25,-0.1)
-                    #r_{\\gamma^+}^{\infty} \\approx
+                    # r_{\\gamma^+}^{\infty} \\approx
                     # ax.set_title('$\\approx %.2f$'%code_stab[c],fontsize=6)
                     pl_dat.remove_frame(ax,['top','left','right'])
 
@@ -3738,10 +3676,10 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
             # s_arr = np.arange(17,88,1)#[0,5,10,17,25,40,87,97,112]
             # n_int = len(s_arr)-1
-            low_p = np.zeros(nSes)*np.NaN
-            high_p = np.zeros(nSes)*np.NaN
-            real_high_p = np.zeros(nSes)*np.NaN
-            real_high_p_test = np.zeros(nSes)*np.NaN
+            low_p = np.zeros(nSes) * np.nan
+            high_p = np.zeros(nSes) * np.nan
+            real_high_p = np.zeros(nSes) * np.nan
+            real_high_p_test = np.zeros(nSes) * np.nan
 
             for i,s in enumerate(np.where(s_bool)[0]):
                 # act_s_range = np.any(D.cMice[mouse].status[:,s_arr[i]:s_arr[i+1],1],1)
@@ -3776,18 +3714,18 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             # ax_extremes.errorbar(1.8+np.random.rand()*0.4,p_extremes[m,2,0],p_extremes[m,2,1],marker='.',color=col_m,markersize=2,linewidth=0.5)
 
             color_t = iter(plt.cm.get_cmap('Greys')(np.linspace(1,0,5)))
-                # for ds in [1,3,5]:
+            # for ds in [1,3,5]:
             col = next(color_t)
 
-                # code_stab = get_act_stability_temp(D.cMice[mouse],ds=ds)[...,1]
-                # r_stab = gauss_smooth(get_field_stability_temp(D.cMice[mouse],SD=1.96,ds=ds),(0,1))
+            # code_stab = get_act_stability_temp(D.cMice[mouse],ds=ds)[...,1]
+            # r_stab = gauss_smooth(get_field_stability_temp(D.cMice[mouse],SD=1.96,ds=ds),(0,1))
 
             # p_pos_high = (code_stab_temp>code_stab_thr[1])
             p_pos_high = (code_stab_temp>code_stab_thr[1]) & (act_stab_temp>act_stab_thr[0])
-            p_pos_high_recurr = np.zeros((nSes,nSes))*np.NaN
+            p_pos_high_recurr = np.zeros((nSes, nSes)) * np.nan
             for s in np.where(s_bool)[0]:
                 p_pos_high_recurr[s,:nSes-s] = p_pos_high[p_pos_high[:,s],s:].sum(0) / p_pos_high[:,s].sum()
-                p_pos_high_recurr[s,np.where(~s_bool[s:])[0]] = np.NaN
+                p_pos_high_recurr[s, np.where(~s_bool[s:])[0]] = np.nan
 
             # ax_act.plot(np.nanmean(p_pos_high_recurr,0),color=col)
             pl_dat.plot_with_confidence(ax_act,np.arange(nSes),np.nanmean(p_pos_high_recurr,0),np.nanstd(p_pos_high_recurr,0),col=col_m,lw=0.5)
@@ -3813,14 +3751,13 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             patches[0].set_xy(patches[0].get_xy()[:-1])
             # ax_Lr.set_xlim([0,10])
 
-
             if len(code_list)>0:
                 r_tau[m,1,0] = np.percentile(code_list,95)
                 # r_tau[m,0,0] = np.mean(code_list)
                 r_tau[m,0,0] = np.median(code_list)
                 r_tau[m,0,1] = np.std(code_list)/np.sqrt(len(code_list))
             else:
-                r_tau[m,...] = np.NaN
+                r_tau[m, ...] = np.nan
             ax_tau.errorbar(r_tau[m,0,0],np.random.rand(),xerr=r_tau[m,0,1],color=col_m,fmt='.',markersize=2,linewidth=0.5)
             ax_tau.plot(r_tau[m,1,0],np.random.rand(),'x',color=col_m,markersize=2)
 
@@ -3926,7 +3863,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         if sv:
             pl_dat.save_fig('ind_code')
 
-
     if plot_fig[13]:
 
         pie = True
@@ -3951,16 +3887,18 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
         ax_Bayes = plt.axes([0.625,0.125,0.325,0.125])
         pl_dat.add_number(fig,ax_Bayes,order=3)
 
-        act_paras = {'act': np.zeros((nMice,4,2))*np.NaN,
-                    'code': np.zeros((nMice,4,2))*np.NaN,
-                    'stable': np.zeros((nMice,4,2))*np.NaN}
+        act_paras = {
+            "act": np.zeros((nMice, 4, 2)) * np.nan,
+            "code": np.zeros((nMice, 4, 2)) * np.nan,
+            "stable": np.zeros((nMice, 4, 2)) * np.nan,
+        }
 
-        overall_paras = np.zeros((nMice,4,2))*np.NaN
+        overall_paras = np.zeros((nMice, 4, 2)) * np.nan
 
         color_t_raw = plt.cm.get_cmap('Dark2')(np.linspace(0,1,nMice))
         color_t = iter(plt.cm.get_cmap('Dark2')(np.linspace(0,1,nMice)))
 
-        overall_mean = np.zeros((nMice,2))*np.NaN
+        overall_mean = np.zeros((nMice, 2)) * np.nan
         # for i,mouse in enumerate(D.cMice.keys()):#D.cMice.keys()
         for m,mouse in enumerate(mice):
             print(mouse)
@@ -4022,19 +3960,35 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
             ax.set_xlim([-2000,2000])
             ax.set_ylim([-2000,2000])
 
-
             mask_PC = D.cMice[mouse].status[...,2]
             mask_fields = (D.cMice[mouse].fields['status']>=3) & s_bool[np.newaxis,:,np.newaxis]
             dat = {}
-            dat['reliability'] = np.ma.array(D.cMice[mouse].fields['reliability'], mask=~mask_fields, fill_value=np.NaN)
-            dat['width'] = np.ma.array(D.cMice[mouse].fields['width'][...,0], mask=~mask_fields, fill_value=np.NaN)
-            dat['MI_value'] = np.ma.array(D.cMice[mouse].stats['MI_value'], mask=~mask_PC, fill_value=np.NaN)
-            # dat['max_rate'] = np.ma.array(D.cMice[mouse].fields['max_rate'], mask=mask_fields, fill_value=np.NaN)
-            dat['rate'] = np.ma.array(D.cMice[mouse].fields['amplitude'][...,0]/D.cMice[mouse].fields['baseline'][...,0], mask=~mask_fields, fill_value=np.NaN)
-            dat_mean = {'reliability':  np.zeros(nSes)*np.NaN,
-                        'width':        np.zeros(nSes)*np.NaN,
-                        'MI_value':     np.zeros(nSes)*np.NaN,
-                        'rate':     np.zeros(nSes)*np.NaN}
+            dat["reliability"] = np.ma.array(
+                D.cMice[mouse].fields["reliability"],
+                mask=~mask_fields,
+                fill_value=np.nan,
+            )
+            dat["width"] = np.ma.array(
+                D.cMice[mouse].fields["width"][..., 0],
+                mask=~mask_fields,
+                fill_value=np.nan,
+            )
+            dat["MI_value"] = np.ma.array(
+                D.cMice[mouse].stats["MI_value"], mask=~mask_PC, fill_value=np.nan
+            )
+            # dat['max_rate'] = np.ma.array(D.cMice[mouse].fields['max_rate'], mask=mask_fields, fill_value=np.nan)
+            dat["rate"] = np.ma.array(
+                D.cMice[mouse].fields["amplitude"][..., 0]
+                / D.cMice[mouse].fields["baseline"][..., 0],
+                mask=~mask_fields,
+                fill_value=np.nan,
+            )
+            dat_mean = {
+                "reliability": np.zeros(nSes) * np.nan,
+                "width": np.zeros(nSes) * np.nan,
+                "MI_value": np.zeros(nSes) * np.nan,
+                "rate": np.zeros(nSes) * np.nan,
+            }
 
             for key in ['reliability','width','MI_value','rate']:
 
@@ -4044,7 +3998,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
             ax_rel.plot(m-0.15+np.random.rand(nSes_good)*0.3,dat_mean['reliability'][s_bool],'.',color=[0.6,0.6,0.6],markersize=2,mew=0)
             ax_rel.boxplot(D.cMice[mouse].fields['reliability'][mask_fields],positions=[m],widths=0.5,whis=[5,95],showfliers=False,patch_artist=True,boxprops=dict(color=col_m,facecolor='none'))
-
 
             ax_sigma.plot(m-0.15+np.random.rand(nSes_good)*0.3,dat_mean['width'][s_bool],'.',color=[0.6,0.6,0.6],markersize=2,mew=0)
             ax_sigma.boxplot(D.cMice[mouse].fields['width'][mask_fields,0],positions=[m],widths=0.5,whis=[5,95],showfliers=False,patch_artist=True,boxprops=dict(color=col_m,facecolor='none'))
@@ -4065,8 +4018,6 @@ def plot_multiPC_analysis(D,plot_arr=[0,1],mice=None,mouse_ex='762',N_bs=10,n_pr
 
             ax_Bayes.hist(D.cMice[mouse].fields['Bayes_factor'][mask_fields],np.linspace(0,1000,1001),cumulative=True,histtype='step',density=True,color=col_m)
             ax_Bayes.set_xlim([0,200])
-
-
 
             # # ax.set_xticks(np.linspace(0,3000,4))
             # # ax.set_xticklabels(['%d'%i for i in np.linspace(0,3000,7)])

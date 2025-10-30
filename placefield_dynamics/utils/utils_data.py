@@ -18,7 +18,7 @@ class cluster_parameters:
     def __init__(self, mouse, s_corr_min, matlab=False):
         self.params = {
             "f": 15,  ## measurement frequency
-            "dims": (512, 512),  # np.zeros(2)*np.NaN,
+            "dims": (512, 512),  # np.zeros(2)*np.nan,
             "field_count_max": 2,
             # 'session_min_correlation':    s_corr_min,
             "min_session_correlation_zscore": 3.0,
@@ -141,7 +141,7 @@ def extend_dict(D, n, D2=None, dim=0, exclude=[]):
                 dims = np.array(D[key].shape[:])
                 dims[dim] = n
                 if D[key].dtype == "float":
-                    D[key] = np.append(D[key], np.full(dims, np.NaN), dim)
+                    D[key] = np.append(D[key], np.full(dims, np.nan), dim)
                 else:
                     D[key] = np.append(D[key], np.zeros(dims).astype(D[key].dtype), dim)
                 if not (D2 is None):
@@ -200,7 +200,7 @@ def replace_relative_path(paths, newPath):
 #     have_gt = True
 #   elif any(mouse==m for m in nogate_mice):    ## no gate
 #     zone_idx['reward'] = [50,70]#[50,66]#
-#     zone_idx['gate'] = [np.NaN,np.NaN]
+#     zone_idx['gate'] = [np.nan,np.nan]
 #     have_gt = False
 
 #   zone_mask = {}

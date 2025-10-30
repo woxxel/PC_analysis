@@ -579,7 +579,7 @@ class silence_redetection:
         # self.dataOut['C'] = self.dataOut['C'] - np.percentile(self.dataOut['C'],0.05,axis=1)[:,np.newaxis]
 
         # self.analysis = {}
-        self.analysis['nu'] = np.full(nC,np.NaN)
+        self.analysis["nu"] = np.full(nC, np.nan)
         for c in tqdm.tqdm(range(nC),leave=False):
             if (self.dataOut['S'][c,:]>0).sum():
                 spike_nr = (self.dataOut['S'][c,:]>0).sum()
@@ -881,904 +881,1160 @@ class silence_redetection:
 
 class plot_test_undetected:
 
-  def __init__(self,basePath,mouse):
-
-    dataSet='redetect'  ## nothing else makes sense
-
-    self.pathMouse = os.path.join(basePath,mouse)
-    self.pathMatching = os.path.join(self.pathMouse,'matching/Sheintuch_registration_results_%s.pkl'%dataSet)
-
-
-  def load_eval(self,ext='mat'):
-      ld_dat = pickleData([],self.pathMatching,'load')
-
-      self.eval_data = {}
-      self.progress = tqdm(range(self.nSes))
-      # self.matches = {}
-      for s in self.progress:
-          ## load results
-          pathSession = os.path.join(self.pathMouse,'Session%02d'%(s+1))
-          pathData = os.path.join(pathSession,'results_redetect.%s'%ext)
-          self.progress.set_description('Now processing Session %d'%(s+1))
-
-          ld = load_data(pathData)
-
-          self.eval_data[s] = {}#   {'SNR':       np.zeros((self.nC,self.nSes))*np.NaN,
-                                #'CNN':       np.zeros((self.nC,self.nSes))*np.NaN,
-                                #'r_values':  np.zeros((self.nC,self.nSes))*np.NaN}
-          for key in ['SNR','r_values','CNN','idx_previous']:
-              self.eval_data[s][key] = ld[key]
-
-
-  def load(self,ext='mat'):
-
-    ### load matching results
-    ld_dat = load_data(self.pathMatching)
-    # ld_dat = pickleData([],self.pathMatching,'load')
-    try:
-      assignments = ld_dat['assignments']
-    except:
-      assignments = ld_dat['assignment']
-    self.nC,self.nSes = assignments.shape
-
-    ### preallocate arrays
-    self.data = {'eval':        {'SNR':       np.zeros((self.nC,self.nSes))*np.NaN,
-                                 'CNN':       np.zeros((self.nC,self.nSes))*np.NaN,
-                                 'r_values':  np.zeros((self.nC,self.nSes))*np.NaN},
-                 'nonMatched':{'SNR':           np.zeros((10000,self.nSes))*np.NaN,
-                                'CNN':          np.zeros((10000,self.nSes))*np.NaN,
-                                'r_values':     np.zeros((10000,self.nSes))*np.NaN},
-                 'fp_corr':   np.zeros((self.nC,self.nSes))*np.NaN,
-                 'C_corr':    np.zeros((self.nC,self.nSes))*np.NaN,
-                 'idxes':       {'previous':  np.zeros((self.nC,self.nSes),'bool'),
-                                 'in':        np.zeros((self.nC,self.nSes),'bool'),
-                                 'detected':  np.zeros((self.nC,self.nSes),'bool')}
-                 }
-
-    ### for all s, store eval and idxes and calculate A-A and C-C correlation
-    self.progress = tqdm(range(self.nSes))
-    self.matches = {}
-    for s in self.progress:
-
-      ## load results
-      pathSession = os.path.join(self.pathMouse,'Session%02d'%(s+1))
-      pathData = os.path.join(pathSession,'results_redetect.%s'%ext)
-      self.progress.set_description('Now processing Session %d'%(s+1))
-
-      ld = load_data(pathData)
-
-      idx_c = np.where(~np.isnan(assignments[:,s]))[0]
-      n_arr = assignments[idx_c,s].astype('int')
-
-      ## store eval
-      non_n_arr = np.zeros(10000,'bool')
-      non_n_arr[:len(ld['SNR'])] = True
-      non_n_arr[n_arr] = False
-      for key in ['SNR','r_values','CNN']:
-        self.analysis['eval'][key][idx_c,s] = ld[key][n_arr]
-        self.analysis['nonMatched'][key][non_n_arr,s] = ld[key][np.where(non_n_arr)]
-
-      # print(np.isfinite(self.analysis['nonMatched']['SNR']).sum())
-      ## store indices
-      self.analysis['idxes']['detected'][idx_c,s] = True
-      self.analysis['idxes']['previous'][idx_c,s] = ld['idx_previous'][n_arr]
-      self.analysis['idxes']['in'][idx_c,s] = ld['idx_Ain'][n_arr]
-
-      dims = (512,512)
-      ## find next footprints with low distance
-      cm_in = com(ld['Ain'],dims[0],dims[1])
-      cm_out = com(ld['A'],dims[0],dims[1])
-      #return ld['A'], ld['Ain']
-
-      nC_in = ld['Ain'].shape[1]
-      nC_out = ld['A'].shape[1]
-
-      D_ROIs = scipy.spatial.distance.cdist(cm_in,cm_out)
-      D_ROI_mask = np.ma.array(D_ROIs, mask = np.isnan(D_ROIs))
-
-      #idx_out_bool = np.zeros(nC_out,'bool')
-      #idx_in_bool = np.zeros(nC_in,'bool')
-
-      self.matches[s] = np.zeros(cm_out.shape[0])*np.NaN
-      idx_new = []
-      nC_new = 0
-      dc = 0              ## difference in index
-      for c in np.where((ld['A']>0).sum(0)>50)[1]:
-        idx_close = np.where(D_ROI_mask[:,c]<5)[0]
-        if len(idx_close):
-            d_idx = np.min(np.abs(idx_close-c))
-            closeby = idx_close[np.argmin(np.abs(idx_close-c))]
-            if np.isscalar(closeby) & (d_idx <= dc):
-                self.matches[s][c] = closeby
-            elif np.isscalar(closeby) & (d_idx < (dc+10)):
-                dc = d_idx
-                self.matches[s][c] = closeby
-
-      C_std = ld['C'].std(1)
-      Cin_std = ld['Cin'].std(1)
-
-      chunks = 1000
-      idx_Ain = np.where((ld['Ain']>0).sum(0)>50)[1]#np.where(self.analysis['idxes']['in'][:,s])[0]
-      Ain_norm = np.zeros(ld['Ain'].shape[1])*np.NaN
-      nC_in = len(idx_Ain)
-      steps = int(nC_in/chunks)
-      for i in tqdm(range(steps+(np.mod(nC_in,chunks)>0)),leave=False):
-        c_start = i*chunks
-        c_end = min(nC_in,(i+1)*chunks)
-        Ain_norm[idx_Ain[c_start:c_end]] = np.linalg.norm(ld['Ain'][:,idx_Ain[c_start:c_end]].toarray(),axis=0)
-
-      idx_A = np.where((ld['A']>0).sum(0)>50)[1]#np.where(self.analysis['idxes']['in'][:,s])[0]
-      A_norm = np.zeros(ld['A'].shape[1])*np.NaN
-      nC_out = len(idx_A)
-      steps = int(nC_out/chunks)
-      for i in tqdm(range(steps+(np.mod(nC_out,chunks)>0)),leave=False):
-        c_start = i*chunks
-        c_end = min(nC_out,(i+1)*chunks)
-        A_norm[idx_A[c_start:c_end]] = np.linalg.norm(ld['A'][:,idx_A[c_start:c_end]].toarray(),axis=0)
-
-      ## calculate correlation between input and output
-      for (n2,n1) in tqdm(enumerate(self.matches[s]),total=len(self.matches[s]),leave=False):
-        if ~np.isnan(n1):
-            c = np.where(assignments[:,s]==n2)[0]
-            n1 = int(n1)
-            self.analysis['fp_corr'][c,s] = ld['A'][:,n2].multiply(ld['Ain'][:,n1]).sum()/(A_norm[n2]*Ain_norm[n1])
-            self.analysis['C_corr'][c,s] = np.cov(ld['C'][n2,:],ld['Cin'][n1,:])[0,1]/(C_std[n2]*Cin_std[n1])
-
-
-  def get_cluster(self,basePath,mouse,nSes,dataSet='redetect',n_processes=0,s_corr_min=0.3):
-
-    self.cluster = cluster(basePath,mouse,nSes,dataSet=dataSet,s_corr_min=s_corr_min)
-    self.cluster.load()
-
-    # self.cluster.process_sessions(n_processes=n_processes,reprocess=True)
-    # self.cluster.get_IDs()
-    # self.cluster.get_stats(n_processes=n_processes,complete=False)
-
-  def plot(self,SNR_thr=2,rval_thr=0,CNN_thr=0.6,pm_thr=0.5,sv=False):
-
-    rc('font',size=10)
-    rc('axes',labelsize=12)
-    rc('xtick',labelsize=8)
-    rc('ytick',labelsize=8)
-
-    dims = (512,512)
-    idx = self.analysis['idxes']['previous']
-
-    idx_active = (self.analysis['eval']['SNR']>SNR_thr) & (self.analysis['eval']['r_values']>rval_thr) & (self.analysis['eval']['CNN']>CNN_thr)
-    idx_silent = ~idx_active
-
-    idxes = {}
-    idxes['active_good'] = idx & idx_active
-    idxes['active_bad'] = idx & idx_silent
-
-    idxes['silent_good'] = ~idx & idx_active
-    idxes['silent_bad'] = ~idx & idx_silent
-
-    pathMatching = os.path.join(self.pathMouse,'matching/Sheintuch_registration_results_OnACID.pkl')
-    dt = pickleData([],pathMatching,'load')
-    assignments_OnACID = dt['assignments']
-
-    pathMatching = os.path.join(self.pathMouse,'matching/Sheintuch_registration_results_redetect.pkl')
-    ld_dat = pickleData([],pathMatching,'load')
-    assignments = ld_dat['assignments']
-
-    self.cluster.meta['SNR_thr'] = SNR_thr
-    self.cluster.meta['rval_thr'] = rval_thr
-    self.cluster.meta['CNN_thr'] = CNN_thr
-    self.cluster.cluster_classification()
-
-    idx_pm = (self.cluster.stats['match_score'][...,0]>0.5)# ((self.cluster.stats['match_score'][...,0]-self.cluster.stats['match_score'][...,1])>pm_thr) | (self.cluster.stats['match_score'][...,0]>0.95)
-
-    if False:
-        fig = plt.figure(figsize=(7,4),dpi=300)
-
-        ax_ROIs = plt.axes([0.05,0.625,0.2,0.325])
-        add_number(fig,ax_ROIs,order=1,offset=[-25,25])
-        ax_ROIs2 = plt.axes([0.3,0.625,0.2,0.325])
-        add_number(fig,ax_ROIs2,order=2,offset=[-25,25])
-
-        s = 10
-
-        n_arr = assignments_OnACID[np.where(~np.isnan(assignments_OnACID[:,s-1]))[0],s-1].astype('int')
-
-        pathSession = os.path.join(self.pathMouse,'Session%02d'%(s))
-        pathData = os.path.join(pathSession,'results_redetect.mat')
-        ld = load_data(pathData)
-
-        cm_in = com(ld['Ain'],dims[0],dims[1])
-        cm_out = com(ld['A'],dims[0],dims[1])
-
-        idx_A = ld['idx_previous'][:ld['Ain'].shape[1]].astype('bool')
-        #idx_A = np.zeros(ld['Ain'].shape[1],'bool')
-        #idx_A[n_arr] = True
-
-        bounds = [[175,225],[175,225]]
-        self.plot_detection(ax_ROIs,ld['Ain'][:,idx_A],ld['Ain'][:,~idx_A],bounds=bounds)
-        ax_ROIs.set_xlim(bounds[0])
-        ax_ROIs.set_ylim(bounds[1])
-        ax_ROIs.set_xticks([])
-        ax_ROIs.set_yticks([])
-        sbar = ScaleBar(530.68/512 *10**(-6),location='lower right')
-        ax_ROIs.add_artist(sbar)
-
-        idx_A = ld['idx_previous'].astype('bool')# & idx_n
-        # print(idx_A.shape)
-        #idx_A = np.zeros(ld['A'].shape[1],'bool')
-        #idx_A[n_arr] = True
-        # print(ld['A'].shape)
-        nC = self.analysis['eval']['SNR'].shape[0]
-        nN = ld['A'].shape[1]
-        c_arr = np.where(assignments[:,s-1]>=0)[0]
-        n_arr = assignments[c_arr,s-1].astype('int')
-        idx_n = np.in1d(range(nN),n_arr)
-        idx_c = np.in1d(range(nC),c_arr)
-        idx_mapping_cn = -np.ones(nC,'int')
-        idx_mapping_cn[c_arr] = n_arr
-        idx_mapping_nc = -np.ones(nN,'int')
-        idx_mapping_nc[n_arr] = c_arr
-
-        idx_active_n = np.in1d(range(nN),idx_mapping_cn[np.squeeze(idx_active[:,s-1])])
-
-        # CM = com(ld['A'],512,512)
-        # idx_bounds = (CM[:,0] > bounds[0][0]) & (CM[:,0] < bounds[0][1]) & (CM[:,1] > bounds[1][0]) & (CM[:,1] < bounds[1][1])
-
-        self.plot_detection(ax_ROIs2,ld['A'][:,idx_A],ld['A'][:,~idx_A],bounds=bounds,lw=0.5,ls='dotted')
-        self.plot_detection(ax_ROIs2,ld['A'][:,idx_A & idx_active_n],ld['A'][:,(~idx_A) & idx_active_n],bounds=bounds)
-
-        ax_ROIs2.set_xlim(bounds[0])
-        ax_ROIs2.set_ylim(bounds[1])
-        ax_ROIs2.set_xticks([])
-        ax_ROIs2.set_yticks([])
-
-        # return
-        #ax1 = ax.twinx()
-        #ax2 = ax.twiny()
-        #ax1.hist(self.analysis['fp_corr'][idx],np.linspace(0,1,101),facecolor='k',alpha=0.5)
-        #ax1.hist(self.analysis['fp_corr'][~idx],np.linspace(0,1,101),facecolor='r',alpha=0.5)
-        #ax1.set_yticks([])
-        #ax1.invert_yaxis()
-
-        #ax2.hist(self.analysis['C_corr'][idx],np.linspace(0,1,101),facecolor='k',alpha=0.5,orientation='horizontal')
-        #ax2.hist(self.analysis['C_corr'][~idx],np.linspace(0,1,101),facecolor='r',alpha=0.5,orientation='horizontal')
-        #ax2.set_xticks([])
-
-        #plt.figure(figsize=(6,2.5))
-        ax = plt.axes([0.55,0.65,0.17,0.3])
-        add_number(fig,ax,order=5,offset=[-25,25])
-
-        ax.plot(self.analysis['fp_corr'][idx].flat,self.analysis['C_corr'][idx].flat,'ko',markersize=0.5,markeredgewidth=0,alpha=0.5)
-        ax.plot(self.analysis['fp_corr'][~idx].flat,self.analysis['C_corr'][~idx].flat,'o',color='tab:orange',markersize=0.5,markeredgewidth=0,alpha=0.5)
-        ax.plot(-1,np.NaN,'ko',markersize=5,markeredgewidth=0,alpha=0.5,label='initial')
-        ax.plot(-1,np.NaN,'o',color='tab:orange',markersize=5,markeredgewidth=0,alpha=0.5,label='inferred')
-
-        ax.set_xlabel('$c_{fp}$')
-        ax.set_ylabel('$c_{Ca}$')
-        ax.set_xlim([-0.1,1])
-        ax.tick_params(axis='y',which='both',left=False,right=True,labelright=True,labelleft=False)
-        ax.yaxis.set_label_position("right")
-        ax.spines['left'].set_visible(False)
-        ax.spines['top'].set_visible(False)
-        ax.set_ylim([-0.1,1])
-        ax.set_yticks(np.linspace(0,1,3))
-
-        ax.legend(loc='upper left',bbox_to_anchor=[-0.1,0.95],fontsize=8)
-
-        SNR = []
-        SNR_not = []
-        r_val = []
-        r_val_not = []
-        for s in range(self.nSes):
-            SNR.extend(self.eval_data[s]['SNR'][self.eval_data[s]['idx_previous'].astype('bool')])
-            SNR_not.extend(self.eval_data[s]['SNR'][~self.eval_data[s]['idx_previous'].astype('bool')])
-            r_val.extend(self.eval_data[s]['r_values'][self.eval_data[s]['idx_previous'].astype('bool')])
-            r_val_not.extend(self.eval_data[s]['r_values'][~self.eval_data[s]['idx_previous'].astype('bool')])
-        # r_val_not.extend(self.analysis['nonMatched']['r_values'].flat)
-        # r_val_not.extend(self.analysis['eval']['r_values'][~idx])
-        # SNR_not.extend(self.analysis['nonMatched']['SNR'].flat)
-        # SNR_not.extend(self.analysis['eval']['SNR'][~idx])
-        # print(SNR)
-        # print(len(SNR))
-
-        ax = plt.axes([0.55,0.125,0.17,0.3])
-        add_number(fig,ax,order=8,offset=[-25,25])
-        ax.plot(r_val_not,SNR_not,'o',color='tab:orange',markersize=0.25,markeredgewidth=0,alpha=0.5)
-        ax.plot(r_val,SNR,'ko',markersize=0.25,markeredgewidth=0,alpha=0.5)
-        # ax.plot(self.analysis['eval']['r_values'][idx],self.analysis['eval']['SNR'][idx],'ko',markersize=0.25,markeredgewidth=0,alpha=0.5)
-        # ax.plot(self.analysis['nonMatched']['r_values'],self.analysis['nonMatched']['SNR'],'o',color='tab:orange',markersize=0.25,markeredgewidth=0,alpha=0.5)
-        # ax.plot(self.analysis['eval']['r_values'][~idx],self.analysis['eval']['SNR'][~idx],'o',color='tab:orange',markersize=0.25,markeredgewidth=0,alpha=0.5)
-        ax.plot([-1,1],[3,3],'k--',linewidth=0.5)
-        ax.plot([0.5,0.5],[1,40],'k--',linewidth=0.5)
-
-        ax.set_yscale('log')
-        ax.set_ylabel('SNR')
-        ax.set_xlim([-0.5,1])
-        ax.set_ylim([1,40])
-        ax.set_xlabel('r-value')
-        ax.tick_params(axis='y',which='both',left=False,right=True,labelright=True,labelleft=False)
-        ax.yaxis.set_label_position("right")
-        ax.spines['left'].set_visible(False)
-        ax.spines['top'].set_visible(False)
-
-        ax = plt.axes([0.85,0.85,0.125,0.1])
-        add_number(fig,ax,order=6,offset=[-50,25])
-        ax.hist(self.analysis['fp_corr'][idx],np.linspace(0.5,1,21),density=True,facecolor='k',alpha=0.8)
-        ax.hist(self.analysis['fp_corr'][~idx],np.linspace(0.5,1,21),density=True,facecolor='tab:orange',alpha=0.8)
-        ax.set_xlabel('$c_{fp}$')
-        ax.set_yticks([])
-        ax.spines['top'].set_visible(False)
-        ax.spines['left'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
-        ax = plt.axes([0.85,0.625,0.125,0.1])
-        add_number(fig,ax,order=7,offset=[-50,25])
-        ax.hist(self.analysis['C_corr'][idx],np.linspace(-0.2,1,25),density=True,facecolor='k',alpha=0.8)
-        ax.hist(self.analysis['C_corr'][~idx],np.linspace(-0.2,1,25),density=True,facecolor='tab:orange',alpha=0.8)
-        ax.set_xlabel('$c_{Ca}$')
-        ax.set_yticks([])
-        ax.spines['top'].set_visible(False)
-        ax.spines['left'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
-        ax = plt.axes([0.85,0.35,0.125,0.1])
-        add_number(fig,ax,order=9,offset=[-50,25])
-        # ax.hist(self.analysis['eval']['r_values'][idx],np.linspace(-0.5,1,31),density=True,facecolor='k',alpha=0.8)
-        ax.hist(r_val,np.linspace(-0.5,1,31),density=True,facecolor='k',alpha=0.8)
-        ax.hist(r_val_not,np.linspace(-0.5,1,31),density=True,facecolor='tab:orange',alpha=0.8)
-        # ax.hist(self.analysis['eval']['r_values'][~idx],np.linspace(-0.5,1,31),density=True,facecolor='tab:orange',alpha=0.8)
-        # ax.hist(self.analysis['nonMatched']['r_values'].flat,np.linspace(-0.5,1,31),density=True,facecolor='tab:orange',alpha=0.8)
-        ax.plot([0.5,0.5],[0,ax.get_ylim()[1]],'k--')
-        ax.set_xlabel('r-value')
-        ax.set_yticks([])
-        ax.spines['top'].set_visible(False)
-        ax.spines['left'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
-        ax = plt.axes([0.85,0.125,0.125,0.1])
-        add_number(fig,ax,order=10,offset=[-50,25])
-        # ax.hist(self.analysis['eval']['SNR'][idx],np.linspace(0,30,31),density=True,facecolor='k',alpha=0.8)
-        ax.hist(SNR,np.linspace(0,30,31),density=True,facecolor='k',alpha=0.8)
-        ax.hist(SNR_not,np.linspace(0,30,31),density=True,facecolor='tab:orange',alpha=0.8)
-        # ax.hist(self.analysis['eval']['SNR'][~idx],np.linspace(0,30,31),density=True,facecolor='tab:orange',alpha=0.8)
-        # ax.hist(self.analysis['nonMatched']['SNR'].flat,np.linspace(0,30,31),density=True,facecolor='tab:orange',alpha=0.8)
-        ax.plot([3,3],[0,ax.get_ylim()[1]],'k--')
-        ax.set_xlabel('SNR')
-        ax.set_yticks([])
-        ax.spines['top'].set_visible(False)
-        ax.spines['left'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
-        # ax1.hist(self.analysis['eval']['r_values'][idx],np.linspace(-0.5,1,151),facecolor='k',alpha=0.5)
-        # ax1.hist(self.analysis['eval']['r_values'][~idx],np.linspace(-0.5,1,151),facecolor='r',alpha=0.5)
-        # ax1.set_yticks([])
-        # ax1.invert_yaxis()
+    def __init__(self, basePath, mouse):
+
+        dataSet = "redetect"  ## nothing else makes sense
+
+        self.pathMouse = os.path.join(basePath, mouse)
+        self.pathMatching = os.path.join(
+            self.pathMouse, "matching/Sheintuch_registration_results_%s.pkl" % dataSet
+        )
+
+    def load_eval(self, ext="mat"):
+        ld_dat = pickleData([], self.pathMatching, "load")
+
+        self.eval_data = {}
+        self.progress = tqdm(range(self.nSes))
+        # self.matches = {}
+        for s in self.progress:
+            ## load results
+            pathSession = os.path.join(self.pathMouse, "Session%02d" % (s + 1))
+            pathData = os.path.join(pathSession, "results_redetect.%s" % ext)
+            self.progress.set_description("Now processing Session %d" % (s + 1))
+
+            ld = load_data(pathData)
+
+            self.eval_data[s] = (
+                {}
+            )  #   {'SNR':       np.zeros((self.nC,self.nSes))*np.nan,
+            #'CNN':       np.zeros((self.nC,self.nSes))*np.nan,
+            #'r_values':  np.zeros((self.nC,self.nSes))*np.nan}
+            for key in ["SNR", "r_values", "CNN", "idx_previous"]:
+                self.eval_data[s][key] = ld[key]
+
+    def load(self, ext="mat"):
+
+        ### load matching results
+        ld_dat = load_data(self.pathMatching)
+        # ld_dat = pickleData([],self.pathMatching,'load')
+        try:
+            assignments = ld_dat["assignments"]
+        except:
+            assignments = ld_dat["assignment"]
+        self.nC, self.nSes = assignments.shape
+
+        ### preallocate arrays
+        self.data = {
+            "eval": {
+                "SNR": np.zeros((self.nC, self.nSes)) * np.nan,
+                "CNN": np.zeros((self.nC, self.nSes)) * np.nan,
+                "r_values": np.zeros((self.nC, self.nSes)) * np.nan,
+            },
+            "nonMatched": {
+                "SNR": np.zeros((10000, self.nSes)) * np.nan,
+                "CNN": np.zeros((10000, self.nSes)) * np.nan,
+                "r_values": np.zeros((10000, self.nSes)) * np.nan,
+            },
+            "fp_corr": np.zeros((self.nC, self.nSes)) * np.nan,
+            "C_corr": np.zeros((self.nC, self.nSes)) * np.nan,
+            "idxes": {
+                "previous": np.zeros((self.nC, self.nSes), "bool"),
+                "in": np.zeros((self.nC, self.nSes), "bool"),
+                "detected": np.zeros((self.nC, self.nSes), "bool"),
+            },
+        }
+
+        ### for all s, store eval and idxes and calculate A-A and C-C correlation
+        self.progress = tqdm(range(self.nSes))
+        self.matches = {}
+        for s in self.progress:
+
+            ## load results
+            pathSession = os.path.join(self.pathMouse, "Session%02d" % (s + 1))
+            pathData = os.path.join(pathSession, "results_redetect.%s" % ext)
+            self.progress.set_description("Now processing Session %d" % (s + 1))
+
+            ld = load_data(pathData)
+
+            idx_c = np.where(~np.isnan(assignments[:, s]))[0]
+            n_arr = assignments[idx_c, s].astype("int")
+
+            ## store eval
+            non_n_arr = np.zeros(10000, "bool")
+            non_n_arr[: len(ld["SNR"])] = True
+            non_n_arr[n_arr] = False
+            for key in ["SNR", "r_values", "CNN"]:
+                self.analysis["eval"][key][idx_c, s] = ld[key][n_arr]
+                self.analysis["nonMatched"][key][non_n_arr, s] = ld[key][
+                    np.where(non_n_arr)
+                ]
+
+            # print(np.isfinite(self.analysis['nonMatched']['SNR']).sum())
+            ## store indices
+            self.analysis["idxes"]["detected"][idx_c, s] = True
+            self.analysis["idxes"]["previous"][idx_c, s] = ld["idx_previous"][n_arr]
+            self.analysis["idxes"]["in"][idx_c, s] = ld["idx_Ain"][n_arr]
+
+            dims = (512, 512)
+            ## find next footprints with low distance
+            cm_in = com(ld["Ain"], dims[0], dims[1])
+            cm_out = com(ld["A"], dims[0], dims[1])
+            # return ld['A'], ld['Ain']
+
+            nC_in = ld["Ain"].shape[1]
+            nC_out = ld["A"].shape[1]
+
+            D_ROIs = scipy.spatial.distance.cdist(cm_in, cm_out)
+            D_ROI_mask = np.ma.array(D_ROIs, mask=np.isnan(D_ROIs))
+
+            # idx_out_bool = np.zeros(nC_out,'bool')
+            # idx_in_bool = np.zeros(nC_in,'bool')
+
+            self.matches[s] = np.zeros(cm_out.shape[0]) * np.nan
+            idx_new = []
+            nC_new = 0
+            dc = 0  ## difference in index
+            for c in np.where((ld["A"] > 0).sum(0) > 50)[1]:
+                idx_close = np.where(D_ROI_mask[:, c] < 5)[0]
+                if len(idx_close):
+                    d_idx = np.min(np.abs(idx_close - c))
+                    closeby = idx_close[np.argmin(np.abs(idx_close - c))]
+                    if np.isscalar(closeby) & (d_idx <= dc):
+                        self.matches[s][c] = closeby
+                    elif np.isscalar(closeby) & (d_idx < (dc + 10)):
+                        dc = d_idx
+                        self.matches[s][c] = closeby
+
+            C_std = ld["C"].std(1)
+            Cin_std = ld["Cin"].std(1)
+
+            chunks = 1000
+            idx_Ain = np.where((ld["Ain"] > 0).sum(0) > 50)[
+                1
+            ]  # np.where(self.analysis['idxes']['in'][:,s])[0]
+            Ain_norm = np.zeros(ld["Ain"].shape[1]) * np.nan
+            nC_in = len(idx_Ain)
+            steps = int(nC_in / chunks)
+            for i in tqdm(range(steps + (np.mod(nC_in, chunks) > 0)), leave=False):
+                c_start = i * chunks
+                c_end = min(nC_in, (i + 1) * chunks)
+                Ain_norm[idx_Ain[c_start:c_end]] = np.linalg.norm(
+                    ld["Ain"][:, idx_Ain[c_start:c_end]].toarray(), axis=0
+                )
+
+            idx_A = np.where((ld["A"] > 0).sum(0) > 50)[
+                1
+            ]  # np.where(self.analysis['idxes']['in'][:,s])[0]
+            A_norm = np.zeros(ld["A"].shape[1]) * np.nan
+            nC_out = len(idx_A)
+            steps = int(nC_out / chunks)
+            for i in tqdm(range(steps + (np.mod(nC_out, chunks) > 0)), leave=False):
+                c_start = i * chunks
+                c_end = min(nC_out, (i + 1) * chunks)
+                A_norm[idx_A[c_start:c_end]] = np.linalg.norm(
+                    ld["A"][:, idx_A[c_start:c_end]].toarray(), axis=0
+                )
+
+            ## calculate correlation between input and output
+            for n2, n1 in tqdm(
+                enumerate(self.matches[s]), total=len(self.matches[s]), leave=False
+            ):
+                if ~np.isnan(n1):
+                    c = np.where(assignments[:, s] == n2)[0]
+                    n1 = int(n1)
+                    self.analysis["fp_corr"][c, s] = ld["A"][:, n2].multiply(
+                        ld["Ain"][:, n1]
+                    ).sum() / (A_norm[n2] * Ain_norm[n1])
+                    self.analysis["C_corr"][c, s] = np.cov(
+                        ld["C"][n2, :], ld["Cin"][n1, :]
+                    )[0, 1] / (C_std[n2] * Cin_std[n1])
+
+    def get_cluster(
+        self, basePath, mouse, nSes, dataSet="redetect", n_processes=0, s_corr_min=0.3
+    ):
+
+        self.cluster = cluster(
+            basePath, mouse, nSes, dataSet=dataSet, s_corr_min=s_corr_min
+        )
+        self.cluster.load()
+
+        # self.cluster.process_sessions(n_processes=n_processes,reprocess=True)
+        # self.cluster.get_IDs()
+        # self.cluster.get_stats(n_processes=n_processes,complete=False)
+
+    def plot(self, SNR_thr=2, rval_thr=0, CNN_thr=0.6, pm_thr=0.5, sv=False):
+
+        rc("font", size=10)
+        rc("axes", labelsize=12)
+        rc("xtick", labelsize=8)
+        rc("ytick", labelsize=8)
+
+        dims = (512, 512)
+        idx = self.analysis["idxes"]["previous"]
+
+        idx_active = (
+            (self.analysis["eval"]["SNR"] > SNR_thr)
+            & (self.analysis["eval"]["r_values"] > rval_thr)
+            & (self.analysis["eval"]["CNN"] > CNN_thr)
+        )
+        idx_silent = ~idx_active
+
+        idxes = {}
+        idxes["active_good"] = idx & idx_active
+        idxes["active_bad"] = idx & idx_silent
+
+        idxes["silent_good"] = ~idx & idx_active
+        idxes["silent_bad"] = ~idx & idx_silent
+
+        pathMatching = os.path.join(
+            self.pathMouse, "matching/Sheintuch_registration_results_OnACID.pkl"
+        )
+        dt = pickleData([], pathMatching, "load")
+        assignments_OnACID = dt["assignments"]
+
+        pathMatching = os.path.join(
+            self.pathMouse, "matching/Sheintuch_registration_results_redetect.pkl"
+        )
+        ld_dat = pickleData([], pathMatching, "load")
+        assignments = ld_dat["assignments"]
+
+        self.cluster.meta["SNR_thr"] = SNR_thr
+        self.cluster.meta["rval_thr"] = rval_thr
+        self.cluster.meta["CNN_thr"] = CNN_thr
+        self.cluster.cluster_classification()
+
+        idx_pm = (
+            self.cluster.stats["match_score"][..., 0] > 0.5
+        )  # ((self.cluster.stats['match_score'][...,0]-self.cluster.stats['match_score'][...,1])>pm_thr) | (self.cluster.stats['match_score'][...,0]>0.95)
+
+        if False:
+            fig = plt.figure(figsize=(7, 4), dpi=300)
+
+            ax_ROIs = plt.axes([0.05, 0.625, 0.2, 0.325])
+            add_number(fig, ax_ROIs, order=1, offset=[-25, 25])
+            ax_ROIs2 = plt.axes([0.3, 0.625, 0.2, 0.325])
+            add_number(fig, ax_ROIs2, order=2, offset=[-25, 25])
+
+            s = 10
+
+            n_arr = assignments_OnACID[
+                np.where(~np.isnan(assignments_OnACID[:, s - 1]))[0], s - 1
+            ].astype("int")
+
+            pathSession = os.path.join(self.pathMouse, "Session%02d" % (s))
+            pathData = os.path.join(pathSession, "results_redetect.mat")
+            ld = load_data(pathData)
+
+            cm_in = com(ld["Ain"], dims[0], dims[1])
+            cm_out = com(ld["A"], dims[0], dims[1])
+
+            idx_A = ld["idx_previous"][: ld["Ain"].shape[1]].astype("bool")
+            # idx_A = np.zeros(ld['Ain'].shape[1],'bool')
+            # idx_A[n_arr] = True
+
+            bounds = [[175, 225], [175, 225]]
+            self.plot_detection(
+                ax_ROIs, ld["Ain"][:, idx_A], ld["Ain"][:, ~idx_A], bounds=bounds
+            )
+            ax_ROIs.set_xlim(bounds[0])
+            ax_ROIs.set_ylim(bounds[1])
+            ax_ROIs.set_xticks([])
+            ax_ROIs.set_yticks([])
+            sbar = ScaleBar(530.68 / 512 * 10 ** (-6), location="lower right")
+            ax_ROIs.add_artist(sbar)
+
+            idx_A = ld["idx_previous"].astype("bool")  # & idx_n
+            # print(idx_A.shape)
+            # idx_A = np.zeros(ld['A'].shape[1],'bool')
+            # idx_A[n_arr] = True
+            # print(ld['A'].shape)
+            nC = self.analysis["eval"]["SNR"].shape[0]
+            nN = ld["A"].shape[1]
+            c_arr = np.where(assignments[:, s - 1] >= 0)[0]
+            n_arr = assignments[c_arr, s - 1].astype("int")
+            idx_n = np.in1d(range(nN), n_arr)
+            idx_c = np.in1d(range(nC), c_arr)
+            idx_mapping_cn = -np.ones(nC, "int")
+            idx_mapping_cn[c_arr] = n_arr
+            idx_mapping_nc = -np.ones(nN, "int")
+            idx_mapping_nc[n_arr] = c_arr
+
+            idx_active_n = np.in1d(
+                range(nN), idx_mapping_cn[np.squeeze(idx_active[:, s - 1])]
+            )
+
+            # CM = com(ld['A'],512,512)
+            # idx_bounds = (CM[:,0] > bounds[0][0]) & (CM[:,0] < bounds[0][1]) & (CM[:,1] > bounds[1][0]) & (CM[:,1] < bounds[1][1])
+
+            self.plot_detection(
+                ax_ROIs2,
+                ld["A"][:, idx_A],
+                ld["A"][:, ~idx_A],
+                bounds=bounds,
+                lw=0.5,
+                ls="dotted",
+            )
+            self.plot_detection(
+                ax_ROIs2,
+                ld["A"][:, idx_A & idx_active_n],
+                ld["A"][:, (~idx_A) & idx_active_n],
+                bounds=bounds,
+            )
+
+            ax_ROIs2.set_xlim(bounds[0])
+            ax_ROIs2.set_ylim(bounds[1])
+            ax_ROIs2.set_xticks([])
+            ax_ROIs2.set_yticks([])
+
+            # return
+            # ax1 = ax.twinx()
+            # ax2 = ax.twiny()
+            # ax1.hist(self.analysis['fp_corr'][idx],np.linspace(0,1,101),facecolor='k',alpha=0.5)
+            # ax1.hist(self.analysis['fp_corr'][~idx],np.linspace(0,1,101),facecolor='r',alpha=0.5)
+            # ax1.set_yticks([])
+            # ax1.invert_yaxis()
+
+            # ax2.hist(self.analysis['C_corr'][idx],np.linspace(0,1,101),facecolor='k',alpha=0.5,orientation='horizontal')
+            # ax2.hist(self.analysis['C_corr'][~idx],np.linspace(0,1,101),facecolor='r',alpha=0.5,orientation='horizontal')
+            # ax2.set_xticks([])
+
+            # plt.figure(figsize=(6,2.5))
+            ax = plt.axes([0.55, 0.65, 0.17, 0.3])
+            add_number(fig, ax, order=5, offset=[-25, 25])
+
+            ax.plot(
+                self.analysis["fp_corr"][idx].flat,
+                self.analysis["C_corr"][idx].flat,
+                "ko",
+                markersize=0.5,
+                markeredgewidth=0,
+                alpha=0.5,
+            )
+            ax.plot(
+                self.analysis["fp_corr"][~idx].flat,
+                self.analysis["C_corr"][~idx].flat,
+                "o",
+                color="tab:orange",
+                markersize=0.5,
+                markeredgewidth=0,
+                alpha=0.5,
+            )
+            ax.plot(
+                -1,
+                np.nan,
+                "ko",
+                markersize=5,
+                markeredgewidth=0,
+                alpha=0.5,
+                label="initial",
+            )
+            ax.plot(
+                -1,
+                np.nan,
+                "o",
+                color="tab:orange",
+                markersize=5,
+                markeredgewidth=0,
+                alpha=0.5,
+                label="inferred",
+            )
+
+            ax.set_xlabel("$c_{fp}$")
+            ax.set_ylabel("$c_{Ca}$")
+            ax.set_xlim([-0.1, 1])
+            ax.tick_params(
+                axis="y",
+                which="both",
+                left=False,
+                right=True,
+                labelright=True,
+                labelleft=False,
+            )
+            ax.yaxis.set_label_position("right")
+            ax.spines["left"].set_visible(False)
+            ax.spines["top"].set_visible(False)
+            ax.set_ylim([-0.1, 1])
+            ax.set_yticks(np.linspace(0, 1, 3))
+
+            ax.legend(loc="upper left", bbox_to_anchor=[-0.1, 0.95], fontsize=8)
+
+            SNR = []
+            SNR_not = []
+            r_val = []
+            r_val_not = []
+            for s in range(self.nSes):
+                SNR.extend(
+                    self.eval_data[s]["SNR"][
+                        self.eval_data[s]["idx_previous"].astype("bool")
+                    ]
+                )
+                SNR_not.extend(
+                    self.eval_data[s]["SNR"][
+                        ~self.eval_data[s]["idx_previous"].astype("bool")
+                    ]
+                )
+                r_val.extend(
+                    self.eval_data[s]["r_values"][
+                        self.eval_data[s]["idx_previous"].astype("bool")
+                    ]
+                )
+                r_val_not.extend(
+                    self.eval_data[s]["r_values"][
+                        ~self.eval_data[s]["idx_previous"].astype("bool")
+                    ]
+                )
+            # r_val_not.extend(self.analysis['nonMatched']['r_values'].flat)
+            # r_val_not.extend(self.analysis['eval']['r_values'][~idx])
+            # SNR_not.extend(self.analysis['nonMatched']['SNR'].flat)
+            # SNR_not.extend(self.analysis['eval']['SNR'][~idx])
+            # print(SNR)
+            # print(len(SNR))
+
+            ax = plt.axes([0.55, 0.125, 0.17, 0.3])
+            add_number(fig, ax, order=8, offset=[-25, 25])
+            ax.plot(
+                r_val_not,
+                SNR_not,
+                "o",
+                color="tab:orange",
+                markersize=0.25,
+                markeredgewidth=0,
+                alpha=0.5,
+            )
+            ax.plot(r_val, SNR, "ko", markersize=0.25, markeredgewidth=0, alpha=0.5)
+            # ax.plot(self.analysis['eval']['r_values'][idx],self.analysis['eval']['SNR'][idx],'ko',markersize=0.25,markeredgewidth=0,alpha=0.5)
+            # ax.plot(self.analysis['nonMatched']['r_values'],self.analysis['nonMatched']['SNR'],'o',color='tab:orange',markersize=0.25,markeredgewidth=0,alpha=0.5)
+            # ax.plot(self.analysis['eval']['r_values'][~idx],self.analysis['eval']['SNR'][~idx],'o',color='tab:orange',markersize=0.25,markeredgewidth=0,alpha=0.5)
+            ax.plot([-1, 1], [3, 3], "k--", linewidth=0.5)
+            ax.plot([0.5, 0.5], [1, 40], "k--", linewidth=0.5)
+
+            ax.set_yscale("log")
+            ax.set_ylabel("SNR")
+            ax.set_xlim([-0.5, 1])
+            ax.set_ylim([1, 40])
+            ax.set_xlabel("r-value")
+            ax.tick_params(
+                axis="y",
+                which="both",
+                left=False,
+                right=True,
+                labelright=True,
+                labelleft=False,
+            )
+            ax.yaxis.set_label_position("right")
+            ax.spines["left"].set_visible(False)
+            ax.spines["top"].set_visible(False)
+
+            ax = plt.axes([0.85, 0.85, 0.125, 0.1])
+            add_number(fig, ax, order=6, offset=[-50, 25])
+            ax.hist(
+                self.analysis["fp_corr"][idx],
+                np.linspace(0.5, 1, 21),
+                density=True,
+                facecolor="k",
+                alpha=0.8,
+            )
+            ax.hist(
+                self.analysis["fp_corr"][~idx],
+                np.linspace(0.5, 1, 21),
+                density=True,
+                facecolor="tab:orange",
+                alpha=0.8,
+            )
+            ax.set_xlabel("$c_{fp}$")
+            ax.set_yticks([])
+            ax.spines["top"].set_visible(False)
+            ax.spines["left"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+
+            ax = plt.axes([0.85, 0.625, 0.125, 0.1])
+            add_number(fig, ax, order=7, offset=[-50, 25])
+            ax.hist(
+                self.analysis["C_corr"][idx],
+                np.linspace(-0.2, 1, 25),
+                density=True,
+                facecolor="k",
+                alpha=0.8,
+            )
+            ax.hist(
+                self.analysis["C_corr"][~idx],
+                np.linspace(-0.2, 1, 25),
+                density=True,
+                facecolor="tab:orange",
+                alpha=0.8,
+            )
+            ax.set_xlabel("$c_{Ca}$")
+            ax.set_yticks([])
+            ax.spines["top"].set_visible(False)
+            ax.spines["left"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+
+            ax = plt.axes([0.85, 0.35, 0.125, 0.1])
+            add_number(fig, ax, order=9, offset=[-50, 25])
+            # ax.hist(self.analysis['eval']['r_values'][idx],np.linspace(-0.5,1,31),density=True,facecolor='k',alpha=0.8)
+            ax.hist(
+                r_val, np.linspace(-0.5, 1, 31), density=True, facecolor="k", alpha=0.8
+            )
+            ax.hist(
+                r_val_not,
+                np.linspace(-0.5, 1, 31),
+                density=True,
+                facecolor="tab:orange",
+                alpha=0.8,
+            )
+            # ax.hist(self.analysis['eval']['r_values'][~idx],np.linspace(-0.5,1,31),density=True,facecolor='tab:orange',alpha=0.8)
+            # ax.hist(self.analysis['nonMatched']['r_values'].flat,np.linspace(-0.5,1,31),density=True,facecolor='tab:orange',alpha=0.8)
+            ax.plot([0.5, 0.5], [0, ax.get_ylim()[1]], "k--")
+            ax.set_xlabel("r-value")
+            ax.set_yticks([])
+            ax.spines["top"].set_visible(False)
+            ax.spines["left"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+
+            ax = plt.axes([0.85, 0.125, 0.125, 0.1])
+            add_number(fig, ax, order=10, offset=[-50, 25])
+            # ax.hist(self.analysis['eval']['SNR'][idx],np.linspace(0,30,31),density=True,facecolor='k',alpha=0.8)
+            ax.hist(SNR, np.linspace(0, 30, 31), density=True, facecolor="k", alpha=0.8)
+            ax.hist(
+                SNR_not,
+                np.linspace(0, 30, 31),
+                density=True,
+                facecolor="tab:orange",
+                alpha=0.8,
+            )
+            # ax.hist(self.analysis['eval']['SNR'][~idx],np.linspace(0,30,31),density=True,facecolor='tab:orange',alpha=0.8)
+            # ax.hist(self.analysis['nonMatched']['SNR'].flat,np.linspace(0,30,31),density=True,facecolor='tab:orange',alpha=0.8)
+            ax.plot([3, 3], [0, ax.get_ylim()[1]], "k--")
+            ax.set_xlabel("SNR")
+            ax.set_yticks([])
+            ax.spines["top"].set_visible(False)
+            ax.spines["left"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+
+            # ax1.hist(self.analysis['eval']['r_values'][idx],np.linspace(-0.5,1,151),facecolor='k',alpha=0.5)
+            # ax1.hist(self.analysis['eval']['r_values'][~idx],np.linspace(-0.5,1,151),facecolor='r',alpha=0.5)
+            # ax1.set_yticks([])
+            # ax1.invert_yaxis()
+            #
+            # ax2 = ax.twiny()
+            # ax2.hist(self.analysis['eval']['SNR'][idx],np.linspace(0,40,101),facecolor='k',alpha=0.5,orientation='horizontal')
+            # ax2.hist(self.analysis['eval']['SNR'][~idx],np.linspace(0,40,101),facecolor='r',alpha=0.5,orientation='horizontal')
+            # ax2.set_xticks([])
+
+            # plt.tight_layout()
+            # plt.show(block=False)
+
+            # ext = 'png'
+            # path = pathcat([self.pathMouse,'complete_set_evaluation.%s'%ext])
+            # plt.savefig(path,format=ext,dpi=300)
+
+            ax_A = plt.axes([0.05, 0.375, 0.125, 0.2])
+            add_number(fig, ax_A, order=3, offset=[-25, 25])
+            ax_Ca = plt.axes([0.2, 0.375, 0.275, 0.2])
+
+            idx_active = np.where((self.analysis["C_corr"] > 0.8) & idx)
+            i = np.random.randint(len(idx_silent[0]))
+            c = idx_active[0][i]
+            s = idx_active[1][i]
+            s, c, n = (7, 0, 0)
+            # ld_dat = pickleData([],self.pathMatching,'load')
+            # assignments = ld_dat['assignments']
+            n = int(assignments[c, s])
+            # plt.draw()
+            print(s, c, n)  ## (73,1441,2406)
+
+            pathSession = os.path.join(self.pathMouse, "Session%02d" % (s + 1))
+            pathData = os.path.join(pathSession, "results_redetect.mat")
+            ld = load_data(pathData)
+            # ld = loadmat(pathData,variable_names=['Cin','C','Ain','A'],squeeze_me=True)
+
+            dims = (512, 512)
+            ax_A.imshow(ld["A"].sum(1).reshape(dims))
+
+            Cin = ld["Cin"] / ld["Cin"].max(1)[:, np.newaxis]
+            C = ld["C"] / ld["C"].max(1)[:, np.newaxis]
+
+            cm = com(ld["A"], dims[0], dims[1])
+
+            # calculate CoMs and distance
+            D_ROIs = scipy.spatial.distance.cdist(cm, cm)
+            n_close = np.where(D_ROIs[n, :] < 10)[0]
+            print(n_close)
+            A_norm = np.linalg.norm(ld["A"].toarray(), axis=0)
+
+            # plot all closeby ones, highlight overlapping ones
+            t_arr = np.linspace(0, 8989 / 15, 8989)
+            ax_Ca.plot(t_arr, Cin[n, :], "k", linewidth=0.5)
+            ax_Ca.plot(t_arr, C[n, :] + 1, "tab:green", linewidth=0.5)
+            # ax_Ca.text(6000/15,1.5,'corr: %5.3g, SNR: %5.3g'%(self.analysis['fp_corr'][c,s],self.analysis['eval']['SNR'][c,s]))
+
+            ax_A.contour(
+                (ld["Ain"][:, n] / ld["Ain"][:, n].max()).reshape(dims).toarray(),
+                levels=[0.3],
+                colors="w",
+                linewidths=2,
+            )
+            ax_A.contour(
+                (ld["A"][:, n] / ld["A"][:, n].max()).reshape(dims).toarray(),
+                levels=[0.3],
+                colors="tab:green",
+                linewidths=2,
+            )
+
+            i = 0
+            for nn in n_close:
+                A_corr = ld["A"][:, n].multiply(ld["A"][:, nn]).sum() / (
+                    A_norm[n] * A_norm[nn]
+                )
+                if (A_corr > 0.3) and not (n == nn):
+                    ax_A.contour(
+                        (ld["A"][:, nn] / ld["A"][:, nn].max()).reshape(dims).toarray(),
+                        levels=[0.3],
+                        colors="tab:orange",
+                        linewidths=1.5,
+                    )
+
+                    # cc = np.where(assignments[:,s] == nn)[0][0]
+                    # print(c)
+                    # print(self.analysis['corr'][cc,s])
+                    # ax_Ca.text(6000,i+2.5,'corr: %5.3g, SNR: %5.3g'%(A_corr,self.analysis['eval']['SNR'][cc,s]))
+                    ax_Ca.plot(t_arr, C[nn, :] + i + 2, "tab:orange", linewidth=0.5)
+                    i += 1
+
+            ax_A.set_xlim([cm[n, 0] - 15, cm[n, 0] + 15])
+            ax_A.set_ylim([cm[n, 1] - 15, cm[n, 1] + 15])
+            ax_A.set_xticks([])
+            ax_A.set_yticks([])
+            ax_A.axis("off")
+            # ax_A.text(cm[n,0],cm[n,1]-14,'$c_{fp}=%4.2g$\n$c_{Ca}=%4.2g$'%(self.analysis['fp_corr'][c,s],self.analysis['C_corr'][c,s]),color='w',fontsize=12)
+            ax_Ca.spines["right"].set_visible(False)
+            ax_Ca.spines["top"].set_visible(False)
+            ax_Ca.set_xticks([])
+            ax_Ca.set_yticks([])
+            # ax_Ca.set_xlabel('time [s]')
+
+            # plt.tight_layout()
+            # plt.show(block=False)
+            # ext = 'png'
+            # path = pathcat([self.pathMouse,'complete_set_evaluation_example_good.%s'%ext])
+            # plt.savefig(path,format=ext,dpi=300)
+
+            ax_A = plt.axes([0.05, 0.125, 0.125, 0.2])
+            add_number(fig, ax_A, order=4, offset=[-25, 25])
+            ax_Ca = plt.axes([0.2, 0.125, 0.275, 0.2])
+
+            idx_silent = np.where(
+                (self.analysis["C_corr"] < 0.5) & (self.analysis["fp_corr"] < 0.8) & idx
+            )
+            i = np.random.randint(len(idx_silent[0]))
+            c = idx_silent[0][i]
+            s = idx_silent[1][i]
+            s, c, n = (5, 2099, 1853)
+            # ld_dat = pickleData([],self.pathMatching,'load')
+            # assignments = ld_dat['assignments']
+            n = int(assignments[c, s])
+            # plt.draw()
+            print(s, c, n)  ## (73,1441,2406)
+
+            pathSession = os.path.join(self.pathMouse, "Session%02d" % (s + 1))
+            pathData = os.path.join(pathSession, "results_redetect.mat")
+            ld = load_data(pathData)
+            # ld = loadmat(pathData,variable_names=['Cin','C','Ain','A'],squeeze_me=True)
+
+            # plt.figure(figsize=(6,2.5))
+            # dims=(512,512)
+            # ax_A = plt.axes([0.1,0.2,0.35,0.75])
+            ax_A.imshow(ld["A"].sum(1).reshape(dims))
+
+            Cin = ld["Cin"] / ld["Cin"].max(1)[:, np.newaxis]
+            C = ld["C"] / ld["C"].max(1)[:, np.newaxis]
+
+            cm = com(ld["A"], dims[0], dims[1])
+
+            # calculate CoMs and distance
+            D_ROIs = scipy.spatial.distance.cdist(cm, cm)
+            n_close = np.where(D_ROIs[n, :] < 10)[0]
+            A_norm = np.linalg.norm(ld["A"].toarray(), axis=0)
+
+            # plot all closeby ones, highlight overlapping ones
+            t_arr = np.linspace(0, 8989 / 15, 8989)
+            ax_Ca.plot(t_arr, Cin[n, :], "k", linewidth=0.5)
+            ax_Ca.plot(t_arr, C[n, :] + 1, "tab:green", linewidth=0.5)
+            # ax_Ca.text(6000/15,1.5,'corr: %5.3g, SNR: %5.3g'%(self.analysis['fp_corr'][c,s],self.analysis['eval']['SNR'][c,s]))
+
+            ax_A.contour(
+                (ld["Ain"][:, n] / ld["Ain"][:, n].max()).reshape(dims).toarray(),
+                levels=[0.3],
+                colors="w",
+                linewidths=2,
+            )
+            ax_A.contour(
+                (ld["A"][:, n] / ld["A"][:, n].max()).reshape(dims).toarray(),
+                levels=[0.3],
+                colors="tab:green",
+                linewidths=2,
+            )
+
+            i = 0
+            for nn in n_close:
+                A_corr = ld["A"][:, n].multiply(ld["A"][:, nn]).sum() / (
+                    A_norm[n] * A_norm[nn]
+                )
+                if (A_corr > 0.3) and not (n == nn):
+                    ax_A.contour(
+                        (ld["A"][:, nn] / ld["A"][:, nn].max()).reshape(dims).toarray(),
+                        levels=[0.3],
+                        colors="tab:orange",
+                        linewidths=1.5,
+                    )
+
+                    # cc = np.where(assignments[:,s] == nn)[0][0]
+                    # print(c)
+                    # print(self.analysis['corr'][cc,s])
+                    # ax_Ca.text(6000,i+2.5,'corr: %5.3g, SNR: %5.3g'%(A_corr,self.analysis['eval']['SNR'][cc,s]))
+                    ax_Ca.plot(t_arr, C[nn, :] + i + 2, "tab:orange", linewidth=0.5)
+                    i += 1
+
+            ax_A.set_xlim([cm[n, 0] - 15, cm[n, 0] + 15])
+            ax_A.set_ylim([cm[n, 1] - 15, cm[n, 1] + 15])
+            ax_A.set_xticks([])
+            ax_A.set_yticks([])
+            ax_A.axis("off")
+            # ax_A.text(cm[n,0],cm[n,1]-14,'$c_{fp}=%4.2g$\n$c_{Ca}=%4.2g$'%(self.analysis['fp_corr'][c,s],self.analysis['C_corr'][c,s]),color='w',fontsize=12)
+            ax_Ca.spines["right"].set_visible(False)
+            ax_Ca.spines["top"].set_visible(False)
+            ax_Ca.set_yticks([])
+            ax_Ca.set_xlabel("time [s]")
+
+            if sv:
+                ext = "png"
+                path = pathcat(
+                    [self.pathMouse, "Figures/complete_set_evaluation1.%s" % ext]
+                )
+                plt.savefig(path, format=ext, dpi=300)
+
+        if True:
+            plt.figure(figsize=(3.5, 4), dpi=300)
+            dataSet = "redetect"
+            pathLoad = pathcat([self.pathMouse, "clusterStats_%s.pkl" % dataSet])
+            ld = pickleData([], pathLoad, "load")
+            idxes = (
+                (ld["SNR"] > SNR_thr)
+                & (ld["r_values"] > rval_thr)
+                & (ld["CNN"] > CNN_thr)
+                & (ld["firingrate"] > 0)
+            )
+            idx_prev = self.analysis["idxes"]["previous"]
+
+            colors = [(1, 0, 0, 0), mcolors.to_rgba("tab:orange")]
+            RedAlpha = mcolors.LinearSegmentedColormap.from_list(
+                "RedAlpha", colors, N=2
+            )
+            colors = [(0, 0, 0, 0), (0, 0, 0, 1)]
+            BlackAlpha = mcolors.LinearSegmentedColormap.from_list(
+                "BlackAlpha", colors, N=2
+            )
+            colors = [(0, 0, 0, 0), mcolors.to_rgba("tab:green")]
+            GreenAlpha = mcolors.LinearSegmentedColormap.from_list(
+                "GreenAlpha", colors, N=2
+            )
+
+            nC, nS = assignments.shape
+            ax_oc = plt.axes([0.2, 0.1, 0.45, 0.55])
+            ax_oc2 = ax_oc.twinx()
+            # ax_oc.imshow((~np.isnan(assignments))&idxes,cmap=BlackAlpha,aspect='auto')
+            # ax_oc2.imshow((~np.isnan(assignments))&(~idxes),cmap=RedAlpha,aspect='auto')
+            ax_oc.imshow(
+                (idx_pm & idxes)[self.cluster.stats["cluster_bool"], :],
+                cmap=BlackAlpha,
+                aspect="auto",
+            )
+            ax_oc.imshow(
+                (idx_pm & idxes & idx_prev)[self.cluster.stats["cluster_bool"], :],
+                cmap=GreenAlpha,
+                aspect="auto",
+            )
+            ax_oc2.imshow(
+                (idx_pm & (~idxes))[self.cluster.stats["cluster_bool"], :],
+                cmap=RedAlpha,
+                aspect="auto",
+            )
+            # ax_oc.imshow(self.results['p_matched'],cmap='binary',aspect='auto')
+            ax_oc.set_xlabel("session")
+            ax_oc.set_ylabel("neuron ID")
+
+            ax = plt.axes([0.65, 0.1, 0.175, 0.55])
+            nC_clean = self.cluster.stats["cluster_bool"].sum()
+            # ax.plot(((~np.isnan(assignments)) & idxes).sum(1),np.linspace(0,nC,nC),'ko',markersize=0.5)
+            ax.plot(
+                (idx_pm & idxes)[self.cluster.stats["cluster_bool"], :].sum(1),
+                np.linspace(1, nC_clean, nC_clean),
+                "ko",
+                markersize=1,
+                mew=0,
+            )
+            ax.invert_yaxis()
+            ax.set_ylim([nC_clean, 0])
+            ax.set_yticks([])
+            ax.set_xlabel("occ.")
+            ax.spines["right"].set_visible(False)
+
+            ax = plt.axes([0.65, 0.65, 0.175, 0.3])
+            # ax.hist((~np.isnan(assignments)).sum(1),np.linspace(0,nS,nS),color='r',cumulative=True,density=True,histtype='step')
+            # ax.hist((ld_dat['p_matched']>pm_thr).sum(1),np.linspace(0,nS,nS),color='r',cumulative=True,density=True,histtype='step')
+            ax.hist(
+                (idx_pm & idxes & idx_prev)[self.cluster.stats["cluster_bool"], :].sum(
+                    1
+                ),
+                np.linspace(0, nS, nS),
+                color="tab:green",
+                cumulative=True,
+                density=True,
+                histtype="step",
+            )
+            # ax.hist(((~np.isnan(assignments)) & idxes).sum(1),np.linspace(0,nS,nS),color='k',alpha=0.5,cumulative=True,density=True,histtype='step')
+            ax.hist(
+                (idx_pm & idxes)[self.cluster.stats["cluster_bool"], :].sum(1),
+                np.linspace(0, nS, nS),
+                color="k",
+                cumulative=True,
+                density=True,
+                histtype="step",
+            )
+            ax.set_xticks([])
+            # ax.set_yticks([])
+            ax.yaxis.tick_right()
+            ax.yaxis.set_label_position("right")
+            ax.set_ylim([0, 1])
+            ax.set_yticks(np.linspace(0, 1, 3))
+            ax.set_ylabel("cdf")
+            ax.spines["top"].set_visible(False)
+            # ax.spines['right'].set_visible(False)
+
+            ax = plt.axes([0.2, 0.65, 0.45, 0.3])
+            # ax.plot(np.linspace(0,nS,nS),(~np.isnan(assignments_OnACID)).sum(0),'ro',markersize=1,markerfacecolor='None')
+            # ax.plot(np.linspace(0,nS,nS),(~np.isnan(assignments)).sum(0),'ro',markersize=1)
+            # ax.plot(np.linspace(0,nS,nS),((~np.isnan(assignments)) & idxes).sum(0),'ko',markersize=1)
+            nROI_prev = (idx_pm & idxes & idx_prev)[
+                self.cluster.stats["cluster_bool"], :
+            ].sum(0)
+            nROI_total = (idx_pm & idxes)[self.cluster.stats["cluster_bool"], :].sum(0)
+            frac_ROI = nROI_total / nROI_prev - 1
+            print(np.nanmean(frac_ROI[frac_ROI < 1.5]))
+            print(np.nanstd(frac_ROI[frac_ROI < 1.5]))
+            # print()
+
+            ax.plot(
+                np.linspace(0, nS, nS),
+                (idx_pm & idxes & idx_prev)[self.cluster.stats["cluster_bool"], :].sum(
+                    0
+                ),
+                "^",
+                color="tab:green",
+                markersize=2,
+                label="initial",
+            )
+            # ax.plot(np.linspace(0,nS,nS),idx_pm[self.cluster.stats['cluster_bool'],:].sum(0),'^',color='tab:orange',markersize=2,label='inferred')
+            ax.plot(
+                np.linspace(0, nS, nS),
+                (idx_pm & idxes)[self.cluster.stats["cluster_bool"], :].sum(0),
+                "k^",
+                markersize=2,
+                label="total",
+            )
+            ax.set_xlim([0, nS])
+            ax.set_ylim([0, 1300])
+            ax.set_xticks([])
+            ax.set_ylabel("# neurons")
+            ax.spines["top"].set_visible(False)
+            ax.legend(fontsize=8, bbox_to_anchor=[0.0, 0.0], loc="lower left")
+
+            plt.tight_layout()
+            plt.show(block=False)
+            if sv:
+                ext = "png"
+                path = pathcat(
+                    [self.pathMouse, "Figures/complete_set_evaluation.%s" % ext]
+                )
+                plt.savefig(path, format=ext, dpi=300)
+
+    def plot_threshold(self):
+        print("### plot test of thresholds for neuron number ###")
+
+        nSes = self.cluster.meta["nSes"]
+        f_max = 5
+        # SNR_thr = 1
+        rval_thr = 0
+        CNN_thr = 0.6
+
+        A0_thr = 1
+        A_thr = 3
+        pmass_thr = 0.5
+        Bayes_thr = 10
+        rel_thr = 0.1
+
+        # if PC is None:
         #
-        # ax2 = ax.twiny()
-        # ax2.hist(self.analysis['eval']['SNR'][idx],np.linspace(0,40,101),facecolor='k',alpha=0.5,orientation='horizontal')
-        # ax2.hist(self.analysis['eval']['SNR'][~idx],np.linspace(0,40,101),facecolor='r',alpha=0.5,orientation='horizontal')
-        # ax2.set_xticks([])
+        #     active = {'SNR':        {},
+        #         'r_values':     {},
+        #         'CNN':          {}}
+        #
+        #     PC = {'Bayes_factor':   {},
+        #         'reliability':  {},
+        #         'A_0':          {},
+        #         'A':            {},
+        #         'p_mass':       {}}
+        #
+        #     for s in tqdm(range(nSes)):
+        #         PC_para = loadmat('/media/wollex/Analyze_AS1/linstop/762/Session%02d/PC_fields_para.mat'%(s+1),variable_names=['Bayes_factor','posterior_mass','parameter'],squeeze_me=True)
+        #         firingstats = loadmat('/media/wollex/Analyze_AS1/linstop/762/Session%02d/PC_fields_firingstats.mat'%(s+1),variable_names=['trial_map','map'],squeeze_me=True)
+        #         CNMF_results = loadmat('/media/wollex/Analyze_AS1/linstop/762/Session%02d/results_redetect.mat'%(s+1),variable_names=['SNR','r_values','CNN'],squeeze_me=True)
+        #
+        #         active['SNR'][s] = CNMF_results['SNR']
+        #         active['r_values'][s] = CNMF_results['r_values']
+        #         active['CNN'][s] = CNMF_results['CNN']
+        #         N = len(active['SNR'][s])
+        #
+        #         PC['Bayes_factor'][s] = PC_para['Bayes_factor'][...,0]
+        #         PC['A_0'][s] = PC_para['parameter'][:,:,0,0]
+        #         PC['A'][s] = PC_para['parameter'][:,:,1,0]
+        #         PC['p_mass'][s] = PC_para['posterior_mass']
+        #         PC['reliability'][s] = np.zeros((N,f_max))
+        #         for n in range(N):
+        #             for f in np.where(~np.isnan(PC['A'][s][n,:]))[0]:
+        #                 PC['reliability'][s][n,f],_,_ = get_reliability(firingstats['trial_map'][n,...],firingstats['map'][n,...],PC_para['parameter'][n,...],f)
 
+        # return active, PC
+        ### get SNR dependence of detected neurons
+        # idx_pm = ((cluster.stats['match_score'][...,0]-cluster.stats['match_score'][...,1])>0.05) | (cluster.stats['match_score'][...,0]>0.95)
+        # idx_other = (cluster.stats['r_values'] > 0) & idx_pm
+        # idx_pm = ((cluster.stats['match_score'][...,0]-cluster.stats['match_score'][...,1])>0.5) | (cluster.stats['match_score'][...,0]>0.95)
+        # idx_other_certain = (cluster.stats['r_values'] > 0) & idx_pm
+        r_thr = 0
+        SNR_arr = np.linspace(1,10,10)
+        nROI = np.zeros(SNR_arr.shape + (nSes,2))
+        nPC = np.zeros(SNR_arr.shape + (nSes,2))
+        plt.figure(figsize=(7,2.5))
+        width = 0.4
+        ax = plt.axes([0.1,0.2,0.25,0.65])
+        for i,SNR_thr in enumerate(SNR_arr):
 
+            for s in range(nSes):
+                idx_active = (self.eval_data[s]['SNR'] > SNR_thr) & (self.eval_data[s]['r_values'] > r_thr) & (self.eval_data[s]['CNN'] > CNN_thr)
+                nROI[i,s,0] = (idx_active).sum()
+
+                morphed_A0_thr = A0_thr-PC['reliability'][s]/2
+                idx_fields = (PC['A_0'][s]>morphed_A0_thr) & \
+                          (PC['A'][s]>A_thr) & \
+                          (PC['p_mass'][s]>pmass_thr) & \
+                          (PC['Bayes_factor'][s]>Bayes_thr) & \
+                          (PC['reliability'][s]>rel_thr)
+
+                nPC[i,s,0] = (idx_active & np.any(idx_fields,1)).sum()
+                # print('active neurons / place cells in session %d: %d / %d'%(s+1,nAct,nPC))
+
+            # nROI[i,:,0] = ((cluster.stats['SNR']>SNR_thr) & idx_other).sum(0)
+            # nROI[i,:,1] = ((cluster.stats['SNR']>SNR_thr) & idx_other_certain).sum(0)
+
+            # nPC[i,:,0] = ((cluster.stats['SNR']>SNR_thr) & idx_other & cluster.status[...,2]).sum(0)
+            # nPC[i,:,1] = ((cluster.stats['SNR']>SNR_thr) & idx_other_certain & cluster.status[...,2]).sum(0)
+            ax.scatter(SNR_thr-width/2 + width*np.random.rand(nSes)[self.cluster.sessions['bool']],nROI[i,self.cluster.sessions['bool'],0],s=2,c=[[0.8,0.8,0.8]])
+            ax.scatter(SNR_thr-width/2 + width*np.random.rand(nSes)[self.cluster.sessions['bool']],nPC[i,self.cluster.sessions['bool'],0],s=2,c=[[0.8,0.8,1]])
+
+        ax.plot(SNR_arr,nROI[:,self.cluster.sessions['bool'],0].mean(1),'k^',markersize=4,markeredgewidth=0.5,label='neurons')#,label='neurons ($p_m\geq0.05$)')
+        # ax.plot(SNR_arr,nROI[:,cluster.sessions['bool'],1].mean(1),'k^',markersize=4,markeredgewidth=0.5,label='neurons')# ($p_m\geq0.95$)')
+        ax.plot(SNR_arr,nPC[:,self.cluster.sessions['bool'],0].mean(1),'^',color='tab:blue',markersize=4,markeredgewidth=0.5,label='PCs')
+        # ax.plot(SNR_arr,nPC[:,cluster.sessions['bool'],1].mean(1),'^',color='tab:blue',markersize=4,markeredgewidth=0.5,label='PCs')
+
+        ax.set_ylim([0,2700])
+        ax.set_xlabel('$\Theta_{SNR}$')
+        ax.set_ylabel('# neurons')
+        ax.spines['top'].set_visible(False)
+
+        ax2 = ax.twinx()
+        # ax2.plot(SNR_arr,nPC[...,0].mean(1)/nROI[...,0].mean(1),'k:')
+        ax2.plot(SNR_arr,(nPC[:,self.cluster.sessions['bool'],0]/nROI[:,self.cluster.sessions['bool'],0]).mean(1),'-',color='tab:blue')
+        ax2.plot([3,3],[0,1],'k--')
+        ax2.set_ylim([0,0.54])
+        # ax2.set_ylabel('PC fraction')
+        ax2.set_yticklabels([])
+        ax2.spines['top'].set_visible(False)
+        ax.legend(fontsize=10,bbox_to_anchor=[0.3,1.15],loc='upper left')
         # plt.tight_layout()
         # plt.show(block=False)
 
-        #ext = 'png'
-        #path = pathcat([self.pathMouse,'complete_set_evaluation.%s'%ext])
-        #plt.savefig(path,format=ext,dpi=300)
+        # if sv:
+        # pl_dat.save_fig('neuronNumbers_SNR')
 
-        ax_A = plt.axes([0.05,0.375,0.125,0.2])
-        add_number(fig,ax_A,order=3,offset=[-25,25])
-        ax_Ca = plt.axes([0.2,0.375,0.275,0.2])
+        ### get r_val dependence of detected neurons
+        # idx_pm = ((cluster.stats['match_score'][...,0]-cluster.stats['match_score'][...,1])>0.05) | (cluster.stats['match_score'][...,0]>0.95)
+        # idx_other = (cluster.stats['SNR'] > 2) & idx_pm
+        # idx_pm = ((cluster.stats['match_score'][...,0]-cluster.stats['match_score'][...,1])>0.5) | (cluster.stats['match_score'][...,0]>0.95)
+        # idx_other_certain = (cluster.stats['SNR'] > 2) & idx_pm
 
-        idx_active = np.where((self.analysis['C_corr']>0.8) & idx)
-        i = np.random.randint(len(idx_silent[0]))
-        c = idx_active[0][i]
-        s = idx_active[1][i]
-        s,c,n = (7,0,0)
-        # ld_dat = pickleData([],self.pathMatching,'load')
-        # assignments = ld_dat['assignments']
-        n = int(assignments[c,s])
-        #plt.draw()
-        print(s,c,n)    ## (73,1441,2406)
+        # idx_other = (cluster.stats['SNR'] > 2) & (cluster.stats['match_score'][...,0]>0.5)
+        # idx_other_certain = (cluster.stats['SNR'] > 2) & (cluster.stats['match_score'][...,0]>0.95)
+        SNR_thr = 3
+        r_arr = np.linspace(-0.4,1,8)
+        nROI = np.zeros(r_arr.shape + (nSes,2))
+        nPC = np.zeros(r_arr.shape + (nSes,2))
+        # plt.figure(figsize=(4,2.5))
+        width = 0.08
+        ax = plt.axes([0.375,0.2,0.25,0.65])
+        for i,r_thr in enumerate(r_arr):
+            for s in range(nSes):
+                idx_active = (self.eval_data[s]['SNR'] > SNR_thr) & (self.eval_data[s]['r_values'] > r_thr) & (self.eval_data[s]['CNN'] > CNN_thr)
+                nROI[i,s,0] = (idx_active).sum()
 
-        pathSession = os.path.join(self.pathMouse,'Session%02d'%(s+1))
-        pathData = os.path.join(pathSession,'results_redetect.mat')
-        ld = load_data(pathData)
-        # ld = loadmat(pathData,variable_names=['Cin','C','Ain','A'],squeeze_me=True)
+                morphed_A0_thr = A0_thr-PC['reliability'][s]/2
+                idx_fields = (PC['A_0'][s]>morphed_A0_thr) & \
+                          (PC['A'][s]>A_thr) & \
+                          (PC['p_mass'][s]>pmass_thr) & \
+                          (PC['Bayes_factor'][s]>Bayes_thr) & \
+                          (PC['reliability'][s]>rel_thr)
 
-        dims=(512,512)
-        ax_A.imshow(ld['A'].sum(1).reshape(dims))
+                nPC[i,s,0] = (idx_active & np.any(idx_fields,1)).sum()
 
-        Cin = ld['Cin']/ld['Cin'].max(1)[:,np.newaxis]
-        C = ld['C']/ld['C'].max(1)[:,np.newaxis]
+            # nROI[i,:,0] = ((cluster.stats['r_values']>r_thr) & idx_other).sum(0)
+            # nROI[i,:,1] = ((cluster.stats['r_values']>r_thr) & idx_other_certain).sum(0)
 
-        cm = com(ld['A'],dims[0],dims[1])
+            # nPC[i,:,0] = ((cluster.stats['r_values']>r_thr) & idx_other & cluster.status[...,2]).sum(0)
+            # nPC[i,:,1] = ((cluster.stats['r_values']>r_thr) & idx_other_certain & cluster.status[...,2]).sum(0)
+            ax.scatter(r_thr-width/2 + width*np.random.rand(nSes)[self.cluster.sessions['bool']],nROI[i,self.cluster.sessions['bool'],0],s=2,c=[[0.8,0.8,0.8]])
+            ax.scatter(r_thr-width/2 + width*np.random.rand(nSes)[self.cluster.sessions['bool']],nPC[i,self.cluster.sessions['bool'],0],s=2,c=[[0.8,0.8,1]])
 
-        # calculate CoMs and distance
-        D_ROIs = scipy.spatial.distance.cdist(cm,cm)
-        n_close = np.where(D_ROIs[n,:]<10)[0]
-        print(n_close)
-        A_norm = np.linalg.norm(ld['A'].toarray(),axis=0)
+        ax.plot(r_arr,nROI[:,self.cluster.sessions['bool'],0].mean(1),'k^',markersize=4,markeredgewidth=0.5,label='neurons')
+        # ax.plot(r_arr,nROI[:,cluster.sessions['bool'],1].mean(1),'k^',markersize=4,markeredgewidth=0.5)
+        ax.plot(r_arr,nPC[:,self.cluster.sessions['bool'],0].mean(1),'^',color='tab:blue',markersize=4,markeredgewidth=0.5,label='PCs')
+        # ax.plot(r_arr,nPC[:,cluster.sessions['bool'],1].mean(1),'^',color='tab:blue',markersize=4,markeredgewidth=0.5)
 
-        # plot all closeby ones, highlight overlapping ones
-        t_arr = np.linspace(0,8989/15,8989)
-        ax_Ca.plot(t_arr,Cin[n,:],'k',linewidth=0.5)
-        ax_Ca.plot(t_arr,C[n,:]+1,'tab:green',linewidth=0.5)
-        #ax_Ca.text(6000/15,1.5,'corr: %5.3g, SNR: %5.3g'%(self.analysis['fp_corr'][c,s],self.analysis['eval']['SNR'][c,s]))
+        ax.set_ylim([0,2700])
+        ax.set_xlabel('$\Theta_{r}$')
+        # ax.set_ylabel('# neurons')
+        ax.set_yticklabels([])
+        # ax.legend(fontsize=10)
+        ax.spines['top'].set_visible(False)
 
-        ax_A.contour((ld['Ain'][:,n]/ld['Ain'][:,n].max()).reshape(dims).toarray(), levels=[0.3], colors='w', linewidths=2)
-        ax_A.contour((ld['A'][:,n]/ld['A'][:,n].max()).reshape(dims).toarray(), levels=[0.3], colors='tab:green', linewidths=2)
+        ax2 = ax.twinx()
+        # ax2.plot(r_arr,nPC[...,0].mean(1)/nROI[...,0].mean(1),'k:')
+        ax2.plot(r_arr,(nPC[:,self.cluster.sessions['bool'],0]/nROI[:,self.cluster.sessions['bool'],0]).mean(1),'-',color='tab:blue')
+        ax2.plot([0,0],[0,1],'k--')
+        ax2.set_ylim([0,0.54])
+        ax2.set_yticklabels([])
+        # ax2.set_ylabel('PC fraction')
+        ax2.spines['top'].set_visible(False)
+        plt.tight_layout()
+        plt.show(block=False)
+        # return
+        ### get pm dependence of detected neurons
+        idx_other = (self.cluster.stats['SNR'] > 3) & (cluster.stats['r_values']>0)
+        # idx_other_certain = (cluster.stats['SNR'] > 2) & (cluster.stats['match_score'][...,0]>0.95)
+        pm_arr = np.linspace(0,1,11)
+        nROI = np.zeros(pm_arr.shape + (nSes,2))
+        nPC = np.zeros(pm_arr.shape + (nSes,2))
+        # plt.figure(figsize=(4,2.5))
+        width = 0.04
+        ax = plt.axes([0.65,0.2,0.25,0.65])
+        for i,pm_thr in enumerate(pm_arr):
+            # idx_pm = cluster.stats['match_score'][...,0]>pm_thr
+            idx_pm = ((self.cluster.stats['match_score'][...,0]-self.cluster.stats['match_score'][...,1])>pm_thr) | (self.cluster.stats['match_score'][...,0]>0.95)
+            # idx_pm = (cluster.stats['match_score'][...,0]-cluster.stats['match_score'][...,1])>pm_thr
+            nROI[i,:,0] = (idx_pm & idx_other).sum(0)
+            # nROI[i,:,1] = ((cluster.stats['r_values']>r_thr) & idx_other_certain).sum(0)
 
-        i = 0
-        for nn in n_close:
-          A_corr = ld['A'][:,n].multiply(ld['A'][:,nn]).sum()/(A_norm[n]*A_norm[nn])
-          if (A_corr>0.3) and not (n==nn):
-            ax_A.contour((ld['A'][:,nn]/ld['A'][:,nn].max()).reshape(dims).toarray(), levels=[0.3], colors='tab:orange', linewidths=1.5)
+            nPC[i,:,0] = (idx_pm & idx_other & self.cluster.status[...,2]).sum(0)
+            # nPC[i,:,1] = ((cluster.stats['r_values']>r_thr) & idx_other_certain & cluster.status[...,2]).sum(0)
+            ax.scatter(pm_thr-width/2 + width*np.random.rand(nSes)[self.cluster.sessions['bool']],nROI[i,self.cluster.sessions['bool'],0],s=2,c=[[0.8,0.8,0.8]])
+            ax.scatter(pm_thr-width/2 + width*np.random.rand(nSes)[self.cluster.sessions['bool']],nPC[i,self.cluster.sessions['bool'],0],s=2,c=[[0.8,0.8,1]])
 
-            # cc = np.where(assignments[:,s] == nn)[0][0]
-            #print(c)
-            #print(self.analysis['corr'][cc,s])
-            #ax_Ca.text(6000,i+2.5,'corr: %5.3g, SNR: %5.3g'%(A_corr,self.analysis['eval']['SNR'][cc,s]))
-            ax_Ca.plot(t_arr,C[nn,:]+i+2,'tab:orange',linewidth=0.5)
-            i+=1
+        ax.plot(pm_arr,nROI[:,self.cluster.sessions['bool'],0].mean(1),'k^',markersize=4,markeredgewidth=0.5,label='neurons')
+        # ax.plot(pm_arr,nROI[:,cluster.sessions['bool'],1].mean(1),'k^',markersize=4,markeredgewidth=0.5)
+        ax.plot(pm_arr,nPC[:,self.cluster.sessions['bool'],0].mean(1),'^',color='tab:blue',markersize=4,markeredgewidth=0.5,label='PCs')
+        # ax.plot(pm_arr,nPC[:,cluster.sessions['bool'],1].mean(1),'r^',markersize=4,markeredgewidth=0.5)
 
-        ax_A.set_xlim([cm[n,0]-15,cm[n,0]+15])
-        ax_A.set_ylim([cm[n,1]-15,cm[n,1]+15])
-        ax_A.set_xticks([])
-        ax_A.set_yticks([])
-        ax_A.axis('off')
-        #ax_A.text(cm[n,0],cm[n,1]-14,'$c_{fp}=%4.2g$\n$c_{Ca}=%4.2g$'%(self.analysis['fp_corr'][c,s],self.analysis['C_corr'][c,s]),color='w',fontsize=12)
-        ax_Ca.spines['right'].set_visible(False)
-        ax_Ca.spines['top'].set_visible(False)
-        ax_Ca.set_xticks([])
-        ax_Ca.set_yticks([])
-        #ax_Ca.set_xlabel('time [s]')
+        ax.set_ylim([0,2700])
+        ax.set_xlabel('$\Theta_{p_m}$')
+        # ax.set_ylabel('# neurons')
+        ax.set_yticklabels([])
+        # ax.legend(fontsize=10)
+        ax.spines['top'].set_visible(False)
 
-        #plt.tight_layout()
-        #plt.show(block=False)
-        #ext = 'png'
-        #path = pathcat([self.pathMouse,'complete_set_evaluation_example_good.%s'%ext])
-        #plt.savefig(path,format=ext,dpi=300)
-
-        ax_A = plt.axes([0.05,0.125,0.125,0.2])
-        add_number(fig,ax_A,order=4,offset=[-25,25])
-        ax_Ca = plt.axes([0.2,0.125,0.275,0.2])
-
-        idx_silent = np.where((self.analysis['C_corr']<0.5) & (self.analysis['fp_corr']<0.8) & idx)
-        i = np.random.randint(len(idx_silent[0]))
-        c = idx_silent[0][i]
-        s = idx_silent[1][i]
-        s,c,n = (5,2099,1853)
-        # ld_dat = pickleData([],self.pathMatching,'load')
-        # assignments = ld_dat['assignments']
-        n = int(assignments[c,s])
-        #plt.draw()
-        print(s,c,n)    ## (73,1441,2406)
-
-        pathSession = os.path.join(self.pathMouse,'Session%02d'%(s+1))
-        pathData = os.path.join(pathSession,'results_redetect.mat')
-        ld = load_data(pathData)
-        # ld = loadmat(pathData,variable_names=['Cin','C','Ain','A'],squeeze_me=True)
-
-        #plt.figure(figsize=(6,2.5))
-        #dims=(512,512)
-        #ax_A = plt.axes([0.1,0.2,0.35,0.75])
-        ax_A.imshow(ld['A'].sum(1).reshape(dims))
-
-        Cin = ld['Cin']/ld['Cin'].max(1)[:,np.newaxis]
-        C = ld['C']/ld['C'].max(1)[:,np.newaxis]
-
-        cm = com(ld['A'],dims[0],dims[1])
-
-        # calculate CoMs and distance
-        D_ROIs = scipy.spatial.distance.cdist(cm,cm)
-        n_close = np.where(D_ROIs[n,:]<10)[0]
-        A_norm = np.linalg.norm(ld['A'].toarray(),axis=0)
-
-        # plot all closeby ones, highlight overlapping ones
-        t_arr = np.linspace(0,8989/15,8989)
-        ax_Ca.plot(t_arr,Cin[n,:],'k',linewidth=0.5)
-        ax_Ca.plot(t_arr,C[n,:]+1,'tab:green',linewidth=0.5)
-        #ax_Ca.text(6000/15,1.5,'corr: %5.3g, SNR: %5.3g'%(self.analysis['fp_corr'][c,s],self.analysis['eval']['SNR'][c,s]))
-
-        ax_A.contour((ld['Ain'][:,n]/ld['Ain'][:,n].max()).reshape(dims).toarray(), levels=[0.3], colors='w', linewidths=2)
-        ax_A.contour((ld['A'][:,n]/ld['A'][:,n].max()).reshape(dims).toarray(), levels=[0.3], colors='tab:green', linewidths=2)
-
-        i = 0
-        for nn in n_close:
-          A_corr = ld['A'][:,n].multiply(ld['A'][:,nn]).sum()/(A_norm[n]*A_norm[nn])
-          if (A_corr>0.3) and not (n==nn):
-            ax_A.contour((ld['A'][:,nn]/ld['A'][:,nn].max()).reshape(dims).toarray(), levels=[0.3], colors='tab:orange', linewidths=1.5)
-
-            # cc = np.where(assignments[:,s] == nn)[0][0]
-            #print(c)
-            #print(self.analysis['corr'][cc,s])
-            #ax_Ca.text(6000,i+2.5,'corr: %5.3g, SNR: %5.3g'%(A_corr,self.analysis['eval']['SNR'][cc,s]))
-            ax_Ca.plot(t_arr,C[nn,:]+i+2,'tab:orange',linewidth=0.5)
-            i+=1
-
-        ax_A.set_xlim([cm[n,0]-15,cm[n,0]+15])
-        ax_A.set_ylim([cm[n,1]-15,cm[n,1]+15])
-        ax_A.set_xticks([])
-        ax_A.set_yticks([])
-        ax_A.axis('off')
-        #ax_A.text(cm[n,0],cm[n,1]-14,'$c_{fp}=%4.2g$\n$c_{Ca}=%4.2g$'%(self.analysis['fp_corr'][c,s],self.analysis['C_corr'][c,s]),color='w',fontsize=12)
-        ax_Ca.spines['right'].set_visible(False)
-        ax_Ca.spines['top'].set_visible(False)
-        ax_Ca.set_yticks([])
-        ax_Ca.set_xlabel('time [s]')
+        ax2 = ax.twinx()
+        ax2.plot(pm_arr,(nPC[:,self.cluster.sessions['bool'],0]/nROI[:,self.cluster.sessions['bool'],0]).mean(1),'-',color='tab:blue')
+        # ax2.plot(pm_arr,nPC[...,1].mean(1)/nROI[...,1].mean(1),'k-')
+        ax2.plot([0.5,0.5],[0,1],'k--')
+        ax2.set_ylim([0,0.54])
+        ax2.set_ylabel('PC fraction')
+        ax2.spines['top'].set_visible(False)
+        plt.tight_layout()
+        plt.show(block=False)
 
         if sv:
-            ext = 'png'
-            path = pathcat([self.pathMouse,'Figures/complete_set_evaluation1.%s'%ext])
-            plt.savefig(path,format=ext,dpi=300)
+            pl_dat.save_fig('neuronNumbers_test')
 
-    if True:
-        plt.figure(figsize=(3.5,4),dpi=300)
-        dataSet = 'redetect'
-        pathLoad = pathcat([self.pathMouse,'clusterStats_%s.pkl'%dataSet])
-        ld = pickleData([],pathLoad,'load')
-        idxes = (ld['SNR']>SNR_thr) & (ld['r_values']>rval_thr) & (ld['CNN']>CNN_thr) & (ld['firingrate']>0)
-        idx_prev = self.analysis['idxes']['previous']
+        print('whats with MI of place cells, only?')
+        ### get SNR dependence of detected neurons
+        idx_other = (self.cluster.stats['r_values'] > 0) & (self.cluster.stats['match_score'][...,0]>0.05)
+        idx_other_certain = (self.cluster.stats['r_values'] > 0) & (self.cluster.stats['match_score'][...,0]>0.95)
+        SNR_arr = np.linspace(2,10,5)
+        MI = np.zeros(SNR_arr.shape + (2,))
+        # nPC = np.zeros(SNR_arr.shape + (nSes,2))
+        plt.figure(figsize=(4,2.5))
+        width = 0.6
+        ax = plt.axes([0.2,0.2,0.65,0.65])
+        for i,SNR_thr in enumerate(SNR_arr):
+            idx = (self.cluster.stats['SNR'] >= (SNR_thr-0.5)) & (self.cluster.stats['SNR'] < (SNR_thr+0.5)) & idx_other
+            MI[i,0] = self.cluster.stats['MI_value'][idx].mean(0)
+            idx = (self.cluster.stats['SNR'] >= (SNR_thr-0.5)) & (self.cluster.stats['SNR'] < (SNR_thr+0.5)) & idx_other_certain
+            MI[i,1] = self.cluster.stats['MI_value'][idx].mean(0)
 
-        colors = [(1,0,0,0),mcolors.to_rgba('tab:orange')]
-        RedAlpha = mcolors.LinearSegmentedColormap.from_list('RedAlpha',colors,N=2)
-        colors = [(0,0,0,0),(0,0,0,1)]
-        BlackAlpha = mcolors.LinearSegmentedColormap.from_list('BlackAlpha',colors,N=2)
-        colors = [(0,0,0,0),mcolors.to_rgba('tab:green')]
-        GreenAlpha = mcolors.LinearSegmentedColormap.from_list('GreenAlpha',colors,N=2)
+            ax.boxplot(self.cluster.stats['MI_value'][idx],positions=[SNR_thr],widths=width,whis=[5,95],notch=True,bootstrap=100,flierprops=dict(marker='.',markeredgecolor='None',markerfacecolor=[0.5,0.5,0.5],markersize=2))
 
-        nC,nS = assignments.shape
-        ax_oc = plt.axes([0.2,0.1,0.45,0.55])
-        ax_oc2 = ax_oc.twinx()
-        # ax_oc.imshow((~np.isnan(assignments))&idxes,cmap=BlackAlpha,aspect='auto')
-        # ax_oc2.imshow((~np.isnan(assignments))&(~idxes),cmap=RedAlpha,aspect='auto')
-        ax_oc.imshow((idx_pm&idxes)[self.cluster.stats['cluster_bool'],:],cmap=BlackAlpha,aspect='auto')
-        ax_oc.imshow((idx_pm&idxes&idx_prev)[self.cluster.stats['cluster_bool'],:],cmap=GreenAlpha,aspect='auto')
-        ax_oc2.imshow((idx_pm&(~idxes))[self.cluster.stats['cluster_bool'],:],cmap=RedAlpha,aspect='auto')
-        #ax_oc.imshow(self.results['p_matched'],cmap='binary',aspect='auto')
-        ax_oc.set_xlabel('session')
-        ax_oc.set_ylabel('neuron ID')
+        ax.plot(SNR_arr,MI[...,1],'k^',markersize=5,label='neurons')
 
-
-        ax = plt.axes([0.65,0.1,0.175,0.55])
-        nC_clean = self.cluster.stats['cluster_bool'].sum()
-        # ax.plot(((~np.isnan(assignments)) & idxes).sum(1),np.linspace(0,nC,nC),'ko',markersize=0.5)
-        ax.plot((idx_pm & idxes)[self.cluster.stats['cluster_bool'],:].sum(1),np.linspace(1,nC_clean,nC_clean),'ko',markersize=1,mew=0)
-        ax.invert_yaxis()
-        ax.set_ylim([nC_clean,0])
-        ax.set_yticks([])
-        ax.set_xlabel('occ.')
-        ax.spines['right'].set_visible(False)
-
-        ax = plt.axes([0.65,0.65,0.175,0.3])
-        # ax.hist((~np.isnan(assignments)).sum(1),np.linspace(0,nS,nS),color='r',cumulative=True,density=True,histtype='step')
-        # ax.hist((ld_dat['p_matched']>pm_thr).sum(1),np.linspace(0,nS,nS),color='r',cumulative=True,density=True,histtype='step')
-        ax.hist((idx_pm&idxes&idx_prev)[self.cluster.stats['cluster_bool'],:].sum(1),np.linspace(0,nS,nS),color='tab:green',cumulative=True,density=True,histtype='step')
-        # ax.hist(((~np.isnan(assignments)) & idxes).sum(1),np.linspace(0,nS,nS),color='k',alpha=0.5,cumulative=True,density=True,histtype='step')
-        ax.hist((idx_pm & idxes)[self.cluster.stats['cluster_bool'],:].sum(1),np.linspace(0,nS,nS),color='k',cumulative=True,density=True,histtype='step')
-        ax.set_xticks([])
-        #ax.set_yticks([])
-        ax.yaxis.tick_right()
-        ax.yaxis.set_label_position("right")
-        ax.set_ylim([0,1])
-        ax.set_yticks(np.linspace(0,1,3))
-        ax.set_ylabel('cdf')
-        ax.spines['top'].set_visible(False)
-        #ax.spines['right'].set_visible(False)
-
-        ax = plt.axes([0.2,0.65,0.45,0.3])
-        # ax.plot(np.linspace(0,nS,nS),(~np.isnan(assignments_OnACID)).sum(0),'ro',markersize=1,markerfacecolor='None')
-        # ax.plot(np.linspace(0,nS,nS),(~np.isnan(assignments)).sum(0),'ro',markersize=1)
-        # ax.plot(np.linspace(0,nS,nS),((~np.isnan(assignments)) & idxes).sum(0),'ko',markersize=1)
-        nROI_prev = (idx_pm&idxes&idx_prev)[self.cluster.stats['cluster_bool'],:].sum(0)
-        nROI_total = (idx_pm&idxes)[self.cluster.stats['cluster_bool'],:].sum(0)
-        frac_ROI = nROI_total/nROI_prev-1
-        print(np.nanmean(frac_ROI[frac_ROI<1.5]))
-        print(np.nanstd(frac_ROI[frac_ROI<1.5]))
-        # print()
-
-        ax.plot(np.linspace(0,nS,nS),(idx_pm&idxes&idx_prev)[self.cluster.stats['cluster_bool'],:].sum(0),'^',color='tab:green',markersize=2,label='initial')
-        # ax.plot(np.linspace(0,nS,nS),idx_pm[self.cluster.stats['cluster_bool'],:].sum(0),'^',color='tab:orange',markersize=2,label='inferred')
-        ax.plot(np.linspace(0,nS,nS),(idx_pm & idxes)[self.cluster.stats['cluster_bool'],:].sum(0),'k^',markersize=2,label='total')
-        ax.set_xlim([0,nS])
-        ax.set_ylim([0,1300])
-        ax.set_xticks([])
-        ax.set_ylabel('# neurons')
-        ax.spines['top'].set_visible(False)
-        ax.legend(fontsize=8,bbox_to_anchor=[0.0,0.0],loc='lower left')
-
-
+        ax.set_ylim([0,0.6])
+        ax.set_xlabel('$\Theta_{SNR}$')
+        ax.set_ylabel('MI')
+        ax.legend(fontsize=10)
 
         plt.tight_layout()
         plt.show(block=False)
-        if sv:
-            ext = 'png'
-            path = pathcat([self.pathMouse,'Figures/complete_set_evaluation.%s'%ext])
-            plt.savefig(path,format=ext,dpi=300)
 
+        # if sv:
+        # pl_dat.save_fig('MI_SNR')
 
-  def plot_threshold(self):
-      print('### plot test of thresholds for neuron number ###')
+    def plot_detection(self,ax,A1,A2,bounds=None,lw=0.7,ls='solid'):
+        dims = (512,512)
 
-      nSes = self.cluster.meta['nSes']
-      f_max = 5
-      # SNR_thr = 1
-      rval_thr = 0
-      CNN_thr = 0.6
+        if bounds is None:
+            bounds = [[0,dims[0]],[0,dims[1]]]
 
-      A0_thr = 1
-      A_thr = 3
-      pmass_thr = 0.5
-      Bayes_thr = 10
-      rel_thr = 0.1
+        A1_norm = normalize_sparse_array(A1)
+        A2_norm = normalize_sparse_array(A2)
 
-      # if PC is None:
-      #
-      #     active = {'SNR':        {},
-      #         'r_values':     {},
-      #         'CNN':          {}}
-      #
-      #     PC = {'Bayes_factor':   {},
-      #         'reliability':  {},
-      #         'A_0':          {},
-      #         'A':            {},
-      #         'p_mass':       {}}
-      #
-      #     for s in tqdm(range(nSes)):
-      #         PC_para = loadmat('/media/wollex/Analyze_AS1/linstop/762/Session%02d/PC_fields_para.mat'%(s+1),variable_names=['Bayes_factor','posterior_mass','parameter'],squeeze_me=True)
-      #         firingstats = loadmat('/media/wollex/Analyze_AS1/linstop/762/Session%02d/PC_fields_firingstats.mat'%(s+1),variable_names=['trial_map','map'],squeeze_me=True)
-      #         CNMF_results = loadmat('/media/wollex/Analyze_AS1/linstop/762/Session%02d/results_redetect.mat'%(s+1),variable_names=['SNR','r_values','CNN'],squeeze_me=True)
-      #
-      #         active['SNR'][s] = CNMF_results['SNR']
-      #         active['r_values'][s] = CNMF_results['r_values']
-      #         active['CNN'][s] = CNMF_results['CNN']
-      #         N = len(active['SNR'][s])
-      #
-      #         PC['Bayes_factor'][s] = PC_para['Bayes_factor'][...,0]
-      #         PC['A_0'][s] = PC_para['parameter'][:,:,0,0]
-      #         PC['A'][s] = PC_para['parameter'][:,:,1,0]
-      #         PC['p_mass'][s] = PC_para['posterior_mass']
-      #         PC['reliability'][s] = np.zeros((N,f_max))
-      #         for n in range(N):
-      #             for f in np.where(~np.isnan(PC['A'][s][n,:]))[0]:
-      #                 PC['reliability'][s][n,f],_,_ = get_reliability(firingstats['trial_map'][n,...],firingstats['map'][n,...],PC_para['parameter'][n,...],f)
+        ax.imshow(A1_norm.sum(1).reshape(dims)+A2_norm.sum(1).reshape(dims),origin='lower')
 
+        CM = com(A1,dims[0],dims[1])
+        idx_bounds = (CM[:,0] > bounds[0][0]) & (CM[:,0] < bounds[0][1]) & (CM[:,1] > bounds[1][0]) & (CM[:,1] < bounds[1][1])
+        [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.5], colors='w', linewidths=0.5) for a in A1[:,idx_bounds].T]
 
-      # return active, PC
-      ### get SNR dependence of detected neurons
-      # idx_pm = ((cluster.stats['match_score'][...,0]-cluster.stats['match_score'][...,1])>0.05) | (cluster.stats['match_score'][...,0]>0.95)
-      # idx_other = (cluster.stats['r_values'] > 0) & idx_pm
-      # idx_pm = ((cluster.stats['match_score'][...,0]-cluster.stats['match_score'][...,1])>0.5) | (cluster.stats['match_score'][...,0]>0.95)
-      # idx_other_certain = (cluster.stats['r_values'] > 0) & idx_pm
-      r_thr = 0
-      SNR_arr = np.linspace(1,10,10)
-      nROI = np.zeros(SNR_arr.shape + (nSes,2))
-      nPC = np.zeros(SNR_arr.shape + (nSes,2))
-      plt.figure(figsize=(7,2.5))
-      width = 0.4
-      ax = plt.axes([0.1,0.2,0.25,0.65])
-      for i,SNR_thr in enumerate(SNR_arr):
+        CM = com(A2,dims[0],dims[1])
+        idx_bounds = (CM[:,0] > bounds[0][0]) & (CM[:,0] < bounds[0][1]) & (CM[:,1] > bounds[1][0]) & (CM[:,1] < bounds[1][1])
+        [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.5], colors='tab:orange', linewidths=lw,linestyles=ls) for a in A2[:,idx_bounds].T]
 
-          for s in range(nSes):
-              idx_active = (self.eval_data[s]['SNR'] > SNR_thr) & (self.eval_data[s]['r_values'] > r_thr) & (self.eval_data[s]['CNN'] > CNN_thr)
-              nROI[i,s,0] = (idx_active).sum()
+        # plt.figure(figsize=(5,4))
+        # ax = plt.subplot(111)
+        # ax.imshow(self.dataOut['A'].sum(1).reshape(self.cluster.meta['dims']),origin='lower')
 
-              morphed_A0_thr = A0_thr-PC['reliability'][s]/2
-              idx_fields = (PC['A_0'][s]>morphed_A0_thr) & \
-                          (PC['A'][s]>A_thr) & \
-                          (PC['p_mass'][s]>pmass_thr) & \
-                          (PC['Bayes_factor'][s]>Bayes_thr) & \
-                          (PC['reliability'][s]>rel_thr)
+        # [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='w', linewidths=0.5) for a in self.dataOut['A'][:,self.idxes['active_good']].T]
+        # [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='r', linewidths=0.5) for a in self.dataOut['A'][:,self.idxes['silent_good']].T]
 
-              nPC[i,s,0] = (idx_active & np.any(idx_fields,1)).sum()
-              # print('active neurons / place cells in session %d: %d / %d'%(s+1,nAct,nPC))
-
-          # nROI[i,:,0] = ((cluster.stats['SNR']>SNR_thr) & idx_other).sum(0)
-          # nROI[i,:,1] = ((cluster.stats['SNR']>SNR_thr) & idx_other_certain).sum(0)
-
-          # nPC[i,:,0] = ((cluster.stats['SNR']>SNR_thr) & idx_other & cluster.status[...,2]).sum(0)
-          # nPC[i,:,1] = ((cluster.stats['SNR']>SNR_thr) & idx_other_certain & cluster.status[...,2]).sum(0)
-          ax.scatter(SNR_thr-width/2 + width*np.random.rand(nSes)[self.cluster.sessions['bool']],nROI[i,self.cluster.sessions['bool'],0],s=2,c=[[0.8,0.8,0.8]])
-          ax.scatter(SNR_thr-width/2 + width*np.random.rand(nSes)[self.cluster.sessions['bool']],nPC[i,self.cluster.sessions['bool'],0],s=2,c=[[0.8,0.8,1]])
-
-      ax.plot(SNR_arr,nROI[:,self.cluster.sessions['bool'],0].mean(1),'k^',markersize=4,markeredgewidth=0.5,label='neurons')#,label='neurons ($p_m\geq0.05$)')
-      # ax.plot(SNR_arr,nROI[:,cluster.sessions['bool'],1].mean(1),'k^',markersize=4,markeredgewidth=0.5,label='neurons')# ($p_m\geq0.95$)')
-      ax.plot(SNR_arr,nPC[:,self.cluster.sessions['bool'],0].mean(1),'^',color='tab:blue',markersize=4,markeredgewidth=0.5,label='PCs')
-      # ax.plot(SNR_arr,nPC[:,cluster.sessions['bool'],1].mean(1),'^',color='tab:blue',markersize=4,markeredgewidth=0.5,label='PCs')
-
-      ax.set_ylim([0,2700])
-      ax.set_xlabel('$\Theta_{SNR}$')
-      ax.set_ylabel('# neurons')
-      ax.spines['top'].set_visible(False)
-
-      ax2 = ax.twinx()
-      # ax2.plot(SNR_arr,nPC[...,0].mean(1)/nROI[...,0].mean(1),'k:')
-      ax2.plot(SNR_arr,(nPC[:,self.cluster.sessions['bool'],0]/nROI[:,self.cluster.sessions['bool'],0]).mean(1),'-',color='tab:blue')
-      ax2.plot([3,3],[0,1],'k--')
-      ax2.set_ylim([0,0.54])
-      # ax2.set_ylabel('PC fraction')
-      ax2.set_yticklabels([])
-      ax2.spines['top'].set_visible(False)
-      ax.legend(fontsize=10,bbox_to_anchor=[0.3,1.15],loc='upper left')
-      # plt.tight_layout()
-      # plt.show(block=False)
-
-      # if sv:
-          # pl_dat.save_fig('neuronNumbers_SNR')
-
-
-      ### get r_val dependence of detected neurons
-      # idx_pm = ((cluster.stats['match_score'][...,0]-cluster.stats['match_score'][...,1])>0.05) | (cluster.stats['match_score'][...,0]>0.95)
-      # idx_other = (cluster.stats['SNR'] > 2) & idx_pm
-      # idx_pm = ((cluster.stats['match_score'][...,0]-cluster.stats['match_score'][...,1])>0.5) | (cluster.stats['match_score'][...,0]>0.95)
-      # idx_other_certain = (cluster.stats['SNR'] > 2) & idx_pm
-
-      # idx_other = (cluster.stats['SNR'] > 2) & (cluster.stats['match_score'][...,0]>0.5)
-      # idx_other_certain = (cluster.stats['SNR'] > 2) & (cluster.stats['match_score'][...,0]>0.95)
-      SNR_thr = 3
-      r_arr = np.linspace(-0.4,1,8)
-      nROI = np.zeros(r_arr.shape + (nSes,2))
-      nPC = np.zeros(r_arr.shape + (nSes,2))
-      # plt.figure(figsize=(4,2.5))
-      width = 0.08
-      ax = plt.axes([0.375,0.2,0.25,0.65])
-      for i,r_thr in enumerate(r_arr):
-          for s in range(nSes):
-              idx_active = (self.eval_data[s]['SNR'] > SNR_thr) & (self.eval_data[s]['r_values'] > r_thr) & (self.eval_data[s]['CNN'] > CNN_thr)
-              nROI[i,s,0] = (idx_active).sum()
-
-              morphed_A0_thr = A0_thr-PC['reliability'][s]/2
-              idx_fields = (PC['A_0'][s]>morphed_A0_thr) & \
-                          (PC['A'][s]>A_thr) & \
-                          (PC['p_mass'][s]>pmass_thr) & \
-                          (PC['Bayes_factor'][s]>Bayes_thr) & \
-                          (PC['reliability'][s]>rel_thr)
-
-              nPC[i,s,0] = (idx_active & np.any(idx_fields,1)).sum()
-
-          # nROI[i,:,0] = ((cluster.stats['r_values']>r_thr) & idx_other).sum(0)
-          # nROI[i,:,1] = ((cluster.stats['r_values']>r_thr) & idx_other_certain).sum(0)
-
-          # nPC[i,:,0] = ((cluster.stats['r_values']>r_thr) & idx_other & cluster.status[...,2]).sum(0)
-          # nPC[i,:,1] = ((cluster.stats['r_values']>r_thr) & idx_other_certain & cluster.status[...,2]).sum(0)
-          ax.scatter(r_thr-width/2 + width*np.random.rand(nSes)[self.cluster.sessions['bool']],nROI[i,self.cluster.sessions['bool'],0],s=2,c=[[0.8,0.8,0.8]])
-          ax.scatter(r_thr-width/2 + width*np.random.rand(nSes)[self.cluster.sessions['bool']],nPC[i,self.cluster.sessions['bool'],0],s=2,c=[[0.8,0.8,1]])
-
-      ax.plot(r_arr,nROI[:,self.cluster.sessions['bool'],0].mean(1),'k^',markersize=4,markeredgewidth=0.5,label='neurons')
-      # ax.plot(r_arr,nROI[:,cluster.sessions['bool'],1].mean(1),'k^',markersize=4,markeredgewidth=0.5)
-      ax.plot(r_arr,nPC[:,self.cluster.sessions['bool'],0].mean(1),'^',color='tab:blue',markersize=4,markeredgewidth=0.5,label='PCs')
-      # ax.plot(r_arr,nPC[:,cluster.sessions['bool'],1].mean(1),'^',color='tab:blue',markersize=4,markeredgewidth=0.5)
-
-      ax.set_ylim([0,2700])
-      ax.set_xlabel('$\Theta_{r}$')
-      # ax.set_ylabel('# neurons')
-      ax.set_yticklabels([])
-      # ax.legend(fontsize=10)
-      ax.spines['top'].set_visible(False)
-
-      ax2 = ax.twinx()
-      # ax2.plot(r_arr,nPC[...,0].mean(1)/nROI[...,0].mean(1),'k:')
-      ax2.plot(r_arr,(nPC[:,self.cluster.sessions['bool'],0]/nROI[:,self.cluster.sessions['bool'],0]).mean(1),'-',color='tab:blue')
-      ax2.plot([0,0],[0,1],'k--')
-      ax2.set_ylim([0,0.54])
-      ax2.set_yticklabels([])
-      # ax2.set_ylabel('PC fraction')
-      ax2.spines['top'].set_visible(False)
-      plt.tight_layout()
-      plt.show(block=False)
-      # return
-      ### get pm dependence of detected neurons
-      idx_other = (self.cluster.stats['SNR'] > 3) & (cluster.stats['r_values']>0)
-      # idx_other_certain = (cluster.stats['SNR'] > 2) & (cluster.stats['match_score'][...,0]>0.95)
-      pm_arr = np.linspace(0,1,11)
-      nROI = np.zeros(pm_arr.shape + (nSes,2))
-      nPC = np.zeros(pm_arr.shape + (nSes,2))
-      # plt.figure(figsize=(4,2.5))
-      width = 0.04
-      ax = plt.axes([0.65,0.2,0.25,0.65])
-      for i,pm_thr in enumerate(pm_arr):
-          # idx_pm = cluster.stats['match_score'][...,0]>pm_thr
-          idx_pm = ((self.cluster.stats['match_score'][...,0]-self.cluster.stats['match_score'][...,1])>pm_thr) | (self.cluster.stats['match_score'][...,0]>0.95)
-          # idx_pm = (cluster.stats['match_score'][...,0]-cluster.stats['match_score'][...,1])>pm_thr
-          nROI[i,:,0] = (idx_pm & idx_other).sum(0)
-          # nROI[i,:,1] = ((cluster.stats['r_values']>r_thr) & idx_other_certain).sum(0)
-
-          nPC[i,:,0] = (idx_pm & idx_other & self.cluster.status[...,2]).sum(0)
-          # nPC[i,:,1] = ((cluster.stats['r_values']>r_thr) & idx_other_certain & cluster.status[...,2]).sum(0)
-          ax.scatter(pm_thr-width/2 + width*np.random.rand(nSes)[self.cluster.sessions['bool']],nROI[i,self.cluster.sessions['bool'],0],s=2,c=[[0.8,0.8,0.8]])
-          ax.scatter(pm_thr-width/2 + width*np.random.rand(nSes)[self.cluster.sessions['bool']],nPC[i,self.cluster.sessions['bool'],0],s=2,c=[[0.8,0.8,1]])
-
-      ax.plot(pm_arr,nROI[:,self.cluster.sessions['bool'],0].mean(1),'k^',markersize=4,markeredgewidth=0.5,label='neurons')
-      # ax.plot(pm_arr,nROI[:,cluster.sessions['bool'],1].mean(1),'k^',markersize=4,markeredgewidth=0.5)
-      ax.plot(pm_arr,nPC[:,self.cluster.sessions['bool'],0].mean(1),'^',color='tab:blue',markersize=4,markeredgewidth=0.5,label='PCs')
-      # ax.plot(pm_arr,nPC[:,cluster.sessions['bool'],1].mean(1),'r^',markersize=4,markeredgewidth=0.5)
-
-      ax.set_ylim([0,2700])
-      ax.set_xlabel('$\Theta_{p_m}$')
-      # ax.set_ylabel('# neurons')
-      ax.set_yticklabels([])
-      # ax.legend(fontsize=10)
-      ax.spines['top'].set_visible(False)
-
-      ax2 = ax.twinx()
-      ax2.plot(pm_arr,(nPC[:,self.cluster.sessions['bool'],0]/nROI[:,self.cluster.sessions['bool'],0]).mean(1),'-',color='tab:blue')
-      # ax2.plot(pm_arr,nPC[...,1].mean(1)/nROI[...,1].mean(1),'k-')
-      ax2.plot([0.5,0.5],[0,1],'k--')
-      ax2.set_ylim([0,0.54])
-      ax2.set_ylabel('PC fraction')
-      ax2.spines['top'].set_visible(False)
-      plt.tight_layout()
-      plt.show(block=False)
-
-      if sv:
-          pl_dat.save_fig('neuronNumbers_test')
-
-
-      print('whats with MI of place cells, only?')
-      ### get SNR dependence of detected neurons
-      idx_other = (self.cluster.stats['r_values'] > 0) & (self.cluster.stats['match_score'][...,0]>0.05)
-      idx_other_certain = (self.cluster.stats['r_values'] > 0) & (self.cluster.stats['match_score'][...,0]>0.95)
-      SNR_arr = np.linspace(2,10,5)
-      MI = np.zeros(SNR_arr.shape + (2,))
-      # nPC = np.zeros(SNR_arr.shape + (nSes,2))
-      plt.figure(figsize=(4,2.5))
-      width = 0.6
-      ax = plt.axes([0.2,0.2,0.65,0.65])
-      for i,SNR_thr in enumerate(SNR_arr):
-          idx = (self.cluster.stats['SNR'] >= (SNR_thr-0.5)) & (self.cluster.stats['SNR'] < (SNR_thr+0.5)) & idx_other
-          MI[i,0] = self.cluster.stats['MI_value'][idx].mean(0)
-          idx = (self.cluster.stats['SNR'] >= (SNR_thr-0.5)) & (self.cluster.stats['SNR'] < (SNR_thr+0.5)) & idx_other_certain
-          MI[i,1] = self.cluster.stats['MI_value'][idx].mean(0)
-
-          ax.boxplot(self.cluster.stats['MI_value'][idx],positions=[SNR_thr],widths=width,whis=[5,95],notch=True,bootstrap=100,flierprops=dict(marker='.',markeredgecolor='None',markerfacecolor=[0.5,0.5,0.5],markersize=2))
-
-      ax.plot(SNR_arr,MI[...,1],'k^',markersize=5,label='neurons')
-
-      ax.set_ylim([0,0.6])
-      ax.set_xlabel('$\Theta_{SNR}$')
-      ax.set_ylabel('MI')
-      ax.legend(fontsize=10)
-
-      plt.tight_layout()
-      plt.show(block=False)
-
-      # if sv:
-          # pl_dat.save_fig('MI_SNR')
-
-
-  def plot_detection(self,ax,A1,A2,bounds=None,lw=0.7,ls='solid'):
-    dims = (512,512)
-
-    if bounds is None:
-      bounds = [[0,dims[0]],[0,dims[1]]]
-
-    A1_norm = normalize_sparse_array(A1)
-    A2_norm = normalize_sparse_array(A2)
-
-    ax.imshow(A1_norm.sum(1).reshape(dims)+A2_norm.sum(1).reshape(dims),origin='lower')
-
-    CM = com(A1,dims[0],dims[1])
-    idx_bounds = (CM[:,0] > bounds[0][0]) & (CM[:,0] < bounds[0][1]) & (CM[:,1] > bounds[1][0]) & (CM[:,1] < bounds[1][1])
-    [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.5], colors='w', linewidths=0.5) for a in A1[:,idx_bounds].T]
-
-    CM = com(A2,dims[0],dims[1])
-    idx_bounds = (CM[:,0] > bounds[0][0]) & (CM[:,0] < bounds[0][1]) & (CM[:,1] > bounds[1][0]) & (CM[:,1] < bounds[1][1])
-    [ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.5], colors='tab:orange', linewidths=lw,linestyles=ls) for a in A2[:,idx_bounds].T]
-
-
-    #plt.figure(figsize=(5,4))
-    #ax = plt.subplot(111)
-    #ax.imshow(self.dataOut['A'].sum(1).reshape(self.cluster.meta['dims']),origin='lower')
-
-    #[ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='w', linewidths=0.5) for a in self.dataOut['A'][:,self.idxes['active_good']].T]
-    #[ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='r', linewidths=0.5) for a in self.dataOut['A'][:,self.idxes['silent_good']].T]
-
-    ##[ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='r', linewidths=1) for a in self.dataIn['A'][:,self.idxes['in']['silent']].T]
-    #plt.tight_layout()
-    #plt.show(block=False)
-    #pathFigure = pathcat([pathSession,'find_silent_after.%s'%(ext)]);
-    #plt.savefig(pathFigure,format=ext,dpi=300)
-    #print('Figure saved as %s'%pathFigure)
+        ##[ax.contour((a/a.max()).reshape(512,512).toarray(), levels=[0.3], colors='r', linewidths=1) for a in self.dataIn['A'][:,self.idxes['in']['silent']].T]
+        # plt.tight_layout()
+        # plt.show(block=False)
+        # pathFigure = pathcat([pathSession,'find_silent_after.%s'%(ext)]);
+        # plt.savefig(pathFigure,format=ext,dpi=300)
+        # print('Figure saved as %s'%pathFigure)
 
 
 # def compute_event_exceptionality(traces, robust_std=False, N=5, sigma_factor=3.):

@@ -446,7 +446,7 @@ def write_data_to_xlsx(df,filename='session_data.xlsx'):
 # 		if Cn[...,i].sum()>0 and Cn[...,j].sum()>0:
 # 			corr[i,j] = calculate_img_correlation(Cn[...,i],Cn[...,j])[0]
 # 		else:
-# 			corr[i,j] = np.NaN
+# 			corr[i,j] = np.nan
 # 		corr[j,i] = corr[i,j]
 
 # 	plt.figure()

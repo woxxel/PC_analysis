@@ -34,8 +34,8 @@ class clusterplots:
 
             idx_close = self.D_ROIs<10
 
-            self.corrcoef = np.zeros((self.nC,self.nC))*np.NaN
-            self.Acorr = np.zeros((self.nC,self.nC))*np.NaN
+            self.corrcoef = np.zeros((self.nC, self.nC)) * np.nan
+            self.Acorr = np.zeros((self.nC, self.nC)) * np.nan
 
             for c in tqdm(np.where(self.cluster.status[:,s,1])[0]):
                 n = int(self.cluster.IDs['neuronID'][c,s,1])
@@ -45,8 +45,8 @@ class clusterplots:
                     self.Acorr[c,cc],_ = calculate_img_correlation(data['A'][:,n],data['A'][:,nn],shift=False)
             self.reprocess=False
 
-        np.fill_diagonal(self.corrcoef,np.NaN)
-        np.fill_diagonal(self.Acorr,np.NaN)
+        np.fill_diagonal(self.corrcoef, np.nan)
+        np.fill_diagonal(self.Acorr, np.nan)
 
         idx_overlap = np.where((self.Acorr>0.2) & (self.corrcoef>0.5))
         for (i,j) in zip(idx_overlap[0],idx_overlap[1]):
@@ -130,6 +130,6 @@ class clusterplots:
             ax.spines['left'].set_visible(False)
             ax.spines['top'].set_visible(False)
             ax.spines['bottom'].set_visible(False)
-        #plt.set_cmap('jet')
+        # plt.set_cmap('jet')
         plt.tight_layout()
         plt.show(block=False)

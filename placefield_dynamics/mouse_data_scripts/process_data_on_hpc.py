@@ -769,17 +769,16 @@ results = process_session.from_file(
 #SBATCH -e {dir}/log_PC_detection.log
 #SBATCH --mem=64000
 
-module use /usr/users/cidbn_sw/sw/modules
-module load cidbn_caiman-1.9.10_py-3.9
+conda activate inference
 
-python3 {placecell_detection_script} {path_mouse} {s}
+python {placecell_detection_script} {path_mouse} {s}
 EOF
 """
         )
         # source activate caiman-1.9.10_py-3.9
 
         _, stdout, stderr = client.exec_command(
-            f"/usr/local/slurm/current/install/bin/sbatch {batch_params['submit_file']}"
+            f"/opt/slurm/el8/25.05.3/install/bin/sbatch {batch_params['submit_file']}"
         )
         print(stdout.read(), stderr.read())
         client.exec_command(f"sleep 0.5 && rm {batch_params['submit_file']}")

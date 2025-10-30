@@ -74,7 +74,7 @@ class naive_Bayes:
 
         # nC = self.cluster.stats['cluster_bool'].sum()
 
-    #    T_cut = 600;
+        #    T_cut = 600;
 
         T_cut = T_cut * self.para['f']
         T_training = np.zeros(T,'bool')
@@ -113,7 +113,6 @@ class naive_Bayes:
 
         print('------ training done ---------')
 
-
     def get_quantiled_fr(self,S,S_thr,smooth=5,qtl_steps=5):
 
         S_smooth = gauss_smooth(np.floor(S / S_thr).astype('float')*self.para['f'],smooth)#(S>S_thr).astype('float')#
@@ -122,7 +121,6 @@ class naive_Bayes:
         # S_qtl = np.count_nonzero(S_smooth[:,np.newaxis]>=qtls[np.newaxis,1:-1],1)
         S_qtl = np.count_nonzero(S_smooth[:,np.newaxis]>=qtls[np.newaxis,:-1],1)
         return S_qtl
-
 
     def run_estimation(self,s,cells=None,dT=0,sig_smooth=5):
 
@@ -159,8 +157,8 @@ class naive_Bayes:
         coarse = 1
         nbin_coarse = int(nbin/coarse)
         ## calculate estimate and display
-        loc_est = np.zeros(T)*np.NaN;
-        x_err = np.zeros(T)*np.NaN;
+        loc_est = np.zeros(T) * np.nan
+        x_err = np.zeros(T) * np.nan
 
         p_sx = np.zeros((nbin_coarse,T))
 
@@ -214,11 +212,11 @@ class naive_Bayes:
             p_infer[:,t] = np.sum(p_xs[t-dT:t,:]+np.log(self.p['s'])[np.newaxis,:],0)
             # print(p_infer[:,t])
             # for dt in range(min(t-1,dT)):
-#
-                # p_infer[:,t] = p_infer[:,t]*p_infer[:,t-dt]#np.prod(p_sx[:,cells,t-dt],1);
+            #
+            # p_infer[:,t] = p_infer[:,t]*p_infer[:,t-dt]#np.prod(p_sx[:,cells,t-dt],1);
 
             max_pos = np.argmax(p_infer[:,t])
-        #      if log(max_amp) > 0
+            #      if log(max_amp) > 0
             loc_est[t] = max_pos
 
         plt.figure()
@@ -234,21 +232,19 @@ class naive_Bayes:
         # data = read_data(pathSession);
 
     #    if ~(ses(1)==ses(2))
-        # pathMatch = dir(pathcat(pathMouse,'matching/results*_std=0_thr=70_w=33_OnACID.mat'));
-        # pathMatch = pathcat(pathMouse,'matching',pathMatch.name);
-        # data_ld = load(pathMatch);
-        # assign = data_ld.assignments+1;
-        # c_idx = find(~isnan(assign(:,ses(1))));
-        #
-        # n_idx(:,1) = assign(c_idx,ses(1));
-        # n_idx(:,2) = assign(c_idx,ses(2));
-        #
-        # n_idx = sortrows(n_idx);
+    # pathMatch = dir(pathcat(pathMouse,'matching/results*_std=0_thr=70_w=33_OnACID.mat'));
+    # pathMatch = pathcat(pathMouse,'matching',pathMatch.name);
+    # data_ld = load(pathMatch);
+    # assign = data_ld.assignments+1;
+    # c_idx = find(~isnan(assign(:,ses(1))));
+    #
+    # n_idx(:,1) = assign(c_idx,ses(1));
+    # n_idx(:,2) = assign(c_idx,ses(2));
+    #
+    # n_idx = sortrows(n_idx);
     #    end
 
-
-
-        # data.N
+    # data.N
     ## uncomment to remove silent neurons from data - does not effect the estimator
     #    p_x_active = sum(data.act,2)/T;  ## calculating firing rate of each neuron
     #    rm_idx = p_x_active < 10/T; ## and removing silent neurons from data (
@@ -257,186 +253,176 @@ class naive_Bayes:
 
     #    p_s(1,1+para.pad:para.nbins-para.pad) = histcounts(data.loc(data.run_bool),linspace(para.pad,para.nbins-para.pad,para.nbins-2*para.pad+1)+0.5,'Normalization','probability');
 
+    #    if ses(1)==ses(2)
+    #      cell_array = data.p_vals < 0.1;
+    #    else
+    # cell_array = find(data.p_vals < 0.1 & ~isnan(n_idx(:,2)));
+    # cell_assign = n_idx(cell_array,2);
 
-        #    if ses(1)==ses(2)
-        #      cell_array = data.p_vals < 0.1;
-        #    else
-        # cell_array = find(data.p_vals < 0.1 & ~isnan(n_idx(:,2)));
-        # cell_assign = n_idx(cell_array,2);
+    ## get matches of neurons
+    #    cell_array = n_idx(:,2);
+    #    if isempty(cell_array)
+    #      cell_array = sum(data.act,2)/T >= 10/T;#true(N,1);
+    #    end
+    #    [sum(cell_array),data.N]
 
+    # if plt:
+    #
+    #     bar_loc = zeros(para.nbins,1);
+    #     bar_sm = ones(5+1,1);     ## width of sliding location bar
+    #
+    #     figure('Position',[0.1 0.1 1800 1500])
+    #
+    #     ## left column
+    #
+    #     # dwelltime distribution
+    #     subplot(4,2,1)
+    #     bar(p_s)
+    #     ylabel('p(s)')
+    #
+    #     # inferred position of whole network
+    #     subplot(4,2,3)
+    #     hold on
+    #     h_bar = bar(log(p_infer(:,1)));
+    #     h_bin = plot(0,0,'xr','MarkerSize',10);
+    #     ylim([-40,40])
+    #     ylabel('log(p(s|r))')
+    #     xlabel('bin #')
+    #
+    #     # inferred position per neuron
+    #     subplot(2,2,3)
+    #     hold on
+    #     h_im = imagesc(p_sx(:,:,1)'.*p_s);
+    #     h_bar_loc = bar(bar_loc,1,'FaceAlpha',0.5,'FaceColor','g','EdgeColor','None');
+    #     ylabel('neuron')
+    #     xlabel('location')
+    #     ylim([0,sum(cell_array)])
+    #     set(gca,'clim',[0,5])
+    #     colormap('jet')
+    #     colorbar
+    #
+    #     ## right column
+    #
+    #     # position of mouse in real space
+    #     subplot(2,2,2)
+    #     h_loc = scatter(0,0,'ko','filled');
+    # #      h_loc_err = scatter(0,0,'k.');
+    #     xlim([min(data.loc)-20,max(data.loc)+20])
+    # #      ylim([min(data.speed(:,2))-20,max(data.speed(:,2))+20])
+    #     ylim([-1,1])
+    #     h_title = suptitle('t=0');
+    #     xlabel('x position')
+    #     ylabel('y position')
+    #
+    #     # position of mouse in bin-space vs estimated position
+    #     subplot(4,2,6)
+    #     hold on
+    #     bar(data.time,(~data.run_bool)*para.nbins,1,'FaceColor',[0.9,0.9,0.9])
+    #     scatter(data.time,data.loc,'.k')
+    #     h_infer = scatter(data.time,loc_est,'.r');
+    #
+    #     xlim([0,data.time(end)])
+    #     ylim([0,para.nbins])
+    #     ylabel('bin s')
+    #
+    #     # error of estimation
+    #     subplot(4,2,8)
+    #     hold on
+    #     bar(data.time,(~data.run_bool)*para.nbins,1,'FaceColor',[0.9,0.9,0.9])
+    #     bar(data.time,-(~data.run_bool)*para.nbins,1,'FaceColor',[0.9,0.9,0.9])
+    #     plot([0,data.time(end)],[0,0],'k--')
+    #     h_err = scatter(data.time,x_err,'.r');
+    #     xlim([0,data.time(end)])
+    #     ylim([-para.nbins/2,para.nbins/2])
+    #     ylabel('\Delta s')
+    #     xlabel('t [s]')
+    #
+    #     if plt_vid        ## preparing video recording
+    #       video = struct;
+    #       video.path = pathcat(pwd, 'BayesTest.avi');
+    #
+    #       video.obj = VideoWriter(video.path);
+    #       video.obj.FrameRate = 15;
+    #       video.obj.Quality = 70;
+    #
+    #       open(video.obj);
+    #     end
+    #   end
 
+    #      else
+    #        loc_est(t) = NaN;
+    #      end
 
-          ## get matches of neurons
-        #    cell_array = n_idx(:,2);
-        #    if isempty(cell_array)
-        #      cell_array = sum(data.act,2)/T >= 10/T;#true(N,1);
-        #    end
-        #    [sum(cell_array),data.N]
+    #     if plt
+    #       set(h_bar,'YData',log(p_infer(:,t)))
+    #       set(h_bin,'XData',data.loc(t))
+    #
+    #       t_min = max(1,t-100);
+    #       x_data = data.loc(t_min:t);
+    # #        y_data = data(t_min:t,3);
+    #       nt = t-t_min+1;
+    #       y_data = zeros(nt,1);
+    #       set(h_loc,'XData',x_data,'YData',y_data,'SizeData',linspace(5,100,nt))
+    #
+    #
+    #       set(h_im,'CData',p_sx(:,cell_array,t)')
+    #       bar_loc = zeros(para.nbins,1);
+    #       bar_loc(data.loc(t)) = 1;
+    #       bar_loc = imdilate(bar_loc,bar_sm);
+    #       set(h_bar_loc,'YData',bar_loc*data.N)
+    #
+    #       set(h_infer,'YData',loc_est)
+    #
+    #       x_err(t) = mod(data.loc(t)-loc_est(t)+para.nbins/2,para.nbins)-para.nbins/2;
+    #       set(h_err,'YData',x_err)
+    #
+    #       set(h_title,'String',sprintf('t=%d',t))
+    #
+    #       if plt_vid
+    #         drawnow
+    #         frame = getframe(gcf);
+    #         writeVideo(video.obj,frame);
+    #       else
+    #         pause(1/para.f)
+    #       end
+    #     end
+    # if plt && plt_vid
+    # close(h.video.obj)
 
-
-
-        # if plt:
-        #
-        #     bar_loc = zeros(para.nbins,1);
-        #     bar_sm = ones(5+1,1);     ## width of sliding location bar
-        #
-        #     figure('Position',[0.1 0.1 1800 1500])
-        #
-        #     ## left column
-        #
-        #     # dwelltime distribution
-        #     subplot(4,2,1)
-        #     bar(p_s)
-        #     ylabel('p(s)')
-        #
-        #     # inferred position of whole network
-        #     subplot(4,2,3)
-        #     hold on
-        #     h_bar = bar(log(p_infer(:,1)));
-        #     h_bin = plot(0,0,'xr','MarkerSize',10);
-        #     ylim([-40,40])
-        #     ylabel('log(p(s|r))')
-        #     xlabel('bin #')
-        #
-        #     # inferred position per neuron
-        #     subplot(2,2,3)
-        #     hold on
-        #     h_im = imagesc(p_sx(:,:,1)'.*p_s);
-        #     h_bar_loc = bar(bar_loc,1,'FaceAlpha',0.5,'FaceColor','g','EdgeColor','None');
-        #     ylabel('neuron')
-        #     xlabel('location')
-        #     ylim([0,sum(cell_array)])
-        #     set(gca,'clim',[0,5])
-        #     colormap('jet')
-        #     colorbar
-        #
-        #     ## right column
-        #
-        #     # position of mouse in real space
-        #     subplot(2,2,2)
-        #     h_loc = scatter(0,0,'ko','filled');
-        # #      h_loc_err = scatter(0,0,'k.');
-        #     xlim([min(data.loc)-20,max(data.loc)+20])
-        # #      ylim([min(data.speed(:,2))-20,max(data.speed(:,2))+20])
-        #     ylim([-1,1])
-        #     h_title = suptitle('t=0');
-        #     xlabel('x position')
-        #     ylabel('y position')
-        #
-        #     # position of mouse in bin-space vs estimated position
-        #     subplot(4,2,6)
-        #     hold on
-        #     bar(data.time,(~data.run_bool)*para.nbins,1,'FaceColor',[0.9,0.9,0.9])
-        #     scatter(data.time,data.loc,'.k')
-        #     h_infer = scatter(data.time,loc_est,'.r');
-        #
-        #     xlim([0,data.time(end)])
-        #     ylim([0,para.nbins])
-        #     ylabel('bin s')
-        #
-        #     # error of estimation
-        #     subplot(4,2,8)
-        #     hold on
-        #     bar(data.time,(~data.run_bool)*para.nbins,1,'FaceColor',[0.9,0.9,0.9])
-        #     bar(data.time,-(~data.run_bool)*para.nbins,1,'FaceColor',[0.9,0.9,0.9])
-        #     plot([0,data.time(end)],[0,0],'k--')
-        #     h_err = scatter(data.time,x_err,'.r');
-        #     xlim([0,data.time(end)])
-        #     ylim([-para.nbins/2,para.nbins/2])
-        #     ylabel('\Delta s')
-        #     xlabel('t [s]')
-        #
-        #     if plt_vid        ## preparing video recording
-        #       video = struct;
-        #       video.path = pathcat(pwd, 'BayesTest.avi');
-        #
-        #       video.obj = VideoWriter(video.path);
-        #       video.obj.FrameRate = 15;
-        #       video.obj.Quality = 70;
-        #
-        #       open(video.obj);
-        #     end
-        #   end
-
-
-
-
-        #      else
-        #        loc_est(t) = NaN;
-        #      end
-
-
-        #     if plt
-        #       set(h_bar,'YData',log(p_infer(:,t)))
-        #       set(h_bin,'XData',data.loc(t))
-        #
-        #       t_min = max(1,t-100);
-        #       x_data = data.loc(t_min:t);
-        # #        y_data = data(t_min:t,3);
-        #       nt = t-t_min+1;
-        #       y_data = zeros(nt,1);
-        #       set(h_loc,'XData',x_data,'YData',y_data,'SizeData',linspace(5,100,nt))
-        #
-        #
-        #       set(h_im,'CData',p_sx(:,cell_array,t)')
-        #       bar_loc = zeros(para.nbins,1);
-        #       bar_loc(data.loc(t)) = 1;
-        #       bar_loc = imdilate(bar_loc,bar_sm);
-        #       set(h_bar_loc,'YData',bar_loc*data.N)
-        #
-        #       set(h_infer,'YData',loc_est)
-        #
-        #       x_err(t) = mod(data.loc(t)-loc_est(t)+para.nbins/2,para.nbins)-para.nbins/2;
-        #       set(h_err,'YData',x_err)
-        #
-        #       set(h_title,'String',sprintf('t=%d',t))
-        #
-        #       if plt_vid
-        #         drawnow
-        #         frame = getframe(gcf);
-        #         writeVideo(video.obj,frame);
-        #       else
-        #         pause(1/para.f)
-        #       end
-        #     end
-        # if plt && plt_vid
-        # close(h.video.obj)
-
-        # figure
-        # subplot(2,1,1)
-        # hold on
-        #
-        # bar(data.time,(~data.run_bool)*para.nbins,1,'FaceColor',[0.8,0.8,0.8])
-        # scatter(data.time,data.loc,'.k')
-        # size(loc_est)
-        # scatter(data.time,loc_est,'.r')
-        # ylabel('bin position s')
-        # xlim([0,data.time(end)])
-        # ylim([0,para.nbins])
-        #
-        # #### check: coding errors mostly during standing still?
-        # subplot(2,1,2)
-        # hold on
-        # bar(data.time,(~data.run_bool)*para.nbins/2,1,'FaceColor',[0.8,0.8,0.8])
-        # bar(data.time,-(~data.run_bool)*para.nbins/2,1,'FaceColor',[0.8,0.8,0.8])
-        # x_err = mod(data.loc'-loc_est+para.nbins/2,para.nbins)-para.nbins/2;
-        # scatter(data.time,x_err,'.r')
-        # xlim([0,data.time(end)])
-        # ylim([-para.nbins/2,para.nbins/2])
-        # xlabel('t [s]')
-        # ylabel('estimation error \Delta s')
-        #
-        # out = struct;
-        # out.N_err_lr = sum(x_err(data.run_bool) > 5);
-        # out.N_err_nlr = sum(x_err(~data.run_bool) > 5);
-        # disp(sprintf('Errors during running: %d',out.N_err_lr))
-        # out.N_err_lr/sum(data.run_bool)
-        # disp(sprintf('Errors during resting: %d',out.N_err_nlr))
-        # out.N_err_lr/sum(~data.run_bool)
-        # out.error_rate = mean(abs(x_err));
-        # disp(sprintf('error per timebin: %5.3g',out.error_rate))
-        # print(pathcat(pwd,'bayes_estimation.png'),'-dpng','-r300')
-
+    # figure
+    # subplot(2,1,1)
+    # hold on
+    #
+    # bar(data.time,(~data.run_bool)*para.nbins,1,'FaceColor',[0.8,0.8,0.8])
+    # scatter(data.time,data.loc,'.k')
+    # size(loc_est)
+    # scatter(data.time,loc_est,'.r')
+    # ylabel('bin position s')
+    # xlim([0,data.time(end)])
+    # ylim([0,para.nbins])
+    #
+    # #### check: coding errors mostly during standing still?
+    # subplot(2,1,2)
+    # hold on
+    # bar(data.time,(~data.run_bool)*para.nbins/2,1,'FaceColor',[0.8,0.8,0.8])
+    # bar(data.time,-(~data.run_bool)*para.nbins/2,1,'FaceColor',[0.8,0.8,0.8])
+    # x_err = mod(data.loc'-loc_est+para.nbins/2,para.nbins)-para.nbins/2;
+    # scatter(data.time,x_err,'.r')
+    # xlim([0,data.time(end)])
+    # ylim([-para.nbins/2,para.nbins/2])
+    # xlabel('t [s]')
+    # ylabel('estimation error \Delta s')
+    #
+    # out = struct;
+    # out.N_err_lr = sum(x_err(data.run_bool) > 5);
+    # out.N_err_nlr = sum(x_err(~data.run_bool) > 5);
+    # disp(sprintf('Errors during running: %d',out.N_err_lr))
+    # out.N_err_lr/sum(data.run_bool)
+    # disp(sprintf('Errors during resting: %d',out.N_err_nlr))
+    # out.N_err_lr/sum(~data.run_bool)
+    # out.error_rate = mean(abs(x_err));
+    # disp(sprintf('error per timebin: %5.3g',out.error_rate))
+    # print(pathcat(pwd,'bayes_estimation.png'),'-dpng','-r300')
 
     def get_p_xs(self,cells,act):
         # calculates probability of obtaining observed activity
@@ -445,8 +431,6 @@ class naive_Bayes:
             if ~act[n]:
                 self.p['xs'][c,:] = 1-self.p['xs'][c,:]
         # return p_xs
-
-
 
 
 # function data = read_data(fileName)

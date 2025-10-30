@@ -27,7 +27,7 @@ def _hsm(data):
     ### sorting done as first step, if not specified else
 
     if data.size == 0:
-        return np.NaN
+        return np.nan
     if np.all(data == data[0]):
         return data[0]
 
@@ -185,12 +185,12 @@ def periodic_distr_distance(
 #   L_track = 100
 #   N_data = len(shifts)
 #   if N_data == 0:
-#     return np.zeros(4)*np.NaN,np.zeros((2,4))*np.NaN,np.zeros(4)*np.NaN,np.zeros((2,nbin))*np.NaN
+#     return np.zeros(4)*np.nan,np.zeros((2,4))*np.nan,np.zeros(4)*np.nan,np.zeros((2,nbin))*np.nan
 
 #   samples = np.random.randint(0,N_data,(N_bs,N_data))
 #   # sample_randval = np.random.rand(N_bs,N_data)
 #   shift_distr_bs = np.zeros((N_bs,nbin))
-#   par = np.zeros((N_bs,4))*np.NaN
+#   par = np.zeros((N_bs,4))*np.nan
 #   for i in range(N_bs):
 #     shift_distr_bs[i,:] = shifts[samples[i,:],:].sum(0)
 #     shift_distr_bs[i,:] /= shift_distr_bs[i,:].sum()
@@ -210,11 +210,11 @@ def bootstrap_data(fun, data, N_bs):
     single = False
     try:
         pars, _ = fun(data)
-        par = np.zeros(np.append(N_bs, np.array(pars).shape)) * np.NaN
+        par = np.zeros(np.append(N_bs, np.array(pars).shape)) * np.nan
     except:
         pars = fun(data)
         single = True
-        par = np.zeros((N_bs, 1)) * np.NaN
+        par = np.zeros((N_bs, 1)) * np.nan
 
     samples = np.random.randint(0, N_data, (N_bs, N_data))
 
@@ -324,7 +324,7 @@ def fit_plane(data, anchor=None):
         n[1] = Cov[0, 1] * Cov[0, 2] - Cov[1, 2] * Cov[0, 0]
         n[2] = det[2]
     n /= np.linalg.norm(n)  ## normalize!
-    return (p, n), np.NaN
+    return (p, n), np.nan
 
 
 def z_from_point_normal_plane(x, y, p, n):
@@ -462,7 +462,7 @@ def com(A, d1, d2, d3=None):
         ]
     ).T
     cm = (Coor * Anorm).T
-    cm[np.squeeze(np.array((Anorm > 0).sum(0))) == 0, :] = np.NaN
+    cm[np.squeeze(np.array((Anorm > 0).sum(0))) == 0, :] = np.nan
     return np.array(cm)
 
 
@@ -540,7 +540,7 @@ def calculate_img_correlation(
         # print('corr-computation --- time taken: %5.3g'%(t_end-t_start))
         C_max = C.max()
         if np.isnan(C_max) | (C_max == 0):
-            return np.NaN, np.ones(2) * np.NaN
+            return np.nan, np.ones(2) * np.nan
 
         # if not crop:
         crop_half = (
@@ -856,7 +856,7 @@ def get_status_arr(cluster, SD=1):
                 for f in np.where(cluster.status_fields[c, s, :])[0]:
 
                     loc_compare = cluster.fields["location"][c, :s, :, 0]
-                    loc_compare[~cluster.status_fields[c, :s, :]] = np.NaN
+                    loc_compare[~cluster.status_fields[c, :s, :]] = np.nan
                     dLoc = np.abs(
                         np.mod(
                             cluster.fields["location"][c, s, f, 0]
@@ -925,7 +925,7 @@ def get_CI(p, X, Y, alpha=0.05):
 def get_recurr(status, status_dep):
 
     nC, nSes = status.shape
-    recurr = np.zeros((nSes, nSes)) * np.NaN
+    recurr = np.zeros((nSes, nSes)) * np.nan
     for s in range(nSes):  # np.where(cluster.sessions['bool'])[0]:
         overlap = status[status[:, s], :].sum(0).astype("float")
         N_ref = status_dep[status[:, s], :].sum(0)

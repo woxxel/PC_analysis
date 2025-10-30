@@ -156,8 +156,8 @@ class cluster_analysis:
         if "alignment" in which and (not hasattr(self, "alignment") or overwrite):
             self.alignment = {
                 "shift": np.zeros((self.data["nSes"], 2)),
-                "corr": np.full(self.data["nSes"], np.NaN),
-                "borders": np.full((2, 2), np.NaN),
+                "corr": np.full(self.data["nSes"], np.nan),
+                "borders": np.full((2, 2), np.nan),
                 # 'flow': np.zeros((self.data['nSes'],2)+self.params['dims']),
                 "transposed": np.zeros(self.data["nSes"], "bool"),
             }
@@ -165,13 +165,13 @@ class cluster_analysis:
         if "matching" in which and (not hasattr(self, "matching") or overwrite):
             self.matching = {
                 "IDs": None,
-                "com": np.full((self.data["nC"], self.data["nSes"], 2), np.NaN),
+                "com": np.full((self.data["nC"], self.data["nSes"], 2), np.nan),
                 "score": np.zeros((self.data["nC"], self.data["nSes"], 2)),
             }
 
         if "stats" in which and (not hasattr(self, "stats") or overwrite):
             self.stats = {
-                "firingrate": np.full((self.data["nC"], self.data["nSes"]), np.NaN),
+                "firingrate": np.full((self.data["nC"], self.data["nSes"]), np.nan),
                 "firingmap": np.zeros(
                     (self.data["nC"], self.data["nSes"], self.data["nbin"])
                 ),
@@ -218,7 +218,7 @@ class cluster_analysis:
                         self.data["nSes"],
                         self.params["field_count_max"] + 1,
                     ),
-                    np.NaN,
+                    np.nan,
                 ),
                 "Bayes_factor": np.full(
                     (
@@ -226,7 +226,7 @@ class cluster_analysis:
                         self.data["nSes"],
                         self.params["field_count_max"],
                     ),
-                    np.NaN,
+                    np.nan,
                 ),
                 "reliability": np.full(
                     (
@@ -234,7 +234,7 @@ class cluster_analysis:
                         self.data["nSes"],
                         self.params["field_count_max"],
                     ),
-                    np.NaN,
+                    np.nan,
                 ),
                 "max_rate": np.full(
                     (
@@ -242,7 +242,7 @@ class cluster_analysis:
                         self.data["nSes"],
                         self.params["field_count_max"],
                     ),
-                    np.NaN,
+                    np.nan,
                 ),
                 # "posterior_mass": np.full(
                 #     (
@@ -250,7 +250,7 @@ class cluster_analysis:
                 #         self.data["nSes"],
                 #         self.params["field_count_max"],
                 #     ),
-                #     np.NaN,
+                #     np.nan,
                 # ),
                 "baseline": np.full(
                     (
@@ -258,7 +258,7 @@ class cluster_analysis:
                         self.data["nSes"],
                         3,
                     ),
-                    np.NaN,
+                    np.nan,
                 ),
                 "amplitude": np.full(
                     (
@@ -267,7 +267,7 @@ class cluster_analysis:
                         self.params["field_count_max"],
                         3,
                     ),
-                    np.NaN,
+                    np.nan,
                 ),
                 "width": np.full(
                     (
@@ -276,7 +276,7 @@ class cluster_analysis:
                         self.params["field_count_max"],
                         3,
                     ),
-                    np.NaN,
+                    np.nan,
                 ),
                 "location": np.full(
                     (
@@ -285,7 +285,7 @@ class cluster_analysis:
                         self.params["field_count_max"],
                         3,
                     ),
-                    np.NaN,
+                    np.nan,
                 ),
                 "p_x": np.full(
                     (
@@ -294,7 +294,7 @@ class cluster_analysis:
                         self.params["field_count_max"],
                         100,
                     ),
-                    np.NaN,
+                    np.nan,
                 ),
             }
 
@@ -418,21 +418,21 @@ class cluster_analysis:
         # 	if not path_exists:
         # 		continue
 
-        # 	# self.alignment['flow'][s,...] = ldData['data'][s]['remap']['flow'] if has_reference else np.NaN
+        # 	# self.alignment['flow'][s,...] = ldData['data'][s]['remap']['flow'] if has_reference else np.nan
 
         # 	# idx_c = np.where(np.isfinite(self.matching['IDs'][:,s]))[0]
 
         # 	# ## match- and best non-match-score should be calculated and stored in matching algorithm
         # 	# if not has_reference:
         # 	#     self.matching['score'][idx_c,s,0] = 1
-        # 	#     self.matching['score'][idx_c,s,1] = np.NaN
+        # 	#     self.matching['score'][idx_c,s,1] = np.nan
         # 	# elif s in ldData['data'].keys():
 
         # 	#     p_all = ldData['data'][s]['p_same']
 
         # 	#     idx_c_first = idx_c[idx_c>=p_all.shape[0]]    # first occurence of a neuron is always certain match!
         # 	#     self.matching['score'][idx_c_first,s,0] = 1
-        # 	#     self.matching['score'][idx_c_first,s,1] = np.NaN
+        # 	#     self.matching['score'][idx_c_first,s,1] = np.nan
 
         # 	#     idx_c = idx_c[idx_c<p_all.shape[0]]    # remove entries of first-occurence neurons (no matching possible)
         # 	#     self.matching['score'][idx_c,s,0] = p_matched[idx_c,s]
@@ -816,7 +816,7 @@ class cluster_analysis:
         if n_processes > 1:
             pool = get_context("spawn").Pool(n_processes)
             loc = np.copy(self.fields["location"][..., 0])
-            loc[~self.status["fields"]] = np.NaN
+            loc[~self.status["fields"]] = np.nan
             res = pool.starmap(
                 get_field_shifts,
                 zip(
@@ -829,7 +829,7 @@ class cluster_analysis:
 
         else:
             loc = np.copy(self.fields["location"][..., 0])
-            loc[~self.status["fields"]] = np.NaN
+            loc[~self.status["fields"]] = np.nan
             res = []
             for c in range(self.data["nC"]):
                 res.append(
@@ -1080,18 +1080,18 @@ class cluster_analysis:
 
         self.recurrence = {
             "active": {
-                "all": np.full((self.data["nSes"], self.data["nSes"]), np.NaN),
-                "continuous": np.full((self.data["nSes"], self.data["nSes"]), np.NaN),
+                "all": np.full((self.data["nSes"], self.data["nSes"]), np.nan),
+                "continuous": np.full((self.data["nSes"], self.data["nSes"]), np.nan),
                 "overrepresentation": np.full(
-                    (self.data["nSes"], self.data["nSes"]), np.NaN
+                    (self.data["nSes"], self.data["nSes"]), np.nan
                 ),
             },
             "coding": {
-                "all": np.full((self.data["nSes"], self.data["nSes"]), np.NaN),
-                "ofactive": np.full((self.data["nSes"], self.data["nSes"]), np.NaN),
-                "continuous": np.full((self.data["nSes"], self.data["nSes"]), np.NaN),
+                "all": np.full((self.data["nSes"], self.data["nSes"]), np.nan),
+                "ofactive": np.full((self.data["nSes"], self.data["nSes"]), np.nan),
+                "continuous": np.full((self.data["nSes"], self.data["nSes"]), np.nan),
                 "overrepresentation": np.full(
-                    (self.data["nSes"], self.data["nSes"]), np.NaN
+                    (self.data["nSes"], self.data["nSes"]), np.nan
                 ),
             },
         }
@@ -1128,8 +1128,8 @@ class cluster_analysis:
                     ].sum()
                 )
 
-            rand_pull_act = np.zeros((self.data["nSes"] - s, n_shuffles)) * np.NaN
-            rand_pull_PC = np.zeros((self.data["nSes"] - s, n_shuffles)) * np.NaN
+            rand_pull_act = np.zeros((self.data["nSes"] - s, n_shuffles)) * np.nan
+            rand_pull_PC = np.zeros((self.data["nSes"] - s, n_shuffles)) * np.nan
 
             for s2 in range(s + 1, self.data["nSes"]):
                 if (N["active"][s] == 0) or (N["active"][s2] == 0):
@@ -1173,13 +1173,13 @@ class cluster_analysis:
     def calculate_field_firingrates(self, sd_r=-1):
 
         oof_frate = (
-            np.zeros((self.data["nC"], self.data["nSes"])) * np.NaN
+            np.zeros((self.data["nC"], self.data["nSes"])) * np.nan
         )  # out-of-field firingrate
         if_frate = (
             np.zeros(
                 (self.data["nC"], self.data["nSes"], self.params["field_count_max"])
             )
-            * np.NaN
+            * np.nan
         )  # in-field firingrate
 
         for s in tqdm(range(self.data["nSes"]), leave=False):
@@ -1296,9 +1296,9 @@ class cluster_analysis:
         ## setting up dictionary for stability
         p = {}
         p_stats = {
-            "mean": np.full((dsMax, 4), np.NaN),
-            "CI": np.full((dsMax, 2, 4), np.NaN),
-            "std": np.full((dsMax, 4), np.NaN),
+            "mean": np.full((dsMax, 4), np.nan),
+            "CI": np.full((dsMax, 2, 4), np.nan),
+            "std": np.full((dsMax, 4), np.nan),
         }
         for key in p_keys:
             p[key] = copy.deepcopy(p_stats)
@@ -1387,10 +1387,10 @@ class cluster_analysis:
 
                     for p_post in p_posts:
                         self.stats[f"p_post{p_post}_s"][status_key][status2_key] = (
-                            np.full((nSes, ds_max + 1, 2), np.NaN)
+                            np.full((nSes, ds_max + 1, 2), np.nan)
                         )
                     self.stats["p_pre_s"][status_key][status2_key] = np.full(
-                        (nSes, ds_max + 1, 2), np.NaN
+                        (nSes, ds_max + 1, 2), np.nan
                     )
 
             status, status_dep = get_status_arr(self)
@@ -1571,7 +1571,7 @@ class cluster_analysis:
                 self.stats["p_post_c"][status_key] = {}
                 for status2_key in status_arr:
                     self.stats["p_post_c"][status_key][status2_key] = (
-                        np.zeros((nC, ds_max + 1, 2)) * np.NaN
+                        np.zeros((nC, ds_max + 1, 2)) * np.nan
                     )
 
             for ds in tqdm(range(1, ds_max)):
@@ -1618,7 +1618,7 @@ class cluster_analysis:
                                 counts[status_key][status2_key][0, 1]
                                 / counts[status_key][status2_key][0, 0]
                                 if counts[status_key][status2_key][0, 0] > 0
-                                else np.NaN
+                                else np.nan
                             )
                             self.stats["p_post_c"][status_key][status2_key][
                                 c, ds, 1
@@ -1626,7 +1626,7 @@ class cluster_analysis:
                                 counts[status_key][status2_key][1, 1]
                                 / counts[status_key][status2_key][1, 0]
                                 if counts[status_key][status2_key][1, 0] > 0
-                                else np.NaN
+                                else np.nan
                             )
 
     def get_locTransition_prob(self, which=["recruit", "dismiss", "stable"]):
@@ -1643,9 +1643,9 @@ class cluster_analysis:
         stab_thr = SD * sig_theta
 
         self.stats["transition"] = {
-            "recruitment": np.zeros((nSes, nbin, 3)) * np.NaN,
+            "recruitment": np.zeros((nSes, nbin, 3)) * np.nan,
             "stabilization": np.zeros((nSes, nbin)),
-            "dismissal": np.zeros((nSes, nbin, 3)) * np.NaN,
+            "dismissal": np.zeros((nSes, nbin, 3)) * np.nan,
         }
 
         for s in np.where(self.status["sessions"])[0]:
@@ -1812,7 +1812,7 @@ class cluster_analysis:
             np.zeros(
                 (self.data["nC"], self.data["nSes"], self.sessions["trial_ct"].max())
             )
-            * np.NaN
+            * np.nan
         )
         for s, path in tqdm(enumerate(self.paths["sessions"])):
 
@@ -1964,17 +1964,17 @@ def bootstrap_shifts(fun, shifts, N_bs, nbin):
     N_data = len(shifts)
     if N_data == 0:
         return (
-            np.full(4, np.NaN),
-            np.full((2, 4), np.NaN),
-            np.full(4, np.NaN),
-            np.full((2, nbin), np.NaN),
+            np.full(4, np.nan),
+            np.full((2, 4), np.nan),
+            np.full(4, np.nan),
+            np.full((2, nbin), np.nan),
         )
 
     samples = np.random.randint(0, N_data, (N_bs, N_data))
 
     # sample_randval = np.random.rand(N_bs,N_data)
     shift_distr_bs = np.zeros((N_bs, nbin))
-    par = np.full((N_bs, 4), np.NaN)
+    par = np.full((N_bs, 4), np.nan)
     for i in range(N_bs):
         shift_distr_bs[i, :] = shifts[samples[i, :], :].sum(0)
         shift_distr_bs[i, :] /= shift_distr_bs[i, :].sum()
@@ -2006,4 +2006,4 @@ def fit_shift_model(data):
         # return curve_fit(F_shifts, np.linspace(-49.5, 49.5, 100), data, bounds=p_bounds)
         return curve_fit(F_shifts, np.linspace(-19.5, 19.5, 40), data, bounds=p_bounds)
     except:
-        return np.zeros(4) * np.NaN, np.NaN
+        return np.zeros(4) * np.nan, np.nan

@@ -95,7 +95,7 @@ results = ps.from_input(
 
     n_repeat = n_neurons // n_per_batch
     print(f"Running {n_repeat} batches of {n_per_batch} neurons each...")
-#SBATCH -A {batch_params['A']}
+    # SBATCH -A {batch_params['A']}
     ## write bash script to run neuron detection
     _, stdout, stderr = client.exec_command(
         f"""cat > {batch_params['submit_file']} <<- EOF
@@ -109,18 +109,16 @@ results = ps.from_input(
 #SBATCH -e log_test_PC_detection_%A_%a.log
 #SBATCH --mem=64000
 
-module use /usr/users/cidbn_sw/sw/modules
-module load cidbn_caiman-1.9.10_py-3.9
-module load cidbn_dynesty-2.1.4_py-3.11
+conda activate inference
 
-python3 {placecell_detection_script} {path_session} {n_per_batch}
+python {placecell_detection_script} {path_session} {n_per_batch}
 EOF
 """
     )
     # source activate caiman-1.9.10_py-3.9
 
     _, stdout, stderr = client.exec_command(
-        f"/usr/local/slurm/current/install/bin/sbatch {batch_params['submit_file']}"
+        f"/opt/slurm/el8/25.05.3/install/bin/sbatch {batch_params['submit_file']}"
     )
     print(stdout.read(), stderr.read())
     client.exec_command(f"sleep 0.5 && rm {batch_params['submit_file']}")

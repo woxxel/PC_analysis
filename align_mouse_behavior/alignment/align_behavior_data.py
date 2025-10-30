@@ -101,7 +101,7 @@ def plot_alignment(data_path=None, aligned_path=None, figure_path=None):
 
         rw_loc = data_resampled["reward_location"]
     else:
-        rw_loc = np.NaN
+        rw_loc = np.nan
 
     fig, ax = plt.subplots(n_plots, 1, sharex=True, figsize=(10, 4))
 

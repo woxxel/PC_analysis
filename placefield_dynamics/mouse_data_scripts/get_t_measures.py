@@ -2,9 +2,9 @@ import numpy as np
 
 def get_t_measures(mouse):
 
-  ## put in here as well position around gate and position around reward, probability of reward reception, etc
-  #t_measures = []
-    t_measures = np.NaN
+    ## put in here as well position around gate and position around reward, probability of reward reception, etc
+    # t_measures = []
+    t_measures = np.nan
     if mouse in ['231']:
         t_measures = np.zeros(105)
 
@@ -566,8 +566,6 @@ def get_t_measures(mouse):
         t_measures[61] = 1636     ## 02.06. AM
         t_measures[62] = 1637     ## 02.06. AM
 
-
-
     elif mouse in ["918shKO","931wt","943shKO"]:
         t_measures = np.zeros(28)
         t_measures[0] = 0
@@ -729,7 +727,6 @@ def get_t_measures(mouse):
         if mouse in '72':
             t_measures = np.delete(t_measures,4)
 
-
     elif mouse in ["762"]:
         t_measures = np.zeros(112)
 
@@ -845,6 +842,5 @@ def get_t_measures(mouse):
         t_measures[109] = 2426
         t_measures[110] = 2904
         t_measures[111] = 2905
-
 
     return t_measures
