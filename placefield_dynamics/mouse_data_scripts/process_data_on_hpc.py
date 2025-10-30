@@ -692,7 +692,9 @@ def run_placecell_detection(
     mouse = os.path.basename(path_mouse)
     cpus = 64
 
-    client, path_code, batch_params = set_hpc_params(hpc)
+    client, path_code, batch_params = set_hpc_params(
+        home_dir=Path("/mnt/vast-standard/home/schmidt124/u23010"), hpc=hpc
+    )
 
     placecell_detection_script = f"{path_code}/placecell_detection.py"
 
