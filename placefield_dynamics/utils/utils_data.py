@@ -4,10 +4,8 @@
 
 """
 
-import os, pickle
+import os
 import numpy as np
-
-from placefield_dynamics.neuron_matching.utils import load_data
 
 
 class cluster_parameters:
