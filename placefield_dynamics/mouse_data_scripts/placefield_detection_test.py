@@ -11,9 +11,8 @@ def run_placefield_detection_test(
     n_per_batch=10,
     nbin=40,
     hpc="sofja",
+    cpus=64,
 ):
-
-    cpus = 64
 
     client, path_code, batch_params = set_hpc_params(
         home_dir=Path("/mnt/vast-standard/home/schmidt124/u23010"),
@@ -33,7 +32,7 @@ from pathlib import Path
 from placefield_dynamics.placefield_detection.surrogate_data import SurrogateData
 from placefield_dynamics.placefield_detection.process_session import process_session
 
-from placefield_dynamics.placefield_detection.utils import prepare_behavior_from_file
+from placefield_dynamics.placefield_detection.utils import prepare_behavior_from_file, save_data
 
 assert len(sys.argv) == 3, "Need to provide two arguments, path_session and n_neurons as arguments! Currently given: %s"%str(sys.argv)
 _, path_session, n_neurons = sys.argv
@@ -76,8 +75,10 @@ data = dict(
     field_activation=surrogate_data.field_activation,
 )
 
-with open(Path('{path_target}') / ('surrogate_data_'+suffix+'.pkl'),'wb') as f:
-    pickle.dump(data,f)
+save_data(data, Path('{path_target}') / ('surrogate_data_'+suffix+'.hdf5'))
+
+#with open(Path('{path_target}') / ('surrogate_data_'+suffix+'.hdf5'),'wb') as f:
+#    pickle.dump(data,f)
 
 ps = process_session(plot_it=False)
 results = ps.from_input(

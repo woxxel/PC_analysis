@@ -763,7 +763,6 @@ results = process_session.from_file(
             f"""cat > {batch_params['submit_file']} <<- EOF
 #!/bin/bash -l
 #SBATCH -J m{mouse}s{s+1}_PC_detection
-#SBATCH -A {batch_params['A']}
 #SBATCH -p {batch_params['p']}
 #SBATCH -c {cpus}
 #SBATCH -t 6:00:00
