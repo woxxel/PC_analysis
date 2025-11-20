@@ -12,7 +12,7 @@ import os, cv2
 class tif_mov:
 
     shape = None
-    dtype = None
+    dtype = np.float32
     file = None
     getSlice = None
 
@@ -25,15 +25,15 @@ class tif_mov:
         if ext=='.tif':
             self.file = TiffFile(path)
             self.shape = self.file.series[0].shape
-            self.dtype = self.file.series[0].dtype
-            print(self.dtype)
+            # self.dtype = self.file.series[0].dtype
+            # print(self.dtype)
             # self.getSlice = lambda t: self.file.pages[t].asarray().astype('float32') ## for some reason, cv2 doesn't like float16 images...
             def getSlice(t):
                 frame = self.file.pages[t].asarray().astype(self.dtype) ## for some reason, cv2 doesn't like float16 images...
                 frame -= np.min(frame)
                 # print(frame)
                 # print(self.dtype)
-                return frame / 2000
+                return frame  # / 2000
                 # return frame / (np.iinfo(self.dtype).max / 10)
                 # return frame / np.max(frame)
             self.getSlice = getSlice
@@ -49,10 +49,11 @@ class tif_mov:
             def getSlice(t):
                 frame = np.reshape(self.file[:,t],(self.shape[1],self.shape[2]),'F').copy()
                 frame -= np.min(frame)
-                return frame / 2000
+                # print(frame)
+                return frame.astype(self.dtype)  # / 2000
                 # return frame / (np.iinfo(self.dtype).max / 10)
                 # return frame / np.max(frame)
-                
+
             self.getSlice = getSlice
             # self.getSlice = lambda t: np.reshape(self.file[:,t],(512,512),'F').copy()
         else:

@@ -2,13 +2,14 @@ import sys, shutil, os
 import numpy as np
 from pathlib import Path
 from placefield_dynamics.neuron_detection import make_stack_from_single_tifs
-from tifffile import *
+from tifffile import TiffFile
 
 def stack_tifs_for_mouse(pathMouse,session=None):
     '''
         session is provided as slurm-array number
     '''
 
+    session -= 1  # to start from 0
     pathMouse = Path(pathMouse)
     pathsSession = sorted([path for path in pathMouse.iterdir() if path.stem.startswith('Session')])
 
@@ -19,7 +20,7 @@ def stack_tifs_for_mouse(pathMouse,session=None):
         assert (pathSession / 'images').is_dir(), "Images folder not found!"
     except:
         return
-    
+
     stackPath = make_stack_from_single_tifs(pathSession / 'images',pathSession,data_type='float16',normalize=True,clean_after_stacking=False)
 
     assert stackPath.is_file(), "Stacking of tif-files was not successful - file not found!"
@@ -32,16 +33,25 @@ def stack_tifs_for_mouse(pathMouse,session=None):
     ## picking three random frames to compare to original data
     T = len(tif_stack.pages)
     for page in np.random.choice(T, 3, replace=False):
-        tif_single = TiffFile(pathSession / 'images' / (stackPath.stem+f'{(page+1):04d}.tif'))
-        
-        assert tif_stack.pages[0].shape == tif_single.pages[0].shape, "Dimensions of the imaging data do not agree!"
+        with TiffFile(
+            pathSession / "images" / (stackPath.stem + f"{(page+1):04d}.tif")
+        ) as tif_single:
+            assert (
+                tif_stack.pages[0].shape == tif_single.pages[0].shape
+            ), "Dimensions of the imaging data do not agree!"
 
-        dTif = np.abs(1 - tif_stack.pages[page].asarray() / (tif_single.pages[0].asarray() /(2**16-1)))
-        assert dTif[np.isfinite(dTif)].max() < 1e-2, "Data in the imaging data do not agree!"
+            dTif = np.abs(
+                1
+                - tif_stack.pages[page].asarray()
+                / (tif_single.pages[0].asarray() / (2**16 - 1))
+            )
+            assert (
+                dTif[np.isfinite(dTif)].max() < 1e-2
+            ), "Data in the imaging data do not agree!"
     print('Stacking of tif-files was successful!')
 
     ## then, remove the old image files
-    shutil.rmtree(pathSession / 'images')
+    shutil.rmtree(pathSession / "images", ignore_errors=True)
     print('Successfully removed images folder!')
 
 if __name__ == '__main__':
