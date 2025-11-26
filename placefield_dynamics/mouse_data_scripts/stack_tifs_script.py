@@ -57,5 +57,5 @@ def stack_tifs_for_mouse(pathMouse,session=None):
 if __name__ == '__main__':
     _, pathMouse = sys.argv
 
-    session = int(os.environ['SLURM_ARRAY_TASK_ID']) -1
+    session = int(os.environ["SLURM_ARRAY_TASK_ID"])
     stack_tifs_for_mouse(pathMouse,int(session))
