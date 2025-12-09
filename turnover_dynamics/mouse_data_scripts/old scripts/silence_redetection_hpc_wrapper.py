@@ -1,5 +1,5 @@
 import os, sys, shutil
-from placefield_dynamics.silence_redetection import *
+from turnover_dynamics.silence_redetection import silence_redetection
 
 print('Input variables:',sys.argv)
 _, datapath_in, datapath_out, dataset, mouse, s, session_name, cpus = sys.argv

@@ -1,6 +1,6 @@
 import os, sys, shutil
 
-from placefield_dynamics.placefield_detection import *
+from turnover_dynamics.place_selectivity_inference import place_selectivity_inference
 
 print(sys.argv)
 _, datapath, result_files, suffix, dataset, mouse, session, cpus = sys.argv
@@ -19,7 +19,7 @@ pathResults = path
 # n_processes = 0
 
 os.makedirs(pathResults,exist_ok=True)
-dPC = placefield_detection(pathData,pathBehavior,pathResults,nP=n_processes,plt_bool=False,nbin=100,suffix=suffix)
+dPC = place_selectivity_inference(pathData,pathBehavior,pathResults,nP=n_processes,plt_bool=False,nbin=100,suffix=suffix)
 dPC.process_session()
 
 print(f"Finished place field detection and stored results to {pathResults}!")

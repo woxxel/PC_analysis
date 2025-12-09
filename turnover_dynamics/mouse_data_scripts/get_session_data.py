@@ -7,7 +7,7 @@ import os, pickle, tqdm
 from pathlib import Path
 
 # from caiman.source_extraction.cnmf.cnmf import load_dict_from_hdf5
-# from ..neuron_matching.utils import calculate_img_correlation
+# from ..neuron_tracking.utils import calculate_img_correlation
 from datetime import datetime
 import numpy as np
 

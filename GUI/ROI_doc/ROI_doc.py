@@ -21,7 +21,7 @@ parent_of_parent_dir = os.path.abspath(os.path.join(parent_dir, os.pardir))
 # Add the parent directory to sys.path
 sys.path.append(parent_of_parent_dir)
 
-from placefield_dynamics.neuron_matching import load_data, save_data, set_paths_default
+from turnover_dynamics.neuron_tracking import load_data, save_data, set_paths_default
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -184,14 +184,13 @@ def callback_setPath(n_clicks):
         # Step 7: Trigger tkinter file dialog on the main thread using a shared flag
         storage['busy'] = True
         tkinter_event.set()  # Set the flag to trigger the file dialog
-        
+
         # Wait until the tkinter dialog completes (or is dismissed)
         while storage['busy']:
             time.sleep(0.1)  # Small delay to prevent high CPU usage while waiting
-        
+
         return f'Selected file: {storage["paths"]["sessions"]}'
     return f'No file selected yet.'
-
 
 
 ### --------------- loading and plotting -------------------
@@ -283,10 +282,10 @@ def callback_button_plotData(n_clicks,status):
         contours = get_contours(storage['sessions'][status['currentSession']]['footprints'][:,:10],storage['dims'])
         for neuronID,c in enumerate(contours):
             print(neuronID,status['currentSession'],storage['assignments'][neuronID,status['currentSession']])
-            
+
             if np.isnan(storage['assignments'][neuronID,status['currentSession']]):
                 continue
-            
+
             fig.add_trace(go.Scatter(
                 x=c['coordinates'][:,0],
                 y=c['coordinates'][:,1],  # For demonstration, this should be the contour points
@@ -301,7 +300,6 @@ def callback_button_plotData(n_clicks,status):
 
         return fig
     return dash.no_update
-
 
 
 @app.callback(
@@ -400,7 +398,7 @@ def update_margin(value,data):
 #     data['changed'] = True
 #     return data
 
-    
+
 @app.callback(
     [Output('details-graph-1','figure', allow_duplicate=True),
      Output('app-status', 'data')],
@@ -420,19 +418,17 @@ def plot_footprints(data,fig1):
 
     # print('selected neuron ID:',neuronID)
 
-    
     updated_fig = go.Figure(fig1)
 
     ## plot all footprints of the selected neuron
     for sessionID in np.where(np.isfinite(storage['assignments'][neuronID,:]))[0]:
         updated_fig.add_trace(plot_footprint_3d(neuronID,sessionID,storage,colormap=settings['footprint_display']['colormap_active'],opacity=settings['footprint_display']['opacity_base']))
-    
+
     ## plot all neighbouring footprints
     neighbourIDs= get_neighbouring_neurons(neuronID,settings['footprint_display']['neighbour_distance'])
     for neuronID in neighbourIDs:
         for sessionID in np.where(np.isfinite(storage['assignments'][neuronID,:]))[0]:
             updated_fig.add_trace(plot_footprint_3d(neuronID,sessionID,storage,colormap=settings['footprint_display']['colormap_neighbours'],opacity=settings['footprint_display']['opacity_base']*1/2.))  
-
 
     margin = settings['footprint_display']['margin']
     # print(cm_neuron)
@@ -463,7 +459,6 @@ def plot_footprints(data,fig1):
     data['changed'] = False
     # Display the clicked coordinates and custom info
     return updated_fig, data
-
 
 
 @app.callback(
@@ -519,10 +514,10 @@ def callback_click_footprint_3d(clickData,data,fig1):
 def callback_click_matched_neuronFootprint(clickData,fig1,relayoutdata):
     if clickData is None:
         return dash.no_update, "Click on a trace to see its custom data."
-    
+
     # Extract the curveNumber (index of the clicked trace) and the customdata
     # custom_info = clickData['points'][0]['customdata']  # Custom data attached to the trace
-    
+
     # Update the opacity of the clicked trace (lower opacity for others)
     curve_number = clickData['points'][0]['curveNumber']
     updated_traces = []
@@ -533,18 +528,16 @@ def callback_click_matched_neuronFootprint(clickData,fig1,relayoutdata):
         else:
             trace.update(opacity=0.6)  # Reduce opacity for others
         updated_traces.append(trace)
-    
+
     # Update the figure with modified traces
     fig1['data'] = updated_traces
     updated_fig = go.Figure(fig1)
     if 'scene.camera' in relayoutdata:
         updated_fig.update_layout(scene_camera=relayoutdata['scene.camera'])
-    
+
     # Return the updated figure and display the custom data
     # return updated_fig, f'You clicked on bla'#{custom_info}'
     return updated_fig#, f'You clicked on bla'#{custom_info}'
-
-
 
 
 # def on_startup(mouse_path):
@@ -554,12 +547,12 @@ def callback_click_matched_neuronFootprint(clickData,fig1,relayoutdata):
 #     else:
 #         return
 #     # print(mouse_path)
-    
+
 
 # def on_exit():
-    # if os.path.exists("startup.lock"):
-    #     os.remove("startup.lock")
-    # print('exiting')
+# if os.path.exists("startup.lock"):
+#     os.remove("startup.lock")
+# print('exiting')
 # atexit.register(on_exit)
 
 

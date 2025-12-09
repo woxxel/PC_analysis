@@ -1,7 +1,7 @@
 import sys, shutil, os
 import numpy as np
 from pathlib import Path
-from placefield_dynamics.neuron_detection import make_stack_from_single_tifs
+from turnover_dynamics.neuron_detection_caiman import make_stack_from_single_tifs
 from tifffile import TiffFile
 
 def stack_tifs_for_mouse(pathMouse,session=None):

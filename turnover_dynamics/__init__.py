@@ -2,7 +2,7 @@
     module to process results of CNMF method
 
     includes submodules 
-        - neuron_matching (https://github.com/woxxel/neuron_matching.git)
+        - neuron_tracking (https://github.com/woxxel/neuron_tracking.git)
         - PC_detection (https://github.com/woxxel/PC_detection.git)
         
 

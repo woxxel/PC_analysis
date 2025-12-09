@@ -8,8 +8,8 @@ from scipy.optimize import linear_sum_assignment
 import caiman as cm
 from caiman.source_extraction import cnmf as cnmf
 
-from .neuron_detection import *
-from .neuron_matching import get_shift_and_flow, calculate_statistics, calculate_p, load_data, save_data, set_paths_default
+from .neuron_detection_caiman import *
+from .neuron_tracking import get_shift_and_flow, calculate_statistics, calculate_p, load_data, save_data, set_paths_default
 from .cluster_analysis import cluster_analysis
 
 

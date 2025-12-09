@@ -4,7 +4,7 @@ from pathlib import Path
 from .utils.connections import *
 
 
-def run_placefield_detection_test(
+def run_place_selectivity_inference_test(
     path_session,
     path_target,
     n_neurons=100,
@@ -29,10 +29,10 @@ def run_placefield_detection_test(
         f"""cat > {placecell_detection_script} <<- EOF
 import os, sys, pickle
 from pathlib import Path
-from placefield_dynamics.placefield_detection.surrogate_data import SurrogateData
-from placefield_dynamics.placefield_detection.process_session import process_session
+from turnover_dynamics.place_selectivity_inference.surrogate_data import SurrogateData
+from turnover_dynamics.place_selectivity_inference.process_session import process_session
 
-from placefield_dynamics.placefield_detection.utils import prepare_behavior_from_file, save_data
+from turnover_dynamics.place_selectivity_inference.utils import prepare_behavior_from_file, save_data
 
 assert len(sys.argv) == 3, "Need to provide two arguments, path_session and n_neurons as arguments! Currently given: %s"%str(sys.argv)
 _, path_session, n_neurons = sys.argv
@@ -84,7 +84,7 @@ ps = process_session(plot_it=False)
 results = ps.from_input(
     behavior,
     surrogate_data.activity,
-    path_results = Path('{path_target}') / ('surrogate_placefield_detection_' + suffix + '.hdf5'),
+    path_results = Path('{path_target}') / ('surrogate_place_selectivity_inference_' + suffix + '.hdf5'),
     mode_place_cell_detection=['peak','information','stability'],
     mode_place_field_detection=['bayesian','threshold'],
     nP={cpus},

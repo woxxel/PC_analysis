@@ -1,6 +1,7 @@
 import os, sys, shutil
 
-from placefield_dynamics.neuron_detection import *
+from turnover_dynamics.neuron_detection_caiman import *
+
 # this also imports CaImAn_params with all necessary parameters
 ### dont forget putting caiman_data/model/* in home folder!
 

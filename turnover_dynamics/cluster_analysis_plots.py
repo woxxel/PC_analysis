@@ -13,7 +13,7 @@ from multiprocessing import get_context
 
 from .cluster_analysis import cluster_analysis
 
-from .placefield_detection import get_firingrate
+from .place_selectivity_inference import get_firingrate
 
 from .utils import (
     get_ICPI,
@@ -26,7 +26,7 @@ from .utils import (
     get_status_arr,
 )
 
-from .neuron_matching.utils import load_data
+from .neuron_tracking.utils import load_data
 
 
 from caiman.utils.visualization import get_contours
@@ -56,7 +56,7 @@ class cluster_analysis_plots(cluster_analysis):
         * Plot 50, 52  - missing behaviour text file
 
     DONE:
-        * Plot 12 - missing key - alignment['rotation_normal'] -> plot has been covered in neuron_matching.plot_alignment_statistics(s_compare)
+        * Plot 12 - missing key - alignment['rotation_normal'] -> plot has been covered in neuron_tracking.plot_alignment_statistics(s_compare)
         * Plot 15 - covered by plot_pv_correlation
         * Plot 16 - just added ’t_measures’ as dummy data
         * Plot 19 - variable dloc empty -> uhm - no. it's working :) (plot_hierarchy_interaction)

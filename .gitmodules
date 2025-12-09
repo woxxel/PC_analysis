@@ -1,12 +1,12 @@
-[submodule "neuron_matching"]
-	path = placefield_dynamics/neuron_matching
-	url = https://github.com/woxxel/neuron_matching.git
-[submodule "placefield_detection"]
-	path = placefield_dynamics/placefield_detection
-	url = https://github.com/woxxel/placefield_detection.git
-[submodule "neuron_detection"]
-	path = placefield_dynamics/neuron_detection
-	url = https://github.com/woxxel/neuron_detection
-[submodule "orientation_detection"]
-	path = placefield_dynamics/orientation_detection
-	url = https://github.com/woxxel/orientation_detection
+[submodule "Neuron Tracking"]
+	path = turnover_dynamics/neuron_tracking
+	url = https://gitlab.gwdg.de/alexander.schmidt/neuron-tracking
+[submodule "Place Selectivity Inference"]
+	path = turnover_dynamics/place_selectivity_inference
+	url = https://gitlab.gwdg.de/alexander.schmidt/place-selectivity-inference
+[submodule "Neuron Detection CaImAn"]
+	path = turnover_dynamics/neuron_detection_caiman
+	url = https://gitlab.gwdg.de/alexander.schmidt/neuron-detection-caiman
+[submodule "Orientation Selectivity Inference"]
+	path = turnover_dynamics/orientation_selectivity_inference
+	url = https://gitlab.gwdg.de/alexander.schmidt/orientation-selectivity-inference

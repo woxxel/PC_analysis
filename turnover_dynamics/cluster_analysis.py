@@ -19,9 +19,9 @@ from .utils import (
 from .utils import cluster_parameters
 from .utils import timing
 
-from .placefield_detection import prepare_behavior_from_file, get_firingrate
+from .place_selectivity_inference import prepare_behavior_from_file, get_firingrate
 from .mouse_data_scripts.get_session_specifics import *
-from .neuron_matching import matching, matching_params, load_data
+from .neuron_tracking import matching, matching_params, load_data
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 warnings.filterwarnings("ignore")
@@ -35,7 +35,7 @@ class cluster_analysis:
         requires
                                                                                                                                                                                                                                                                         - processed footprint data (footprint matching)
         'pathAssignments' (single path to matching results file)
-        from module "neuron_matching" @ https://github.com/woxxel/neuron_matching.git
+        from module "neuron_tracking" @ https://github.com/woxxel/neuron_tracking.git
                                                                                                                                                                                                                                                                                                         - processed calcium activity (tuning curve detection)
         'paths' (list of processed temporal activity files)
         from module "PC_detection" @ https://github.com/woxxel/PC_detection.git

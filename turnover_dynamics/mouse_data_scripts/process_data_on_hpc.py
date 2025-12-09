@@ -49,14 +49,14 @@ def run_neuron_detection_Subhodeep(
     neuron_detection_script = f"{path_code}/run_neuron_detection.py"
     ## first, write the neuron detection script to the server
 
-    # params['dxy']: 512./520.
+    # params['dxy']: 512./512. 563 x 563 mum
     # params['fr']: 15.26
     # params['decay_time']: 1.75
 
     _, stdout, stderr = client.exec_command(
         f"""cat > {neuron_detection_script} <<- EOF
 import os, sys, shutil, copy
-from placefield_dynamics.neuron_detection import *
+from turnover_dynamics.neuron_detection_caiman import *
 
 ## obtain input parameters
 _, path_source, path_target, cpus = sys.argv
@@ -216,7 +216,7 @@ def run_neuron_detection(
     _, stdout, stderr = client.exec_command(
         f"""cat > {neuron_detection_script} <<- EOF
 import os, sys, shutil, copy
-from placefield_dynamics.neuron_detection import *
+from turnover_dynamics.neuron_detection_caiman import *
 
 ## obtain input parameters
 _, path_source, path_target, cpus = sys.argv
@@ -349,7 +349,7 @@ EOF
 # (oder scc_users ...)
 
 
-def run_neuron_matching(
+def run_neuron_tracking(
     pathMouse,
     fileName="results_CaImAn*",
     suffix="",
@@ -373,7 +373,7 @@ def run_neuron_matching(
 
     client, path_code, batch_params = set_hpc_params(hpc)
 
-    neuron_matching_script = f"{path_code}/run_neuron_matching.py"
+    neuron_tracking_script = f"{path_code}/run_neuron_tracking.py"
     ## first, write the neuron detection script to the server
 
     if subhodeep:
@@ -388,9 +388,9 @@ _, pathsResults = set_paths_default(pathMouse=pathMouse,fileName_in=fileName,fil
 """
 
     _, stdout, stderr = client.exec_command(
-        f"""cat > {neuron_matching_script} <<- EOF
+        f"""cat > {neuron_tracking_script} <<- EOF
 import os, sys
-from placefield_dynamics.neuron_matching import *
+from turnover_dynamics.neuron_tracking import *
 
 assert len(sys.argv) == 3, "Need to provide two arguments, pathMouse and fileName as arguments! Currently given: %s"%str(sys.argv)
 _, pathMouse, fileName = sys.argv
@@ -413,14 +413,14 @@ match.run_matching(p_thr=[0.3,0.05])
 #SBATCH -p {batch_params['p']}
 #SBATCH -c {cpus}
 #SBATCH -t 04:00:00
-#SBATCH -o {pathMouse}/log_neuron_matching.log
-#SBATCH -e {pathMouse}/log_neuron_matching.log
+#SBATCH -o {pathMouse}/log_neuron_tracking.log
+#SBATCH -e {pathMouse}/log_neuron_tracking.log
 #SBATCH --mem=32000
 
 module use /usr/users/cidbn_sw/sw/modules
 module load cidbn_caiman-1.9.10_py-3.9
 
-python3 {neuron_matching_script} {pathMouse} {fileName}
+python3 {neuron_tracking_script} {pathMouse} {fileName}
 EOF
 """
     )
@@ -482,7 +482,7 @@ pathImage = pathsImages[s]
     _, stdout, stderr = client.exec_command(
         f"""cat > {neuron_redetection_script} <<- EOF
 import os, sys
-from placefield_dynamics.silence_redetection import *
+from turnover_dynamics.silence_redetection import *
 
 _, pathMouse, pathMouse_ref, resultFiles, s = sys.argv
 
@@ -567,7 +567,7 @@ pathImage = os.path.join(session,(basename+'.tif'))
     _, stdout, stderr = client.exec_command(
         f"""cat > {neuron_redetection_script} <<- EOF
 import os, sys
-from placefield_dynamics.silence_redetection import *
+from turnover_dynamics.silence_redetection import *
 
 _, pathMouse, s = sys.argv
 
@@ -706,8 +706,8 @@ _, path_results = set_paths_default(pathMouse=path_mouse,fileName_in='{result_fi
         f"""cat > {placecell_detection_script} <<- EOF
 import os, sys
 from pathlib import Path
-from placefield_dynamics.neuron_matching.utils import set_paths_default
-from placefield_dynamics import placefield_detection
+from turnover_dynamics.neuron_tracking.utils import set_paths_default
+from turnover_dynamics import place_selectivity_inference
 
 assert len(sys.argv) == 3, "Need to provide two arguments, pathMouse and fileName as arguments! Currently given: %s"%str(sys.argv)
 _, path_mouse, s = sys.argv
@@ -719,11 +719,11 @@ path_results = Path(path_results[int(s)])
 path_session = path_results.parent
 print(path_results)
 
-process_session = placefield_detection.process_session()
+process_session = place_selectivity_inference.process_session()
 results = process_session.from_file(
     path_data = path_results,
     path_behavior = path_session / 'aligned_behavior.pkl',
-    path_results = path_session / 'placefield_detection{suffix}.hdf5',
+    path_results = path_session / 'place_selectivity_inference{suffix}.hdf5',
     mode_place_cell_detection=['peak','information','stability'],
     mode_place_field_detection=['bayesian','threshold'],
     nP={cpus},
@@ -737,13 +737,13 @@ results = process_session.from_file(
     directories = str(stdout.read(), encoding="utf-8").splitlines()
 
     for s, dir in enumerate(directories):
-
         if len(specific_sessions):
             if not ((s + 1) in specific_sessions):
                 s += 1
                 continue
+        # print(f"Checking session {s} in dir {dir}")
 
-        # results_path = Path(dir) / f"placefield_detection{suffix}.hdf5"
+        # results_path = Path(dir) / f"place_selectivity_inference{suffix}.hdf5"
         # # print(results_path)
         # _, stdout, stderr = client.exec_command(
         #     f'test -e {results_path} && echo "File exists" || echo "File does not exist"'
